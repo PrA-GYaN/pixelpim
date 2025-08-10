@@ -1,0 +1,276 @@
+# PixelPim Backend API Tests
+# Use with REST Client extension in VS Code or import into Postman/Insomnia
+
+### Variables
+@baseUrl = http://localhost:3000
+@contentType = application/json
+
+# Test user data
+@testEmail = test@example.com
+@testFullName = Test User
+@testPassword = password123
+@testOtp = 123456
+
+# JWT token (update after login/signup)
+@jwtToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+
+### ============================================
+### AUTHENTICATION FLOW TESTS
+### ============================================
+
+### 1. Health Check (Optional)
+GET {{baseUrl}}/health
+Accept: {{contentType}}
+
+###
+
+### 2. Send OTP for Registration (Step 1 of 2FA)
+# @name sendOtp
+POST {{baseUrl}}/auth/send-otp
+Content-Type: {{contentType}}
+
+{
+  "email": "{{testEmail}}"
+}
+
+###
+
+### 3. Verify OTP (Step 2 of 2FA)
+# Note: Replace "123456" with the actual OTP from your email
+# @name verifyOtp
+POST {{baseUrl}}/auth/verify-otp
+Content-Type: {{contentType}}
+
+{
+  "email": "{{testEmail}}",
+  "otp": "{{testOtp}}"
+}
+
+###
+
+### 4. Complete Registration (Requires verified OTP)
+# Note: Use the same OTP that was verified in step 3
+# @name signup
+POST {{baseUrl}}/auth/signup
+Content-Type: {{contentType}}
+
+{
+  "email": "{{testEmail}}",
+  "fullname": "{{testFullName}}",
+  "password": "{{testPassword}}",
+  "otp": "{{testOtp}}"
+}
+
+###
+
+### 5. Login with Email and Password
+# @name login
+POST {{baseUrl}}/auth/login
+Content-Type: {{contentType}}
+
+{
+  "email": "{{testEmail}}",
+  "password": "{{testPassword}}"
+}
+
+###
+
+### 6. Get User Profile (Requires authentication)
+# Note: Update @jwtToken variable with token from login/signup response
+GET {{baseUrl}}/auth/profile
+Authorization: Bearer {{jwtToken}}
+Accept: {{contentType}}
+
+###
+
+### ============================================
+### GOOGLE OAUTH TESTS
+### ============================================
+
+### 7. Google OAuth Login (Opens in browser)
+# This will redirect to Google for authentication
+GET {{baseUrl}}/auth/google
+
+###
+
+### ============================================
+### ERROR SCENARIO TESTS
+### ============================================
+
+### 8. Send OTP - Invalid Email Format
+POST {{baseUrl}}/auth/send-otp
+Content-Type: {{contentType}}
+
+{
+  "email": "invalid-email"
+}
+
+###
+
+### 9. Send OTP - Email Already Exists
+# This should fail if the user from step 4 already exists
+POST {{baseUrl}}/auth/send-otp
+Content-Type: {{contentType}}
+
+{
+  "email": "{{testEmail}}"
+}
+
+###
+
+### 10. Verify OTP - Invalid OTP
+POST {{baseUrl}}/auth/verify-otp
+Content-Type: {{contentType}}
+
+{
+  "email": "{{testEmail}}",
+  "otp": "000000"
+}
+
+###
+
+### 11. Signup - Invalid OTP
+POST {{baseUrl}}/auth/signup
+Content-Type: {{contentType}}
+
+{
+  "email": "new-user@example.com",
+  "fullname": "New User",
+  "password": "password123",
+  "otp": "000000"
+}
+
+###
+
+### 12. Signup - Weak Password
+POST {{baseUrl}}/auth/signup
+Content-Type: {{contentType}}
+
+{
+  "email": "new-user2@example.com",
+  "fullname": "New User 2",
+  "password": "123",
+  "otp": "123456"
+}
+
+###
+
+### 13. Login - Invalid Credentials
+POST {{baseUrl}}/auth/login
+Content-Type: {{contentType}}
+
+{
+  "email": "{{testEmail}}",
+  "password": "wrongpassword"
+}
+
+###
+
+### 14. Login - Non-existent User
+POST {{baseUrl}}/auth/login
+Content-Type: {{contentType}}
+
+{
+  "email": "nonexistent@example.com",
+  "password": "password123"
+}
+
+###
+
+### 15. Get Profile - No Authentication
+GET {{baseUrl}}/auth/profile
+Accept: {{contentType}}
+
+###
+
+### 16. Get Profile - Invalid Token
+GET {{baseUrl}}/auth/profile
+Authorization: Bearer invalid-token
+Accept: {{contentType}}
+
+###
+
+### ============================================
+### PERFORMANCE TESTS
+### ============================================
+
+### 17. Multiple OTP Requests (Rate Limiting Test)
+# Send multiple requests quickly to test rate limiting
+POST {{baseUrl}}/auth/send-otp
+Content-Type: {{contentType}}
+
+{
+  "email": "rate-test@example.com"
+}
+
+###
+
+### ============================================
+### CLEANUP TESTS
+### ============================================
+
+### 18. Login Again (for token refresh)
+# Use this to get a fresh token for further testing
+POST {{baseUrl}}/auth/login
+Content-Type: {{contentType}}
+
+{
+  "email": "{{testEmail}}",
+  "password": "{{testPassword}}"
+}
+
+###
+
+### ============================================
+### TEST SCENARIOS FOR DIFFERENT ENVIRONMENTS
+### ============================================
+
+### Development Environment
+# @baseUrl = http://localhost:3000
+
+### Staging Environment
+# @baseUrl = https://staging-api.pixelpim.com
+
+### Production Environment
+# @baseUrl = https://api.pixelpim.com
+
+### ============================================
+### TESTING NOTES
+### ============================================
+
+# 1. Complete Registration Flow:
+#    a. Send OTP (step 2)
+#    b. Check email for OTP code
+#    c. Verify OTP (step 3) with actual code
+#    d. Complete signup (step 4) with same OTP
+#    e. Copy JWT token from response
+#    f. Update @jwtToken variable
+#    g. Test profile endpoint (step 6)
+
+# 2. Login Flow:
+#    a. Login (step 5) with registered credentials
+#    b. Copy JWT token from response
+#    c. Update @jwtToken variable
+#    d. Test profile endpoint (step 6)
+
+# 3. Google OAuth Flow:
+#    a. Open step 7 in browser
+#    b. Complete Google authentication
+#    c. Copy JWT token from result page
+#    d. Use token for authenticated requests
+
+# 4. Error Testing:
+#    Steps 8-16 test various error scenarios
+#    Expected to return 4xx error codes
+
+# 5. Expected Response Codes:
+#    - 200: Successful GET requests
+#    - 201: Successful POST requests (creation)
+#    - 400: Bad Request (validation errors)
+#    - 401: Unauthorized (authentication required)
+#    - 409: Conflict (email already exists)
+
+# 6. Security Testing:
+#    - Test rate limiting with step 17
+#    - Test authentication bypass attempts
+#    - Test input validation with malformed data
