@@ -8,6 +8,9 @@ A secure and scalable backend API for PixelPim application built with NestJS, fe
 - **Google OAuth Integration** - Seamless social login with Google
 - **JWT Authentication** - Secure token-based authentication
 - **Email Services** - Automated OTP delivery via email
+- **Attribute Management** - CRUD operations for custom attributes with type validation
+- **Attribute Groups** - Create and manage groups of attributes with configuration options
+- **Flexible Data Modeling** - Support for string, number, boolean, date, and enum attribute types
 - **Database Integration** - PostgreSQL with Prisma ORM
 - **Type Safety** - Full TypeScript implementation
 - **API Documentation** - Comprehensive endpoint documentation
@@ -174,6 +177,199 @@ Returns authenticated user's profile information.
 Authorization: Bearer <jwt-token>
 ```
 
+### Attribute Management Endpoints
+
+#### 1. Create Attribute
+**POST** `/attributes`
+
+Creates a new attribute with specified name and type.
+
+**Headers:**
+```
+Authorization: Bearer <jwt-token>
+```
+
+**Body:**
+```json
+{
+  "name": "Product Name",
+  "type": "string"
+}
+```
+
+**Supported Types:** `string`, `number`, `boolean`, `date`, `enum`
+
+#### 2. Get All Attributes
+**GET** `/attributes`
+
+Returns all attributes ordered by creation date.
+
+**Headers:**
+```
+Authorization: Bearer <jwt-token>
+```
+
+#### 3. Get Attribute by ID
+**GET** `/attributes/:id`
+
+Returns a specific attribute with its associated attribute groups.
+
+**Headers:**
+```
+Authorization: Bearer <jwt-token>
+```
+
+#### 4. Update Attribute
+**PATCH** `/attributes/:id`
+
+Updates an existing attribute.
+
+**Headers:**
+```
+Authorization: Bearer <jwt-token>
+```
+
+**Body:**
+```json
+{
+  "name": "Updated Product Name",
+  "type": "string"
+}
+```
+
+#### 5. Delete Attribute
+**DELETE** `/attributes/:id`
+
+Deletes an attribute and removes it from all attribute groups.
+
+**Headers:**
+```
+Authorization: Bearer <jwt-token>
+```
+
+### Attribute Group Management Endpoints
+
+#### 1. Create Attribute Group
+**POST** `/attribute-groups`
+
+Creates a new attribute group with selected attributes.
+
+**Headers:**
+```
+Authorization: Bearer <jwt-token>
+```
+
+**Body:**
+```json
+{
+  "name": "Product Attributes",
+  "description": "Basic product information attributes",
+  "attributes": [
+    {
+      "attributeId": 1,
+      "required": true
+    },
+    {
+      "attributeId": 2,
+      "required": true,
+      "defaultValue": "0"
+    },
+    {
+      "attributeId": 3,
+      "required": false,
+      "defaultValue": "true"
+    }
+  ]
+}
+```
+
+#### 2. Get All Attribute Groups
+**GET** `/attribute-groups`
+
+Returns all attribute groups with their associated attributes.
+
+**Headers:**
+```
+Authorization: Bearer <jwt-token>
+```
+
+#### 3. Get Attribute Group by ID
+**GET** `/attribute-groups/:id`
+
+Returns a specific attribute group with all its attributes.
+
+**Headers:**
+```
+Authorization: Bearer <jwt-token>
+```
+
+#### 4. Update Attribute Group
+**PATCH** `/attribute-groups/:id`
+
+Updates an existing attribute group and its attribute associations.
+
+**Headers:**
+```
+Authorization: Bearer <jwt-token>
+```
+
+**Body:**
+```json
+{
+  "name": "Updated Product Attributes",
+  "description": "Updated description",
+  "attributes": [
+    {
+      "attributeId": 1,
+      "required": true
+    },
+    {
+      "attributeId": 2,
+      "required": false,
+      "defaultValue": "10"
+    }
+  ]
+}
+```
+
+#### 5. Add Attribute to Group
+**POST** `/attribute-groups/:id/attributes/:attributeId`
+
+Adds an existing attribute to an attribute group.
+
+**Headers:**
+```
+Authorization: Bearer <jwt-token>
+```
+
+**Body:**
+```json
+{
+  "required": false,
+  "defaultValue": "default_value"
+}
+```
+
+#### 6. Remove Attribute from Group
+**DELETE** `/attribute-groups/:id/attributes/:attributeId`
+
+Removes an attribute from an attribute group.
+
+**Headers:**
+```
+Authorization: Bearer <jwt-token>
+```
+
+#### 7. Delete Attribute Group
+**DELETE** `/attribute-groups/:id`
+
+Deletes an attribute group and all its attribute associations.
+
+**Headers:**
+```
+Authorization: Bearer <jwt-token>
+```
+
 ## 🔐 Authentication Flow
 
 ### Standard Registration Flow
@@ -221,6 +417,47 @@ model Otp {
 }
 ```
 
+### Attribute Model
+```prisma
+model Attribute {
+  id               Int                @id @default(autoincrement())
+  name             String             @unique
+  type             String             // 'string', 'number', 'boolean', 'date', 'enum'
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  attributeGroups  AttributeGroupAttribute[]
+}
+```
+
+### AttributeGroup Model
+```prisma
+model AttributeGroup {
+  id          Int                     @id @default(autoincrement())
+  name        String                  @unique
+  description String?
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+  attributes  AttributeGroupAttribute[]
+}
+```
+
+### AttributeGroupAttribute Model (Junction Table)
+```prisma
+model AttributeGroupAttribute {
+  id              Int            @id @default(autoincrement())
+  attributeId     Int
+  attributeGroupId Int
+  required        Boolean        @default(false)
+  defaultValue    String?
+  createdAt       DateTime       @default(now())
+  
+  attribute       Attribute      @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+  attributeGroup  AttributeGroup @relation(fields: [attributeGroupId], references: [id], onDelete: Cascade)
+  
+  @@unique([attributeId, attributeGroupId])
+}
+```
+
 ## 🧪 Testing
 
 ```bash
@@ -261,6 +498,16 @@ src/
 │   ├── auth.controller.ts # Authentication endpoints
 │   ├── auth.service.ts    # Authentication business logic
 │   └── email.service.ts   # Email service for OTP
+├── attribute/             # Attribute management module
+│   ├── dto/              # Attribute DTOs
+│   ├── attribute.controller.ts # Attribute CRUD endpoints
+│   ├── attribute.service.ts    # Attribute business logic
+│   └── attribute.module.ts     # Attribute module
+├── attribute-group/       # Attribute group management module
+│   ├── dto/              # Attribute group DTOs
+│   ├── attribute-group.controller.ts # Attribute group CRUD endpoints
+│   ├── attribute-group.service.ts    # Attribute group business logic
+│   └── attribute-group.module.ts     # Attribute group module
 ├── prisma/                # Database module
 │   ├── prisma.module.ts
 │   └── prisma.service.ts
@@ -301,17 +548,3 @@ npm run start:prod
 3. Commit your changes (`git commit -m 'Add some amazing feature'`)
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
-
-## 📝 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 📞 Support
-
-For support and questions:
-- Create an issue in the repository
-- Contact the development team
-
-## 🔄 API Testing
-
-Use the included `api-tests.http` file with REST Client extension in VS Code for easy API testing, or import the endpoints into Postman/Insomnia.

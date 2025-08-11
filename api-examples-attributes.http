@@ -1,0 +1,166 @@
+### Create Attribute Examples
+
+# Create a string attribute
+POST http://localhost:3000/attributes
+Content-Type: application/json
+Authorization: Bearer YOUR_JWT_TOKEN
+
+{
+  "name": "Product Name",
+  "type": "string"
+}
+
+###
+
+# Create a number attribute
+POST http://localhost:3000/attributes
+Content-Type: application/json
+Authorization: Bearer YOUR_JWT_TOKEN
+
+{
+  "name": "Price",
+  "type": "number"
+}
+
+###
+
+# Create a boolean attribute
+POST http://localhost:3000/attributes
+Content-Type: application/json
+Authorization: Bearer YOUR_JWT_TOKEN
+
+{
+  "name": "Is Active",
+  "type": "boolean"
+}
+
+###
+
+# Create a date attribute
+POST http://localhost:3000/attributes
+Content-Type: application/json
+Authorization: Bearer YOUR_JWT_TOKEN
+
+{
+  "name": "Created Date",
+  "type": "date"
+}
+
+###
+
+# Get all attributes
+GET http://localhost:3000/attributes
+Authorization: Bearer YOUR_JWT_TOKEN
+
+###
+
+# Get specific attribute
+GET http://localhost:3000/attributes/1
+Authorization: Bearer YOUR_JWT_TOKEN
+
+###
+
+# Update attribute
+PATCH http://localhost:3000/attributes/1
+Content-Type: application/json
+Authorization: Bearer YOUR_JWT_TOKEN
+
+{
+  "name": "Updated Product Name",
+  "type": "string"
+}
+
+###
+
+# Delete attribute
+DELETE http://localhost:3000/attributes/1
+Authorization: Bearer YOUR_JWT_TOKEN
+
+###
+
+### Attribute Group Examples
+
+# Create an attribute group with existing attributes
+POST http://localhost:3000/attribute-groups
+Content-Type: application/json
+Authorization: Bearer YOUR_JWT_TOKEN
+
+{
+  "name": "Product Attributes",
+  "description": "Basic product information attributes",
+  "attributes": [
+    {
+      "attributeId": 1,
+      "required": true
+    },
+    {
+      "attributeId": 2,
+      "required": true,
+      "defaultValue": "0"
+    },
+    {
+      "attributeId": 3,
+      "required": false,
+      "defaultValue": "true"
+    }
+  ]
+}
+
+###
+
+# Get all attribute groups
+GET http://localhost:3000/attribute-groups
+Authorization: Bearer YOUR_JWT_TOKEN
+
+###
+
+# Get specific attribute group
+GET http://localhost:3000/attribute-groups/1
+Authorization: Bearer YOUR_JWT_TOKEN
+
+###
+
+# Update attribute group
+PATCH http://localhost:3000/attribute-groups/1
+Content-Type: application/json
+Authorization: Bearer YOUR_JWT_TOKEN
+
+{
+  "name": "Updated Product Attributes",
+  "description": "Updated description",
+  "attributes": [
+    {
+      "attributeId": 1,
+      "required": true
+    },
+    {
+      "attributeId": 2,
+      "required": false,
+      "defaultValue": "10"
+    }
+  ]
+}
+
+###
+
+# Add attribute to group
+POST http://localhost:3000/attribute-groups/1/attributes/4
+Content-Type: application/json
+Authorization: Bearer YOUR_JWT_TOKEN
+
+{
+  "required": false,
+  "defaultValue": "2025-01-01"
+}
+
+###
+
+# Remove attribute from group
+DELETE http://localhost:3000/attribute-groups/1/attributes/4
+Authorization: Bearer YOUR_JWT_TOKEN
+
+###
+
+# Delete attribute group
+DELETE http://localhost:3000/attribute-groups/1
+Authorization: Bearer YOUR_JWT_TOKEN

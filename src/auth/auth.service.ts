@@ -176,7 +176,7 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException('User Account does not exist');
     }
 
     // Check if user is a Google user (no password)

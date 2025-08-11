@@ -15,13 +15,15 @@ datasource db {
 }
 
 model User {
-  id          Int      @id @default(autoincrement())
-  email       String   @unique
-  fullname    String?
-  password    String?  // Made optional for Google OAuth users
-  googleId    String?  @unique // For Google OAuth
-  provider    String   @default("local") // "local" or "google"
-  createdAt   DateTime @default(now())
+  id              Int              @id @default(autoincrement())
+  email           String           @unique
+  fullname        String?
+  password        String?          // Made optional for Google OAuth users
+  googleId        String?          @unique // For Google OAuth
+  provider        String           @default("local") // "local" or "google"
+  createdAt       DateTime         @default(now())
+  attributes      Attribute[]      @relation("UserAttributes")
+  attributeGroups AttributeGroup[] @relation("UserAttributeGroups")
 }
 
 model Otp {
@@ -34,4 +36,40 @@ model Otp {
   createdAt DateTime @default(now())
 
   @@index([email, type])
+}
+
+model Attribute {
+  id               Int                @id @default(autoincrement())
+  name             String             @unique
+  type             String             // e.g., 'string', 'number', 'boolean', 'date', 'enum'
+  userId           Int                // Foreign key to User
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  attributeGroups  AttributeGroupAttribute[]
+  user             User               @relation("UserAttributes", fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AttributeGroup {
+  id          Int                     @id @default(autoincrement())
+  name        String                  @unique
+  description String?
+  userId      Int                     // Foreign key to User
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+  attributes  AttributeGroupAttribute[]
+  user        User                    @relation("UserAttributeGroups", fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AttributeGroupAttribute {
+  id              Int            @id @default(autoincrement())
+  attributeId     Int
+  attributeGroupId Int
+  required        Boolean        @default(false)
+  defaultValue    String?
+  createdAt       DateTime       @default(now())
+  
+  attribute       Attribute      @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+  attributeGroup  AttributeGroup @relation(fields: [attributeGroupId], references: [id], onDelete: Cascade)
+  
+  @@unique([attributeId, attributeGroupId])
 }
