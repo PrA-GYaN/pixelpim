@@ -1,31 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
-// AttributeType enum supports the following types:
-// - STRING: Short text values
-// - TEXT: Long text content
-// - NUMBER: Generic numeric values
-// - INTEGER: Whole numbers only
-// - FLOAT: Decimal numbers
-// - BOOLEAN: True/false values
-// - DATE: Date only (YYYY-MM-DD)
-// - DATETIME: Date and time
-// - TIME: Time only
-// - EMAIL: Email addresses
-// - URL: Web URLs
-// - PHONE: Phone numbers
-// - ENUM: Predefined set of values
-// - JSON: Complex object structures
-// - ARRAY: List of values
-// - FILE: File references
-// - IMAGE: Image file references
-// - COLOR: Color values (hex, rgb, etc.)
-// - CURRENCY: Monetary values
-// - PERCENTAGE: Percentage values
-
 generator client {
   provider = "prisma-client-js"
   output   = "../generated/prisma"
@@ -36,36 +8,13 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum AttributeType {
-  STRING
-  TEXT
-  NUMBER
-  INTEGER
-  FLOAT
-  BOOLEAN
-  DATE
-  DATETIME
-  TIME
-  EMAIL
-  URL
-  PHONE
-  ENUM
-  JSON
-  ARRAY
-  FILE
-  IMAGE
-  COLOR
-  CURRENCY
-  PERCENTAGE
-}
-
 model User {
   id              Int              @id @default(autoincrement())
   email           String           @unique
   fullname        String?
-  password        String?          // Made optional for Google OAuth users
-  googleId        String?          @unique // For Google OAuth
-  provider        String           @default("local") // "local" or "google"
+  password        String?
+  googleId        String?          @unique
+  provider        String           @default("local")
   createdAt       DateTime         @default(now())
   attributes      Attribute[]      @relation("UserAttributes")
   attributeGroups AttributeGroup[] @relation("UserAttributeGroups")
@@ -76,7 +25,7 @@ model Otp {
   id        Int      @id @default(autoincrement())
   email     String
   code      String
-  type      String   // 'registration' or 'login'
+  type      String
   verified  Boolean  @default(false)
   expiresAt DateTime
   createdAt DateTime @default(now())
@@ -85,65 +34,63 @@ model Otp {
 }
 
 model Attribute {
-  id               Int                @id @default(autoincrement())
-  name             String             @unique
-  type             AttributeType      // Enum for attribute types
-  defaultValue     Json?              // JSON field to store typed default values
-  userId           Int                // Foreign key to User
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
+  id               Int                       @id @default(autoincrement())
+  name             String                    @unique
+  type             String
+  defaultValue     String?
+  userId           Int
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+  user             User                      @relation("UserAttributes", fields: [userId], references: [id], onDelete: Cascade)
   attributeGroups  AttributeGroupAttribute[]
   familyAttributes FamilyAttribute[]
-  user             User               @relation("UserAttributes", fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model AttributeGroup {
-  id          Int                     @id @default(autoincrement())
-  name        String                  @unique
+  id          Int                       @id @default(autoincrement())
+  name        String                    @unique
   description String?
-  userId      Int                     // Foreign key to User
-  createdAt   DateTime                @default(now())
-  updatedAt   DateTime                @updatedAt
+  userId      Int
+  createdAt   DateTime                  @default(now())
+  updatedAt   DateTime                  @updatedAt
+  user        User                      @relation("UserAttributeGroups", fields: [userId], references: [id], onDelete: Cascade)
   attributes  AttributeGroupAttribute[]
-  user        User                    @relation("UserAttributeGroups", fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model AttributeGroupAttribute {
-  id              Int            @id @default(autoincrement())
-  attributeId     Int
+  id               Int            @id @default(autoincrement())
+  attributeId      Int
   attributeGroupId Int
-  required        Boolean        @default(false)
-  defaultValue    Json?          // JSON field to store typed default values
-  createdAt       DateTime       @default(now())
-  
-  attribute       Attribute      @relation(fields: [attributeId], references: [id], onDelete: Cascade)
-  attributeGroup  AttributeGroup @relation(fields: [attributeGroupId], references: [id], onDelete: Cascade)
-  
+  required         Boolean        @default(false)
+  defaultValue     String?
+  createdAt        DateTime       @default(now())
+  attributeGroup   AttributeGroup @relation(fields: [attributeGroupId], references: [id], onDelete: Cascade)
+  attribute        Attribute      @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+
   @@unique([attributeId, attributeGroupId])
 }
 
 model Family {
-  id                Int                @id @default(autoincrement())
-  name              String
-  userId            Int                // Foreign key to User
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  familyAttributes  FamilyAttribute[]
-  user              User               @relation("UserFamilies", fields: [userId], references: [id], onDelete: Cascade)
+  id               Int               @id @default(autoincrement())
+  name             String
+  userId           Int
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  user             User              @relation("UserFamilies", fields: [userId], references: [id], onDelete: Cascade)
+  familyAttributes FamilyAttribute[]
 
   @@unique([name, userId])
 }
 
 model FamilyAttribute {
-  id                    Int      @id @default(autoincrement())
-  familyId              Int
-  attributeId           Int
-  isRequired            Boolean  @default(false)
-  additionalValue       Json?    // JSON field to store typed additional values
-  createdAt             DateTime @default(now())
-  
-  family                Family     @relation(fields: [familyId], references: [id], onDelete: Cascade)
-  attribute             Attribute  @relation(fields: [attributeId], references: [id], onDelete: Cascade)
-  
+  id              Int       @id @default(autoincrement())
+  familyId        Int
+  attributeId     Int
+  isRequired      Boolean   @default(false)
+  additionalValue String?
+  createdAt       DateTime  @default(now())
+  attribute       Attribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+  family          Family    @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
   @@unique([familyId, attributeId])
 }
