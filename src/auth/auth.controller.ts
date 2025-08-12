@@ -43,25 +43,12 @@ export class AuthController {
   async googleAuthRedirect(@Request() req, @Res() res: Response) {
     const result = await this.authService.googleLogin(req.user);
     
-    // Send HTML response with token
-    const html = `
-      <html>
-        <body>
-          <h1>Login Successful!</h1>
-          <p>Your JWT token:</p>
-          <textarea rows="4" cols="50" readonly>${result.token}</textarea>
-          <br><br>
-          <p>User Info:</p>
-          <pre>${JSON.stringify(result.user, null, 2)}</pre>
-          <script>
-            // You can also store the token in localStorage
-            localStorage.setItem('token', '${result.token}');
-          </script>
-        </body>
-      </html>
-    `;
-    
-    res.send(html);
+    // Send response with token
+    return res.json({
+    message: 'Google login successful',
+    token: result.token,
+    user: result.user,
+  });
   }
 
   @UseGuards(JwtAuthGuard)
