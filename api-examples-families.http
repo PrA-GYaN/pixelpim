@@ -1,0 +1,142 @@
+### Family API Tests
+
+### Variables
+@baseUrl = http://localhost:3000
+@authToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsImVtYWlsIjoicHJhZ3lhbjE1MTZAZ21haWwuY29tIiwiaWF0IjoxNzU0OTA3NTkwLCJleHAiOjE3NTQ5OTM5OTB9.fMs7cEsCQwpRbHtPeIyJ9T0S8Zq0orspK4L9jT0oKjs
+
+### Create a new family with required and other attributes
+POST {{baseUrl}}/families
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "name": "Electronics",
+  "requiredAttributes": [
+    {
+      "attributeId": 1
+    },
+    {
+      "attributeId": 2
+    }
+  ],
+  "otherAttributes": [
+    {
+      "attributeId": 3
+    },
+    {
+      "attributeId": 4
+    }
+  ]
+}
+
+### Create a family with only name
+POST {{baseUrl}}/families
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "name": "Books"
+}
+
+### Get all families
+GET {{baseUrl}}/families
+Authorization: Bearer {{authToken}}
+
+### Get specific family by ID
+GET {{baseUrl}}/families/1
+Authorization: Bearer {{authToken}}
+
+### Update family name and attributes
+PATCH {{baseUrl}}/families/1
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "name": "Updated Electronics",
+  "requiredAttributes": [
+    {
+      "attributeId": 1
+    }
+  ],
+  "otherAttributes": [
+    {
+      "attributeId": 5
+    }
+  ]
+}
+
+### Update only family name
+PATCH {{baseUrl}}/families/1
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "name": "Premium Electronics"
+}
+
+### Add an attribute to a family
+POST {{baseUrl}}/families/1/attributes/6?isRequired=true&defaultValue=New Value
+Authorization: Bearer {{authToken}}
+
+### Add an attribute to a family (optional)
+POST {{baseUrl}}/families/1/attributes/7?isRequired=false
+Authorization: Bearer {{authToken}}
+
+### Remove an attribute from a family
+DELETE {{baseUrl}}/families/1/attributes/3
+Authorization: Bearer {{authToken}}
+
+### Delete a family
+DELETE {{baseUrl}}/families/1
+Authorization: Bearer {{authToken}}
+
+### Error cases
+
+### Try to create family with duplicate name
+POST {{baseUrl}}/families
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "name": "Electronics"
+}
+
+### Try to create family with non-existent attribute
+POST {{baseUrl}}/families
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "name": "Test Family",
+  "requiredAttributes": [
+    {
+      "attributeId": 999
+    }
+  ]
+}
+
+### Try to create family with duplicate attribute IDs
+POST {{baseUrl}}/families
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "name": "Test Family 2",
+  "requiredAttributes": [
+    {
+      "attributeId": 1
+    }
+  ],
+  "otherAttributes": [
+    {
+      "attributeId": 1
+    }
+  ]
+}
+
+### Try to access family without authentication
+GET {{baseUrl}}/families
+
+### Try to get non-existent family
+GET {{baseUrl}}/families/999
+Authorization: Bearer {{authToken}}

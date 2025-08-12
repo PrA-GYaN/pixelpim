@@ -1,21 +1,36 @@
-### Create Attribute Examples
+# PixelPim API - Attributes & Attribute Groups Examples
+# 
+# This file contains comprehensive examples for testing the Attributes and Attribute Groups API
+# 
+# Prerequisites:
+# 1. Server running on localhost:3000
+# 2. Valid JWT token (replace YOUR_JWT_TOKEN with actual token)
+# 3. Create attributes first before creating attribute groups
 
-# Create a string attribute
-POST http://localhost:3000/attributes
+@baseUrl = http://localhost:3000
+@authToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsImVtYWlsIjoicHJhZ3lhbjE1MTZAZ21haWwuY29tIiwiaWF0IjoxNzU0OTA3NTkwLCJleHAiOjE3NTQ5OTM5OTB9.fMs7cEsCQwpRbHtPeIyJ9T0S8Zq0orspK4L9jT0oKjs
+
+
+#################################
+# ATTRIBUTES CRUD OPERATIONS
+#################################
+
+### 1. Create String Attribute - Brand
+POST {{baseUrl}}/attributes
 Content-Type: application/json
-Authorization: Bearer YOUR_JWT_TOKEN
+Authorization: Bearer {{authToken}}
 
 {
-  "name": "Product Name",
+  "name": "Brand",
   "type": "string"
 }
 
 ###
 
-# Create a number attribute
-POST http://localhost:3000/attributes
+### 2. Create Number Attribute - Price
+POST {{baseUrl}}/attributes
 Content-Type: application/json
-Authorization: Bearer YOUR_JWT_TOKEN
+Authorization: Bearer {{authToken}}
 
 {
   "name": "Price",
@@ -24,143 +39,315 @@ Authorization: Bearer YOUR_JWT_TOKEN
 
 ###
 
-# Create a boolean attribute
-POST http://localhost:3000/attributes
+### 3. Create Boolean Attribute - Is Available
+POST {{baseUrl}}/attributes
 Content-Type: application/json
-Authorization: Bearer YOUR_JWT_TOKEN
+Authorization: Bearer {{authToken}}
 
 {
-  "name": "Is Active",
+  "name": "Is Available",
   "type": "boolean"
 }
 
 ###
 
-# Create a date attribute
-POST http://localhost:3000/attributes
+### 4. Create Date Attribute - Manufacturing Date
+POST {{baseUrl}}/attributes
 Content-Type: application/json
-Authorization: Bearer YOUR_JWT_TOKEN
+Authorization: Bearer {{authToken}}
 
 {
-  "name": "Created Date",
+  "name": "Manufacturing Date",
   "type": "date"
 }
 
 ###
 
-# Get all attributes
-GET http://localhost:3000/attributes
-Authorization: Bearer YOUR_JWT_TOKEN
-
-###
-
-# Get specific attribute
-GET http://localhost:3000/attributes/1
-Authorization: Bearer YOUR_JWT_TOKEN
-
-###
-
-# Update attribute
-PATCH http://localhost:3000/attributes/1
+### 5. Create Enum Attribute - Category
+POST {{baseUrl}}/attributes
 Content-Type: application/json
-Authorization: Bearer YOUR_JWT_TOKEN
+Authorization: Bearer {{authToken}}
 
 {
-  "name": "Updated Product Name",
+  "name": "Category",
+  "type": "enum"
+}
+
+###
+
+### 6. Get All Attributes
+GET {{baseUrl}}/attributes
+Authorization: Bearer {{authToken}}
+
+###
+
+### 7. Get Specific Attribute by ID
+GET {{baseUrl}}/attributes/1
+Authorization: Bearer {{authToken}}
+
+###
+
+### 8. Update Attribute Name and Type
+PATCH {{baseUrl}}/attributes/1
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "Product Brand",
   "type": "string"
 }
 
 ###
 
-# Delete attribute
-DELETE http://localhost:3000/attributes/1
-Authorization: Bearer YOUR_JWT_TOKEN
+### 9. Update Only Attribute Name
+PATCH {{baseUrl}}/attributes/2
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "Unit Price"
+}
 
 ###
 
-### Attribute Group Examples
+### 10. Delete Attribute (Use with caution - will affect groups using this attribute)
+DELETE {{baseUrl}}/attributes/5
+Authorization: Bearer {{authToken}}
 
-# Create an attribute group with existing attributes
-POST http://localhost:3000/attribute-groups
+###
+
+#################################
+# ATTRIBUTE GROUPS CRUD OPERATIONS
+#################################
+
+### 11. Create Product Information Attribute Group
+POST {{baseUrl}}/attribute-groups
 Content-Type: application/json
-Authorization: Bearer YOUR_JWT_TOKEN
+Authorization: Bearer {{authToken}}
 
 {
-  "name": "Product Attributes",
-  "description": "Basic product information attributes",
+  "name": "Product Information",
+  "description": "Essential product attributes for e-commerce",
   "attributes": [
     {
-      "attributeId": 1,
-      "required": true
+      "attributeId": 1
     },
     {
-      "attributeId": 2,
-      "required": true,
-      "defaultValue": "0"
+      "attributeId": 2
     },
     {
-      "attributeId": 3,
-      "required": false,
-      "defaultValue": "true"
+      "attributeId": 3
     }
   ]
 }
 
 ###
 
-# Get all attribute groups
-GET http://localhost:3000/attribute-groups
-Authorization: Bearer YOUR_JWT_TOKEN
-
-###
-
-# Get specific attribute group
-GET http://localhost:3000/attribute-groups/1
-Authorization: Bearer YOUR_JWT_TOKEN
-
-###
-
-# Update attribute group
-PATCH http://localhost:3000/attribute-groups/1
+### 12. Create Basic Product Attribute Group (Minimal)
+POST {{baseUrl}}/attribute-groups
 Content-Type: application/json
-Authorization: Bearer YOUR_JWT_TOKEN
+Authorization: Bearer {{authToken}}
 
 {
-  "name": "Updated Product Attributes",
-  "description": "Updated description",
+  "name": "Basic Product",
+  "description": "Minimal product attributes",
   "attributes": [
     {
-      "attributeId": 1,
-      "required": true
-    },
-    {
-      "attributeId": 2,
-      "required": false,
-      "defaultValue": "10"
+      "attributeId": 1
     }
   ]
 }
 
 ###
 
-# Add attribute to group
-POST http://localhost:3000/attribute-groups/1/attributes/4
+### 13. Get All Attribute Groups
+GET {{baseUrl}}/attribute-groups
+Authorization: Bearer {{authToken}}
+
+###
+
+### 14. Get Specific Attribute Group by ID
+GET {{baseUrl}}/attribute-groups/1
+Authorization: Bearer {{authToken}}
+
+###
+
+### 15. Update Attribute Group - Change Name and Description
+PATCH {{baseUrl}}/attribute-groups/1
 Content-Type: application/json
-Authorization: Bearer YOUR_JWT_TOKEN
+Authorization: Bearer {{authToken}}
 
 {
-  "required": false,
-  "defaultValue": "2025-01-01"
+  "name": "Enhanced Product Information",
+  "description": "Comprehensive product attributes for advanced e-commerce"
 }
 
 ###
 
-# Remove attribute from group
-DELETE http://localhost:3000/attribute-groups/1/attributes/4
-Authorization: Bearer YOUR_JWT_TOKEN
+### 16. Update Attribute Group - Replace Attributes
+PATCH {{baseUrl}}/attribute-groups/1
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "Enhanced Product Information",
+  "description": "Comprehensive product attributes for advanced e-commerce",
+  "attributes": [
+    {
+      "attributeId": 1
+    },
+    {
+      "attributeId": 2
+    },
+    {
+      "attributeId": 4
+    }
+  ]
+}
 
 ###
 
-# Delete attribute group
-DELETE http://localhost:3000/attribute-groups/1
-Authorization: Bearer YOUR_JWT_TOKEN
+### 17. Add Single Attribute to Group (Using Query Parameters)
+POST {{baseUrl}}/attribute-groups/1/attributes/4
+Authorization: Bearer {{authToken}}
+
+###
+
+### 18. Add Single Attribute to Group (Optional)
+POST {{baseUrl}}/attribute-groups/1/attributes/3
+Authorization: Bearer {{authToken}}
+
+###
+
+### 19. Remove Specific Attribute from Group
+DELETE {{baseUrl}}/attribute-groups/1/attributes/3
+Authorization: Bearer {{authToken}}
+
+###
+
+### 20. Delete Attribute Group
+DELETE {{baseUrl}}/attribute-groups/2
+Authorization: Bearer {{authToken}}
+
+###
+
+#################################
+# ERROR HANDLING EXAMPLES
+#################################
+
+### 21. Try to Create Duplicate Attribute (Should return 409 Conflict)
+POST {{baseUrl}}/attributes
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "Brand",
+  "type": "string"
+}
+
+###
+
+### 22. Try to Get Non-existent Attribute (Should return 404 Not Found)
+GET {{baseUrl}}/attributes/999
+Authorization: Bearer {{authToken}}
+
+###
+
+### 23. Try to Create Attribute Group with Non-existent Attribute (Should return 400 Bad Request)
+POST {{baseUrl}}/attribute-groups
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "Invalid Group",
+  "description": "This will fail",
+  "attributes": [
+    {
+      "attributeId": 999
+    }
+  ]
+}
+
+###
+
+### 24. Try to Access Attribute Group Without Token (Should return 401 Unauthorized)
+GET {{baseUrl}}/attribute-groups/1
+
+###
+
+### 25. Try to Create Attribute with Invalid Type (Should return 400 Bad Request)
+POST {{baseUrl}}/attributes
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "Invalid Type Attribute",
+  "type": "invalid_type"
+}
+
+###
+
+#################################
+# WORKFLOW EXAMPLES
+#################################
+
+### 26. Complete Workflow: Create Electronics Product Template
+
+# Step 1: Create Electronics-specific attributes
+POST {{baseUrl}}/attributes
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "Model Number",
+  "type": "string"
+}
+
+###
+
+POST {{baseUrl}}/attributes
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "Warranty Period",
+  "type": "number"
+}
+
+###
+
+POST {{baseUrl}}/attributes
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "Power Consumption",
+  "type": "number"
+}
+
+###
+
+# Step 2: Create Electronics Attribute Group
+# Note: Replace attributeId values with actual IDs from previous responses
+POST {{baseUrl}}/attribute-groups
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "Electronics Products",
+  "description": "Attribute group for electronic devices and gadgets",
+  "attributes": [
+    {
+      "attributeId": 1
+    },
+    {
+      "attributeId": 6
+    },
+    {
+      "attributeId": 7
+    },
+    {
+      "attributeId": 8
+    }
+  ]
+}

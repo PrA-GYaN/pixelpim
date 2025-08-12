@@ -26,7 +26,7 @@ export class AttributeGroupService {
     }
 
     try {
-      return await this.prisma.attributeGroup.create({
+      const result = await this.prisma.attributeGroup.create({
         data: {
           ...groupData,
           userId,
@@ -38,14 +38,27 @@ export class AttributeGroupService {
             })),
           },
         },
-        include: {
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          userId: true,
           attributes: {
-            include: {
-              attribute: true,
+            select: {
+              id: true,
+              attribute: {
+                select: {
+                  id: true,
+                  name: true,
+                  type: true,
+                  userId: true,
+                },
+              },
             },
           },
         },
       });
+      return result;
     } catch (error) {
       if (error.code === 'P2002') {
         throw new ConflictException('Attribute group with this name already exists');
@@ -57,10 +70,22 @@ export class AttributeGroupService {
   async findAll(userId: number) {
     return await this.prisma.attributeGroup.findMany({
       where: { userId },
-      include: {
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        userId: true,
         attributes: {
-          include: {
-            attribute: true,
+          select: {
+            id: true,
+            attribute: {
+              select: {
+                id: true,
+                name: true,
+                type: true,
+                userId: true,
+              },
+            },
           },
         },
       },
@@ -73,10 +98,22 @@ export class AttributeGroupService {
   async findOne(id: number, userId: number) {
     const attributeGroup = await this.prisma.attributeGroup.findUnique({
       where: { id },
-      include: {
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        userId: true,
         attributes: {
-          include: {
-            attribute: true,
+          select: {
+            id: true,
+            attribute: {
+              select: {
+                id: true,
+                name: true,
+                type: true,
+                userId: true,
+              },
+            },
           },
         },
       },
@@ -135,10 +172,22 @@ export class AttributeGroupService {
             },
           }),
         },
-        include: {
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          userId: true,
           attributes: {
-            include: {
-              attribute: true,
+            select: {
+              id: true,
+              attribute: {
+                select: {
+                  id: true,
+                  name: true,
+                  type: true,
+                  userId: true,
+                },
+              },
             },
           },
         },
@@ -199,9 +248,16 @@ export class AttributeGroupService {
         required,
         defaultValue,
       },
-      include: {
-        attribute: true,
-        attributeGroup: true,
+      select: {
+        id: true,
+        attribute: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            userId: true,
+          },
+        },
       },
     });
   }

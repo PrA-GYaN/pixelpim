@@ -24,6 +24,7 @@ model User {
   createdAt       DateTime         @default(now())
   attributes      Attribute[]      @relation("UserAttributes")
   attributeGroups AttributeGroup[] @relation("UserAttributeGroups")
+  families        Family[]         @relation("UserFamilies")
 }
 
 model Otp {
@@ -46,6 +47,7 @@ model Attribute {
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
   attributeGroups  AttributeGroupAttribute[]
+  familyAttributes FamilyAttribute[]
   user             User               @relation("UserAttributes", fields: [userId], references: [id], onDelete: Cascade)
 }
 
@@ -72,4 +74,30 @@ model AttributeGroupAttribute {
   attributeGroup  AttributeGroup @relation(fields: [attributeGroupId], references: [id], onDelete: Cascade)
   
   @@unique([attributeId, attributeGroupId])
+}
+
+model Family {
+  id                Int                @id @default(autoincrement())
+  name              String
+  userId            Int                // Foreign key to User
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  familyAttributes  FamilyAttribute[]
+  user              User               @relation("UserFamilies", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([name, userId])
+}
+
+model FamilyAttribute {
+  id                    Int      @id @default(autoincrement())
+  familyId              Int
+  attributeId           Int
+  isRequired            Boolean  @default(false)
+  defaultValue          String?
+  createdAt             DateTime @default(now())
+  
+  family                Family     @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  attribute             Attribute  @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+  
+  @@unique([familyId, attributeId])
 }
