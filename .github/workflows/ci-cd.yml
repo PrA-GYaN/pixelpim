@@ -16,6 +16,26 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: testdb
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    env:
+      DATABASE_URL: postgresql://testuser:testpass@localhost:5432/testdb
+      JWT_SECRET: test-jwt-secret
+      NODE_ENV: test
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -35,11 +55,14 @@ jobs:
       - name: Generate Prisma Client
         run: npx prisma generate
 
+      - name: Run database migrations
+        run: npx prisma migrate deploy
+
       - name: Run ESLint
         run: npm run lint
 
       - name: Run Tests
-        run: npm run test -- --coverage --watchAll=false
+        run: npm run test:cov
 
       - name: Upload test coverage
         uses: codecov/codecov-action@v3
@@ -52,6 +75,11 @@ jobs:
     runs-on: ubuntu-latest
     needs: lint-and-test
     timeout-minutes: 10
+
+    env:
+      DATABASE_URL: postgresql://testuser:testpass@localhost:5432/testdb
+      JWT_SECRET: test-jwt-secret
+      NODE_ENV: production
 
     steps:
       - name: Checkout repository
@@ -105,7 +133,7 @@ jobs:
     timeout-minutes: 5
     environment: 
       name: production
-      url: https://your-app.onrender.com
+      url: https://pixelpim.onrender.com
 
     steps:
       - name: Deploy to Render
@@ -125,6 +153,20 @@ jobs:
 
       - name: Health check
         run: |
-          # Add your health check endpoint here
-          # curl -f https://your-app.onrender.com/health || exit 1
-          echo "Health check passed"
+          echo "Checking application health..."
+          max_attempts=10
+          attempt=1
+          
+          while [ $attempt -le $max_attempts ]; do
+            echo "Health check attempt $attempt/$max_attempts"
+            if curl -f https://pixelpim.onrender.com/health; then
+              echo "Health check passed!"
+              exit 0
+            fi
+            echo "Health check failed, waiting 30 seconds..."
+            sleep 30
+            attempt=$((attempt + 1))
+          done
+          
+          echo "Health check failed after $max_attempts attempts"
+          exit 1
