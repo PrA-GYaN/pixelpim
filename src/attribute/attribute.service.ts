@@ -12,7 +12,9 @@ export class AttributeService {
     try {
       return await this.prisma.attribute.create({
         data: {
-          ...createAttributeDto,
+          name: createAttributeDto.name,
+          type: createAttributeDto.type,
+          defaultValue: createAttributeDto.defaultValue,
           userId,
         },
       });
@@ -62,7 +64,11 @@ export class AttributeService {
     try {
       return await this.prisma.attribute.update({
         where: { id },
-        data: updateAttributeDto,
+        data: {
+          ...(updateAttributeDto.name && { name: updateAttributeDto.name }),
+          ...(updateAttributeDto.type && { type: updateAttributeDto.type }),
+          ...(updateAttributeDto.defaultValue !== undefined && { defaultValue: updateAttributeDto.defaultValue }),
+        },
       });
     } catch (error) {
       if (error.code === 'P2002') {

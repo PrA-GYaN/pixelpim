@@ -1,117 +1,58 @@
 # PixelPim API - Attributes & Attribute Groups Examples
 # 
-# This file contains comprehensive examples for testing the Attributes and Attribute Groups API
+# This file contains sample examples for testing the Attributes and Attribute Groups API
 # 
 # Prerequisites:
 # 1. Server running on localhost:3000
 # 2. Valid JWT token (replace YOUR_JWT_TOKEN with actual token)
-# 3. Create attributes first before creating attribute groups
 
 @baseUrl = http://localhost:3000
-@authToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsImVtYWlsIjoicHJhZ3lhbjE1MTZAZ21haWwuY29tIiwiaWF0IjoxNzU0OTA3NTkwLCJleHAiOjE3NTQ5OTM5OTB9.fMs7cEsCQwpRbHtPeIyJ9T0S8Zq0orspK4L9jT0oKjs
-
+@authToken = YOUR_JWT_TOKEN
 
 #################################
 # ATTRIBUTES CRUD OPERATIONS
 #################################
 
-### 1. Create String Attribute - Brand
+### Create Attribute
 POST {{baseUrl}}/attributes
 Content-Type: application/json
 Authorization: Bearer {{authToken}}
 
 {
   "name": "Brand",
-  "type": "string"
+  "type": "STRING",
+  "defaultValue": "Unknown"
 }
 
 ###
 
-### 2. Create Number Attribute - Price
-POST {{baseUrl}}/attributes
-Content-Type: application/json
-Authorization: Bearer {{authToken}}
-
-{
-  "name": "Price",
-  "type": "number"
-}
-
-###
-
-### 3. Create Boolean Attribute - Is Available
-POST {{baseUrl}}/attributes
-Content-Type: application/json
-Authorization: Bearer {{authToken}}
-
-{
-  "name": "Is Available",
-  "type": "boolean"
-}
-
-###
-
-### 4. Create Date Attribute - Manufacturing Date
-POST {{baseUrl}}/attributes
-Content-Type: application/json
-Authorization: Bearer {{authToken}}
-
-{
-  "name": "Manufacturing Date",
-  "type": "date"
-}
-
-###
-
-### 5. Create Enum Attribute - Category
-POST {{baseUrl}}/attributes
-Content-Type: application/json
-Authorization: Bearer {{authToken}}
-
-{
-  "name": "Category",
-  "type": "enum"
-}
-
-###
-
-### 6. Get All Attributes
+### Get All Attributes
 GET {{baseUrl}}/attributes
 Authorization: Bearer {{authToken}}
 
 ###
 
-### 7. Get Specific Attribute by ID
+### Get Specific Attribute by ID
 GET {{baseUrl}}/attributes/1
 Authorization: Bearer {{authToken}}
 
 ###
 
-### 8. Update Attribute Name and Type
+### Update Attribute
 PATCH {{baseUrl}}/attributes/1
 Content-Type: application/json
 Authorization: Bearer {{authToken}}
 
 {
   "name": "Product Brand",
-  "type": "string"
+  "type": "STRING",
+  "defaultValue": "Generic"
 }
 
 ###
 
-### 9. Update Only Attribute Name
-PATCH {{baseUrl}}/attributes/2
-Content-Type: application/json
-Authorization: Bearer {{authToken}}
-
-{
-  "name": "Unit Price"
-}
-
-###
-
-### 10. Delete Attribute (Use with caution - will affect groups using this attribute)
-DELETE {{baseUrl}}/attributes/5
+### Delete Attribute
+DELETE {{baseUrl}}/attributes/1
 Authorization: Bearer {{authToken}}
 
 ###
@@ -120,113 +61,74 @@ Authorization: Bearer {{authToken}}
 # ATTRIBUTE GROUPS CRUD OPERATIONS
 #################################
 
-### 11. Create Product Information Attribute Group
+### Create Attribute Group
 POST {{baseUrl}}/attribute-groups
 Content-Type: application/json
 Authorization: Bearer {{authToken}}
 
 {
   "name": "Product Information",
-  "description": "Essential product attributes for e-commerce",
+  "description": "Essential product attributes",
   "attributes": [
     {
-      "attributeId": 1
+      "attributeId": 1,
+      "required": true,
+      "defaultValue": "Standard Brand"
     },
     {
-      "attributeId": 2
-    },
-    {
-      "attributeId": 3
+      "attributeId": 2,
+      "required": false,
+      "defaultValue": 0.00
     }
   ]
 }
 
 ###
 
-### 12. Create Basic Product Attribute Group (Minimal)
-POST {{baseUrl}}/attribute-groups
-Content-Type: application/json
-Authorization: Bearer {{authToken}}
-
-{
-  "name": "Basic Product",
-  "description": "Minimal product attributes",
-  "attributes": [
-    {
-      "attributeId": 1
-    }
-  ]
-}
-
-###
-
-### 13. Get All Attribute Groups
+### Get All Attribute Groups
 GET {{baseUrl}}/attribute-groups
 Authorization: Bearer {{authToken}}
 
 ###
 
-### 14. Get Specific Attribute Group by ID
+### Get Specific Attribute Group by ID
 GET {{baseUrl}}/attribute-groups/1
 Authorization: Bearer {{authToken}}
 
 ###
 
-### 15. Update Attribute Group - Change Name and Description
+### Update Attribute Group
 PATCH {{baseUrl}}/attribute-groups/1
 Content-Type: application/json
 Authorization: Bearer {{authToken}}
 
 {
   "name": "Enhanced Product Information",
-  "description": "Comprehensive product attributes for advanced e-commerce"
+  "description": "Updated product attributes"
 }
 
 ###
 
-### 16. Update Attribute Group - Replace Attributes
-PATCH {{baseUrl}}/attribute-groups/1
-Content-Type: application/json
-Authorization: Bearer {{authToken}}
-
-{
-  "name": "Enhanced Product Information",
-  "description": "Comprehensive product attributes for advanced e-commerce",
-  "attributes": [
-    {
-      "attributeId": 1
-    },
-    {
-      "attributeId": 2
-    },
-    {
-      "attributeId": 4
-    }
-  ]
-}
-
-###
-
-### 17. Add Single Attribute to Group (Using Query Parameters)
-POST {{baseUrl}}/attribute-groups/1/attributes/4
-Authorization: Bearer {{authToken}}
-
-###
-
-### 18. Add Single Attribute to Group (Optional)
+### Add Attribute to Group
 POST {{baseUrl}}/attribute-groups/1/attributes/3
+Content-Type: application/json
 Authorization: Bearer {{authToken}}
+
+{
+  "required": true,
+  "defaultValue": "default_value"
+}
 
 ###
 
-### 19. Remove Specific Attribute from Group
+### Remove Attribute from Group
 DELETE {{baseUrl}}/attribute-groups/1/attributes/3
 Authorization: Bearer {{authToken}}
 
 ###
 
-### 20. Delete Attribute Group
-DELETE {{baseUrl}}/attribute-groups/2
+### Delete Attribute Group
+DELETE {{baseUrl}}/attribute-groups/1
 Authorization: Bearer {{authToken}}
 
 ###
@@ -235,47 +137,25 @@ Authorization: Bearer {{authToken}}
 # ERROR HANDLING EXAMPLES
 #################################
 
-### 21. Try to Create Duplicate Attribute (Should return 409 Conflict)
+### Duplicate Attribute (409 Conflict)
 POST {{baseUrl}}/attributes
 Content-Type: application/json
 Authorization: Bearer {{authToken}}
 
 {
   "name": "Brand",
-  "type": "string"
+  "type": "STRING"
 }
 
 ###
 
-### 22. Try to Get Non-existent Attribute (Should return 404 Not Found)
+### Non-existent Resource (404 Not Found)
 GET {{baseUrl}}/attributes/999
 Authorization: Bearer {{authToken}}
 
 ###
 
-### 23. Try to Create Attribute Group with Non-existent Attribute (Should return 400 Bad Request)
-POST {{baseUrl}}/attribute-groups
-Content-Type: application/json
-Authorization: Bearer {{authToken}}
-
-{
-  "name": "Invalid Group",
-  "description": "This will fail",
-  "attributes": [
-    {
-      "attributeId": 999
-    }
-  ]
-}
-
-###
-
-### 24. Try to Access Attribute Group Without Token (Should return 401 Unauthorized)
-GET {{baseUrl}}/attribute-groups/1
-
-###
-
-### 25. Try to Create Attribute with Invalid Type (Should return 400 Bad Request)
+### Invalid Data (400 Bad Request)
 POST {{baseUrl}}/attributes
 Content-Type: application/json
 Authorization: Bearer {{authToken}}
@@ -287,11 +167,122 @@ Authorization: Bearer {{authToken}}
 
 ###
 
+### 26. Create Attribute without Default Value (Optional field)
+POST {{baseUrl}}/attributes
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "SKU",
+  "type": "STRING"
+}
+
+###
+
+### 27. Create Email Attribute
+POST {{baseUrl}}/attributes
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "Contact Email",
+  "type": "EMAIL",
+  "defaultValue": "contact@example.com"
+}
+
+###
+
+### 28. Create URL Attribute
+POST {{baseUrl}}/attributes
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "Product Website",
+  "type": "URL",
+  "defaultValue": "https://example.com"
+}
+
+###
+
+### 29. Create Color Attribute
+POST {{baseUrl}}/attributes
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "Primary Color",
+  "type": "COLOR",
+  "defaultValue": "#FF0000"
+}
+
+###
+
+### 30. Create JSON Attribute with Object Default
+POST {{baseUrl}}/attributes
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "Product Settings",
+  "type": "JSON",
+  "defaultValue": {
+    "featured": false,
+    "inStock": true,
+    "categories": ["electronics", "gadgets"],
+    "metadata": {
+      "weight": 1.5,
+      "dimensions": "10x5x2"
+    }
+  }
+}
+
+###
+
+### 31. Create Array Attribute
+POST {{baseUrl}}/attributes
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "Product Tags",
+  "type": "ARRAY",
+  "defaultValue": ["new", "featured", "bestseller"]
+}
+
+###
+
+### 32. Create Percentage Attribute
+POST {{baseUrl}}/attributes
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "Discount Rate",
+  "type": "PERCENTAGE",
+  "defaultValue": 0.15
+}
+
+###
+
+### 33. Create DateTime Attribute
+POST {{baseUrl}}/attributes
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "Last Updated",
+  "type": "DATETIME",
+  "defaultValue": "2024-01-01T00:00:00Z"
+}
+
+###
+
 #################################
 # WORKFLOW EXAMPLES
 #################################
 
-### 26. Complete Workflow: Create Electronics Product Template
+### 34. Complete Workflow: Create Electronics Product Template
 
 # Step 1: Create Electronics-specific attributes
 POST {{baseUrl}}/attributes
@@ -300,7 +291,8 @@ Authorization: Bearer {{authToken}}
 
 {
   "name": "Model Number",
-  "type": "string"
+  "type": "STRING",
+  "defaultValue": "N/A"
 }
 
 ###
@@ -311,7 +303,8 @@ Authorization: Bearer {{authToken}}
 
 {
   "name": "Warranty Period",
-  "type": "number"
+  "type": "INTEGER",
+  "defaultValue": 12
 }
 
 ###
@@ -322,7 +315,8 @@ Authorization: Bearer {{authToken}}
 
 {
   "name": "Power Consumption",
-  "type": "number"
+  "type": "NUMBER",
+  "defaultValue": 0
 }
 
 ###
@@ -338,16 +332,80 @@ Authorization: Bearer {{authToken}}
   "description": "Attribute group for electronic devices and gadgets",
   "attributes": [
     {
-      "attributeId": 1
+      "attributeId": 1,
+      "required": true,
+      "defaultValue": "Unknown Brand"
     },
     {
-      "attributeId": 6
+      "attributeId": 6,
+      "required": true,
+      "defaultValue": "N/A"
     },
     {
-      "attributeId": 7
+      "attributeId": 7,
+      "required": false,
+      "defaultValue": 12
     },
     {
-      "attributeId": 8
+      "attributeId": 8,
+      "required": false,
+      "defaultValue": 0
+    }
+  ]
+}
+
+###
+
+### Advanced Workflow: Create Complex Product Attribute Group with Various Types
+POST {{baseUrl}}/attribute-groups
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "Advanced Product Template",
+  "description": "Comprehensive attribute group showcasing all data types",
+  "attributes": [
+    {
+      "attributeId": 1,
+      "required": true,
+      "defaultValue": "Default Brand"
+    },
+    {
+      "attributeId": 2,
+      "required": true,
+      "defaultValue": 99.99
+    },
+    {
+      "attributeId": 3,
+      "required": false,
+      "defaultValue": true
+    },
+    {
+      "attributeId": 5,
+      "required": false,
+      "defaultValue": ["Electronics", "Gadgets"]
+    },
+    {
+      "attributeId": 9,
+      "required": false,
+      "defaultValue": "contact@company.com"
+    },
+    {
+      "attributeId": 11,
+      "required": false,
+      "defaultValue": "#0066CC"
+    },
+    {
+      "attributeId": 12,
+      "required": false,
+      "defaultValue": {
+        "warranty": 24,
+        "features": ["waterproof", "wireless"],
+        "specs": {
+          "battery": "5000mAh",
+          "storage": "128GB"
+        }
+      }
     }
   ]
 }

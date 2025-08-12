@@ -54,7 +54,7 @@ export class AttributeGroupController {
   addAttributeToGroup(
     @Param('id', ParseIntPipe) id: number,
     @Param('attributeId', ParseIntPipe) attributeId: number,
-    @Body() body: { required?: boolean; defaultValue?: string },
+    @Body() body: { required?: boolean; defaultValue?: any },
     @User() user: any,
   ) {
     return this.attributeGroupService.addAttributeToGroup(

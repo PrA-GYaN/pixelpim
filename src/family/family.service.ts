@@ -59,13 +59,13 @@ export class FamilyService {
             create: [
               ...requiredAttributes.map(attr => ({
                 attributeId: attr.attributeId,
-                isRequired: true,
-                defaultValue: attr.defaultValue,
+                isRequired: attr.isRequired ?? true,
+                additionalValue: attr.additionalValue,
               })),
               ...otherAttributes.map(attr => ({
                 attributeId: attr.attributeId,
-                isRequired: false,
-                defaultValue: attr.defaultValue,
+                isRequired: attr.isRequired ?? false,
+                additionalValue: attr.additionalValue,
               })),
             ],
           },
@@ -107,10 +107,13 @@ export class FamilyService {
       userId: family.userId,
       familyAttributes: family.familyAttributes.map(fa => ({
         id: fa.id,
+        isRequired: fa.isRequired,
+        additionalValue: fa.additionalValue,
         attribute: {
           id: fa.attribute.id,
           name: fa.attribute.name,
           type: fa.attribute.type,
+          defaultValue: fa.attribute.defaultValue,
           userId: fa.attribute.userId,
         },
       })),
@@ -143,10 +146,13 @@ export class FamilyService {
       userId: family.userId,
       familyAttributes: family.familyAttributes.map(fa => ({
         id: fa.id,
+        isRequired: fa.isRequired,
+        additionalValue: fa.additionalValue,
         attribute: {
           id: fa.attribute.id,
           name: fa.attribute.name,
           type: fa.attribute.type,
+          defaultValue: fa.attribute.defaultValue,
           userId: fa.attribute.userId,
         },
       })),
@@ -210,13 +216,13 @@ export class FamilyService {
               create: [
                 ...requiredAttributes.map(attr => ({
                   attributeId: attr.attributeId,
-                  isRequired: true,
-                  defaultValue: attr.defaultValue,
+                  isRequired: attr.isRequired ?? true,
+                  additionalValue: attr.additionalValue,
                 })),
                 ...otherAttributes.map(attr => ({
                   attributeId: attr.attributeId,
-                  isRequired: false,
-                  defaultValue: attr.defaultValue,
+                  isRequired: attr.isRequired ?? false,
+                  additionalValue: attr.additionalValue,
                 })),
               ],
             },
@@ -248,7 +254,7 @@ export class FamilyService {
     return { message: `Family with ID ${id} has been deleted` };
   }
 
-  async addAttribute(familyId: number, attributeId: number, isRequired: boolean, defaultValue: string | undefined, userId: number) {
+  async addAttribute(familyId: number, attributeId: number, isRequired: boolean, additionalValue: any, userId: number) {
     const family = await this.findOne(familyId, userId);
 
     // Check if attribute exists and belongs to user
@@ -279,7 +285,7 @@ export class FamilyService {
         familyId,
         attributeId,
         isRequired,
-        defaultValue,
+        additionalValue,
       },
       include: {
         attribute: true,

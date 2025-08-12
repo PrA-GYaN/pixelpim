@@ -210,7 +210,7 @@ export class AttributeGroupService {
     return { message: `Attribute group with ID ${id} has been deleted` };
   }
 
-  async addAttributeToGroup(groupId: number, attributeId: number, userId: number, required: boolean = false, defaultValue?: string) {
+  async addAttributeToGroup(groupId: number, attributeId: number, userId: number, required: boolean = false, defaultValue?: any) {
     // Check if group exists and user owns it
     await this.findOne(groupId, userId);
 

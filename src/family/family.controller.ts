@@ -55,14 +55,14 @@ export class FamilyController {
     @Param('id', ParseIntPipe) familyId: number,
     @Param('attributeId', ParseIntPipe) attributeId: number,
     @Query('isRequired') isRequired: string = 'false',
-    @Query('defaultValue') defaultValue: string,
+    @Query('additionalValue') additionalValue: string,
     @User() user: any,
   ) {
     return this.familyService.addAttribute(
       familyId,
       attributeId,
       isRequired === 'true',
-      defaultValue,
+      additionalValue,
       user.id,
     );
   }

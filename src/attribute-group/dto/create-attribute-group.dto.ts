@@ -9,9 +9,8 @@ export class AttributeGroupItemDto {
   @IsOptional()
   required?: boolean = false;
 
-  @IsString()
   @IsOptional()
-  defaultValue?: string;
+  defaultValue?: any; // Can be string, number, boolean, object, array, etc.
 }
 
 export class CreateAttributeGroupDto {

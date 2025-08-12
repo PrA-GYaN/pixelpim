@@ -9,9 +9,8 @@ export class FamilyAttributeDto {
   @IsOptional()
   isRequired?: boolean = false;
 
-  @IsString()
   @IsOptional()
-  defaultValue?: string;
+  additionalValue?: any; // Can be string, number, boolean, object, array, etc.
 }
 
 export class CreateFamilyDto {

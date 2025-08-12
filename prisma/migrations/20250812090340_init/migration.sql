@@ -29,6 +29,7 @@ CREATE TABLE "public"."Attribute" (
     "id" SERIAL NOT NULL,
     "name" TEXT NOT NULL,
     "type" TEXT NOT NULL,
+    "defaultValue" TEXT,
     "userId" INTEGER NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -60,6 +61,29 @@ CREATE TABLE "public"."AttributeGroupAttribute" (
     CONSTRAINT "AttributeGroupAttribute_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "public"."Family" (
+    "id" SERIAL NOT NULL,
+    "name" TEXT NOT NULL,
+    "userId" INTEGER NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Family_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "public"."FamilyAttribute" (
+    "id" SERIAL NOT NULL,
+    "familyId" INTEGER NOT NULL,
+    "attributeId" INTEGER NOT NULL,
+    "isRequired" BOOLEAN NOT NULL DEFAULT false,
+    "additionalValue" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "FamilyAttribute_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "User_email_key" ON "public"."User"("email");
 
@@ -78,6 +102,12 @@ CREATE UNIQUE INDEX "AttributeGroup_name_key" ON "public"."AttributeGroup"("name
 -- CreateIndex
 CREATE UNIQUE INDEX "AttributeGroupAttribute_attributeId_attributeGroupId_key" ON "public"."AttributeGroupAttribute"("attributeId", "attributeGroupId");
 
+-- CreateIndex
+CREATE UNIQUE INDEX "Family_name_userId_key" ON "public"."Family"("name", "userId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "FamilyAttribute_familyId_attributeId_key" ON "public"."FamilyAttribute"("familyId", "attributeId");
+
 -- AddForeignKey
 ALTER TABLE "public"."Attribute" ADD CONSTRAINT "Attribute_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
@@ -89,3 +119,12 @@ ALTER TABLE "public"."AttributeGroupAttribute" ADD CONSTRAINT "AttributeGroupAtt
 
 -- AddForeignKey
 ALTER TABLE "public"."AttributeGroupAttribute" ADD CONSTRAINT "AttributeGroupAttribute_attributeGroupId_fkey" FOREIGN KEY ("attributeGroupId") REFERENCES "public"."AttributeGroup"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."Family" ADD CONSTRAINT "Family_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."FamilyAttribute" ADD CONSTRAINT "FamilyAttribute_familyId_fkey" FOREIGN KEY ("familyId") REFERENCES "public"."Family"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."FamilyAttribute" ADD CONSTRAINT "FamilyAttribute_attributeId_fkey" FOREIGN KEY ("attributeId") REFERENCES "public"."Attribute"("id") ON DELETE CASCADE ON UPDATE CASCADE;

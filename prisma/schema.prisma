@@ -4,6 +4,28 @@
 // Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
 // Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
 
+// AttributeType enum supports the following types:
+// - STRING: Short text values
+// - TEXT: Long text content
+// - NUMBER: Generic numeric values
+// - INTEGER: Whole numbers only
+// - FLOAT: Decimal numbers
+// - BOOLEAN: True/false values
+// - DATE: Date only (YYYY-MM-DD)
+// - DATETIME: Date and time
+// - TIME: Time only
+// - EMAIL: Email addresses
+// - URL: Web URLs
+// - PHONE: Phone numbers
+// - ENUM: Predefined set of values
+// - JSON: Complex object structures
+// - ARRAY: List of values
+// - FILE: File references
+// - IMAGE: Image file references
+// - COLOR: Color values (hex, rgb, etc.)
+// - CURRENCY: Monetary values
+// - PERCENTAGE: Percentage values
+
 generator client {
   provider = "prisma-client-js"
   output   = "../generated/prisma"
@@ -12,6 +34,29 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+enum AttributeType {
+  STRING
+  TEXT
+  NUMBER
+  INTEGER
+  FLOAT
+  BOOLEAN
+  DATE
+  DATETIME
+  TIME
+  EMAIL
+  URL
+  PHONE
+  ENUM
+  JSON
+  ARRAY
+  FILE
+  IMAGE
+  COLOR
+  CURRENCY
+  PERCENTAGE
 }
 
 model User {
@@ -42,7 +87,8 @@ model Otp {
 model Attribute {
   id               Int                @id @default(autoincrement())
   name             String             @unique
-  type             String             // e.g., 'string', 'number', 'boolean', 'date', 'enum'
+  type             AttributeType      // Enum for attribute types
+  defaultValue     Json?              // JSON field to store typed default values
   userId           Int                // Foreign key to User
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
@@ -67,7 +113,7 @@ model AttributeGroupAttribute {
   attributeId     Int
   attributeGroupId Int
   required        Boolean        @default(false)
-  defaultValue    String?
+  defaultValue    Json?          // JSON field to store typed default values
   createdAt       DateTime       @default(now())
   
   attribute       Attribute      @relation(fields: [attributeId], references: [id], onDelete: Cascade)
@@ -93,7 +139,7 @@ model FamilyAttribute {
   familyId              Int
   attributeId           Int
   isRequired            Boolean  @default(false)
-  defaultValue          String?
+  additionalValue       Json?    // JSON field to store typed additional values
   createdAt             DateTime @default(now())
   
   family                Family     @relation(fields: [familyId], references: [id], onDelete: Cascade)
