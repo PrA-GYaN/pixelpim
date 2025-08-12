@@ -7,7 +7,7 @@
 # 2. Valid JWT token (replace YOUR_JWT_TOKEN with actual token)
 
 @baseUrl = http://localhost:3000
-@authToken = YOUR_JWT_TOKEN
+@authToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsImVtYWlsIjoicHJhZ3lhbjE1MTZAZ21haWwuY29tIiwiaWF0IjoxNzU0OTkyMDM2LCJleHAiOjE3NTUwNzg0MzZ9.T-O-mgdLa4CLuof07P-duehXP0lr9PvTQRuMTYhc0eA
 
 #################################
 # ATTRIBUTES CRUD OPERATIONS
@@ -163,6 +163,49 @@ Authorization: Bearer {{authToken}}
 {
   "name": "Invalid Type Attribute",
   "type": "invalid_type"
+}
+
+###
+
+### Type Mismatch Error Example (Corrected)
+# PROBLEM: Numeric default value for STRING type
+# SOLUTION: Use string default value or let the system convert it
+POST {{baseUrl}}/attributes
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "Description",
+  "type": "STRING",
+  "defaultValue": "No description available"
+}
+
+###
+
+### Type Mismatch Error Example (Auto-conversion)
+# The system will now automatically convert numeric 0 to string "0"
+POST {{baseUrl}}/attributes
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "Product Code",
+  "type": "STRING",
+  "defaultValue": 0
+}
+
+###
+
+### Type Mismatch Error Example (INTEGER with string)
+# The system will convert string "123" to integer 123
+POST {{baseUrl}}/attributes
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "Stock Quantity",
+  "type": "INTEGER",
+  "defaultValue": "123"
 }
 
 ###
