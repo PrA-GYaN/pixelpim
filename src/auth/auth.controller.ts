@@ -44,11 +44,7 @@ export class AuthController {
     const result = await this.authService.googleLogin(req.user);
     
     // Send response with token
-    return res.json({
-    message: 'Google login successful',
-    token: result.token,
-    user: result.user,
-  });
+    res.redirect(`${process.env.BASE_URL}/auth/callback?token=${result.token}`);
   }
 
   @UseGuards(JwtAuthGuard)
