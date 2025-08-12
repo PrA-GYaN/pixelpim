@@ -1,19 +1,14 @@
-import { IsString, IsNotEmpty, IsIn, IsOptional, IsObject } from 'class-validator';
+import { IsString, IsNotEmpty, IsIn, IsOptional, IsEnum } from 'class-validator';
+import { AttributeType } from '../../../generated/prisma';
 
 export class CreateAttributeDto {
   @IsString()
   @IsNotEmpty()
   name: string;
 
-  @IsString()
+  @IsEnum(AttributeType)
   @IsNotEmpty()
-  @IsIn([
-    'STRING', 'TEXT', 'NUMBER', 'INTEGER', 'FLOAT', 'BOOLEAN', 
-    'DATE', 'DATETIME', 'TIME', 'EMAIL', 'URL', 'PHONE', 
-    'ENUM', 'JSON', 'ARRAY', 'FILE', 'IMAGE', 'COLOR', 
-    'CURRENCY', 'PERCENTAGE'
-  ])
-  type: string;
+  type: AttributeType;
 
   @IsOptional()
   defaultValue?: any; // Can be string, number, boolean, object, array, etc.

@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, ConflictException, ForbiddenException } 
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateAttributeDto } from './dto/create-attribute.dto';
 import { UpdateAttributeDto } from './dto/update-attribute.dto';
-import type { Attribute } from '../../generated/prisma';
+import type { Attribute, AttributeType } from '../../generated/prisma';
 
 @Injectable()
 export class AttributeService {
@@ -13,7 +13,7 @@ export class AttributeService {
       return await this.prisma.attribute.create({
         data: {
           name: createAttributeDto.name,
-          type: createAttributeDto.type,
+          type: createAttributeDto.type as AttributeType,
           defaultValue: createAttributeDto.defaultValue,
           userId,
         },
@@ -66,7 +66,7 @@ export class AttributeService {
         where: { id },
         data: {
           ...(updateAttributeDto.name && { name: updateAttributeDto.name }),
-          ...(updateAttributeDto.type && { type: updateAttributeDto.type }),
+          ...(updateAttributeDto.type && { type: updateAttributeDto.type as AttributeType }),
           ...(updateAttributeDto.defaultValue !== undefined && { defaultValue: updateAttributeDto.defaultValue }),
         },
       });
