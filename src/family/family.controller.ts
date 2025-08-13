@@ -13,6 +13,7 @@ import {
 import { FamilyService } from './family.service';
 import { CreateFamilyDto } from './dto/create-family.dto';
 import { UpdateFamilyDto } from './dto/update-family.dto';
+import { FamilyResponseDto } from './dto/family-response.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { User } from '../auth/decorators/user.decorator';
 
@@ -27,12 +28,12 @@ export class FamilyController {
   }
 
   @Get()
-  findAll(@User() user: any) {
+  findAll(@User() user: any): Promise<FamilyResponseDto[]> {
     return this.familyService.findAll(user.id);
   }
 
   @Get(':id')
-  findOne(@Param('id', ParseIntPipe) id: number, @User() user: any) {
+  findOne(@Param('id', ParseIntPipe) id: number, @User() user: any): Promise<FamilyResponseDto> {
     return this.familyService.findOne(id, user.id);
   }
 

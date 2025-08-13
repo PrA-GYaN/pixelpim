@@ -60,18 +60,46 @@ export class CategoryService {
                 include: {
                   subcategories: {
                     include: {
-                      subcategories: true // Support up to 4 levels deep
+                      subcategories: {
+                        include: {
+                          _count: {
+                            select: {
+                              products: true,
+                            },
+                          },
+                        },
+                      },
+                      _count: {
+                        select: {
+                          products: true,
+                        },
+                      },
                     }
-                  }
+                  },
+                  _count: {
+                    select: {
+                      products: true,
+                    },
+                  },
                 }
-              }
+              },
+              _count: {
+                select: {
+                  products: true,
+                },
+              },
             }
-          }
+          },
+          _count: {
+            select: {
+              products: true,
+            },
+          },
         },
         orderBy: { name: 'asc' },
       });
 
-      return categories.map(category => this.transformCategoryForHierarchicalResponse(category));
+      return categories.map(category => this.transformCategoryForHierarchicalResponseWithCount(category));
     } catch (error) {
       this.logger.error(`Failed to fetch categories for user ${userId}: ${error.message}`, error.stack);
       throw error;
@@ -91,7 +119,32 @@ export class CategoryService {
           parentCategory: true,
           subcategories: {
             include: {
-              subcategories: true, // Include nested subcategories
+              subcategories: {
+                include: {
+                  _count: {
+                    select: {
+                      products: true,
+                    },
+                  },
+                },
+              },
+              _count: {
+                select: {
+                  products: true,
+                },
+              },
+            },
+          },
+          products: {
+            select: {
+              id: true,
+              name: true,
+              sku: true,
+              status: true,
+              imageUrl: true,
+            },
+            orderBy: {
+              createdAt: 'desc',
             },
           },
         },
@@ -101,7 +154,7 @@ export class CategoryService {
         throw new NotFoundException(`Category with ID ${id} not found or access denied`);
       }
 
-      return this.transformCategoryForResponse(category);
+      return this.transformCategoryForResponseWithProducts(category);
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
@@ -351,6 +404,31 @@ export class CategoryService {
     };
   }
 
+  private transformCategoryForHierarchicalResponseWithCount(category: any, isSubcategory = false): any {
+    const baseResponse = {
+      id: category.id,
+      name: category.name,
+      description: category.description,
+      parentCategoryId: category.parentCategoryId,
+      productCount: category._count?.products || 0, // Include product count for all levels
+      subcategories: category.subcategories?.map((sub: any) => 
+        this.transformCategoryForHierarchicalResponseWithCount(sub, true)
+      ) || [],
+    };
+
+    // Only include userId, createdAt, updatedAt for root categories
+    if (!isSubcategory) {
+      return {
+        ...baseResponse,
+        userId: category.userId,
+        createdAt: category.createdAt,
+        updatedAt: category.updatedAt,
+      };
+    }
+
+    return baseResponse;
+  }
+
   private transformCategoryForHierarchicalResponse(category: any, isSubcategory = false): any {
     const baseResponse = {
       id: category.id,
@@ -373,6 +451,54 @@ export class CategoryService {
     }
 
     return baseResponse;
+  }
+
+  private transformCategoryForResponseWithProducts(category: any): CategoryResponseDto {
+    return {
+      id: category.id,
+      name: category.name,
+      description: category.description,
+      parentCategoryId: category.parentCategoryId,
+      userId: category.userId,
+      createdAt: category.createdAt,
+      updatedAt: category.updatedAt,
+      parentCategory: category.parentCategory ? {
+        id: category.parentCategory.id,
+        name: category.parentCategory.name,
+        description: category.parentCategory.description,
+        parentCategoryId: category.parentCategory.parentCategoryId,
+        userId: category.parentCategory.userId,
+        createdAt: category.parentCategory.createdAt,
+        updatedAt: category.parentCategory.updatedAt,
+      } : undefined,
+      subcategories: category.subcategories?.map((sub: any) => ({
+        id: sub.id,
+        name: sub.name,
+        description: sub.description,
+        parentCategoryId: sub.parentCategoryId,
+        userId: sub.userId,
+        createdAt: sub.createdAt,
+        updatedAt: sub.updatedAt,
+        productCount: sub._count?.products || 0,
+        subcategories: sub.subcategories?.map((subSub: any) => ({
+          id: subSub.id,
+          name: subSub.name,
+          description: subSub.description,
+          parentCategoryId: subSub.parentCategoryId,
+          userId: subSub.userId,
+          createdAt: subSub.createdAt,
+          updatedAt: subSub.updatedAt,
+          productCount: subSub._count?.products || 0,
+        })) || [],
+      })) || [],
+      products: category.products?.map((product: any) => ({
+        id: product.id,
+        name: product.name,
+        sku: product.sku,
+        status: product.status,
+        imageUrl: product.imageUrl,
+      })) || [],
+    };
   }
 
   private transformCategoryForResponse(category: any): CategoryResponseDto {

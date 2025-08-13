@@ -43,7 +43,7 @@ Content-Type: application/json
 
 ###
 
-# Get all categories (flat list)
+# Get all categories (hierarchical with product counts for each category and subcategory)
 GET {{baseUrl}}/categories
 Authorization: Bearer {{token}}
 
@@ -61,7 +61,7 @@ Authorization: Bearer {{token}}
 
 ###
 
-# Get a specific category
+# Get a specific category (includes product list and subcategories with product counts)
 GET {{baseUrl}}/categories/1
 Authorization: Bearer {{token}}
 

@@ -2,7 +2,8 @@
 
 ### Variables
 @baseUrl = http://localhost:3000
-@authToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsImVtYWlsIjoicHJhZ3lhbjE1MTZAZ21haWwuY29tIiwiaWF0IjoxNzU0OTA3NTkwLCJleHAiOjE3NTQ5OTM5OTB9.fMs7cEsCQwpRbHtPeIyJ9T0S8Zq0orspK4L9jT0oKjs
+@authToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsImVtYWlsIjoicHJhZ3lhbjE1MTZAZ21haWwuY29tIiwiaWF0IjoxNzU1MDc2Njk2LCJleHAiOjE3NTUxNjMwOTZ9.pQM2bGyQAKPr-NJhfIu7rDK6ygiXHc_qdcTXbXDDTYI
+
 
 ### Create a new family with required and other attributes (including additionalValue)
 POST {{baseUrl}}/families
@@ -13,27 +14,12 @@ Content-Type: application/json
   "name": "Electronics",
   "requiredAttributes": [
     {
-      "attributeId": 1,
+      "attributeId": 10,
       "isRequired": true,
       "additionalValue": "Premium Brand"
-    },
-    {
-      "attributeId": 2,
-      "isRequired": true,
-      "additionalValue": 299.99
     }
   ],
   "otherAttributes": [
-    {
-      "attributeId": 3,
-      "isRequired": false,
-      "additionalValue": true
-    },
-    {
-      "attributeId": 4,
-      "isRequired": false,
-      "additionalValue": ["feature1", "feature2", "feature3"]
-    }
   ]
 }
 
@@ -109,11 +95,11 @@ Content-Type: application/json
   ]
 }
 
-### Get all families
+### Get all families (now includes productCount for each family)
 GET {{baseUrl}}/families
 Authorization: Bearer {{authToken}}
 
-### Get specific family by ID
+### Get specific family by ID (now includes list of products using this family)
 GET {{baseUrl}}/families/1
 Authorization: Bearer {{authToken}}
 

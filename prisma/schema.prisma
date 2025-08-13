@@ -20,6 +20,7 @@ model User {
   attributeGroups AttributeGroup[] @relation("UserAttributeGroups")
   families        Family[]         @relation("UserFamilies")
   categories      Category[]       @relation("UserCategories")
+  products        Product[]        @relation("UserProducts")
 }
 
 model Otp {
@@ -45,6 +46,7 @@ model Attribute {
   user             User                      @relation("UserAttributes", fields: [userId], references: [id], onDelete: Cascade)
   attributeGroups  AttributeGroupAttribute[]
   familyAttributes FamilyAttribute[]
+  products         Product[]                 @relation("ProductAttributes")
 }
 
 model AttributeGroup {
@@ -56,6 +58,7 @@ model AttributeGroup {
   updatedAt   DateTime                  @updatedAt
   user        User                      @relation("UserAttributeGroups", fields: [userId], references: [id], onDelete: Cascade)
   attributes  AttributeGroupAttribute[]
+  products    Product[]                 @relation("ProductAttributeGroups")
 }
 
 model AttributeGroupAttribute {
@@ -79,6 +82,7 @@ model Family {
   updatedAt        DateTime          @updatedAt
   user             User              @relation("UserFamilies", fields: [userId], references: [id], onDelete: Cascade)
   familyAttributes FamilyAttribute[]
+  products         Product[]         @relation("ProductFamilies")
 
   @@unique([name, userId])
 }
@@ -107,6 +111,31 @@ model Category {
   parentCategory   Category?  @relation("CategoryParent", fields: [parentCategoryId], references: [id])
   subcategories    Category[] @relation("CategoryParent")
   user             User       @relation("UserCategories", fields: [userId], references: [id], onDelete: Cascade)
+  products         Product[]  @relation("CategoryProducts")
 
+  @@unique([name, userId])
+}
+
+model Product {
+  id               Int             @id @default(autoincrement())
+  name             String
+  sku              String
+  productLink      String?
+  imageUrl         String?
+  status           String          @default("incomplete") // complete, incomplete
+  categoryId       Int?
+  attributeId      Int?
+  attributeGroupId Int?
+  familyId         Int?
+  userId           Int
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  category         Category?       @relation("CategoryProducts", fields: [categoryId], references: [id])
+  attribute        Attribute?      @relation("ProductAttributes", fields: [attributeId], references: [id])
+  attributeGroup   AttributeGroup? @relation("ProductAttributeGroups", fields: [attributeGroupId], references: [id])
+  family           Family?         @relation("ProductFamilies", fields: [familyId], references: [id])
+  user             User            @relation("UserProducts", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([sku, userId])
   @@unique([name, userId])
 }

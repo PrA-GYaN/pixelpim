@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, ConflictException, ForbiddenException, B
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateFamilyDto } from './dto/create-family.dto';
 import { UpdateFamilyDto } from './dto/update-family.dto';
+import { FamilyResponseDto } from './dto/family-response.dto';
 import { AttributeValueValidator } from '../attribute/validators/attribute-value.validator';
 import { AttributeType } from '../types/attribute-type.enum';
 import type { Family } from '../../generated/prisma';
@@ -104,13 +105,18 @@ export class FamilyService {
     }
   }
 
-  async findAll(userId: number): Promise<any[]> {
+  async findAll(userId: number): Promise<FamilyResponseDto[]> {
     const families = await this.prisma.family.findMany({
       where: { userId },
       include: {
         familyAttributes: {
           include: {
             attribute: true,
+          },
+        },
+        _count: {
+          select: {
+            products: true,
           },
         },
       },
@@ -123,6 +129,9 @@ export class FamilyService {
       id: family.id,
       name: family.name,
       userId: family.userId,
+      createdAt: family.createdAt,
+      updatedAt: family.updatedAt,
+      productCount: family._count.products,
       familyAttributes: family.familyAttributes.map(fa => ({
         id: fa.id,
         isRequired: fa.isRequired,
@@ -138,13 +147,25 @@ export class FamilyService {
     }));
   }
 
-  async findOne(id: number, userId: number): Promise<any> {
+  async findOne(id: number, userId: number): Promise<FamilyResponseDto> {
     const family = await this.prisma.family.findUnique({
       where: { id },
       include: {
         familyAttributes: {
           include: {
             attribute: true,
+          },
+        },
+        products: {
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            status: true,
+            imageUrl: true,
+          },
+          orderBy: {
+            createdAt: 'desc',
           },
         },
       },
@@ -162,6 +183,15 @@ export class FamilyService {
       id: family.id,
       name: family.name,
       userId: family.userId,
+      createdAt: family.createdAt,
+      updatedAt: family.updatedAt,
+      products: family.products.map(product => ({
+        id: product.id,
+        name: product.name,
+        sku: product.sku,
+        status: product.status,
+        imageUrl: product.imageUrl,
+      })),
       familyAttributes: family.familyAttributes.map(fa => ({
         id: fa.id,
         isRequired: fa.isRequired,

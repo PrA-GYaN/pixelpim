@@ -7,8 +7,7 @@
 # 2. Valid JWT token (replace YOUR_JWT_TOKEN with actual token)
 
 @baseUrl = http://localhost:3000
-@authToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsImVtYWlsIjoicHJhZ3lhbjE1MTZAZ21haWwuY29tIiwiaWF0IjoxNzU0OTkyMDM2LCJleHAiOjE3NTUwNzg0MzZ9.T-O-mgdLa4CLuof07P-duehXP0lr9PvTQRuMTYhc0eA
-
+@authToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsImVtYWlsIjoicHJhZ3lhbjE1MTZAZ21haWwuY29tIiwiaWF0IjoxNzU1MDc2Njk2LCJleHAiOjE3NTUxNjMwOTZ9.pQM2bGyQAKPr-NJhfIu7rDK6ygiXHc_qdcTXbXDDTYI
 #################################
 # ATTRIBUTES CRUD OPERATIONS
 #################################
@@ -71,14 +70,9 @@ Authorization: Bearer {{authToken}}
   "description": "Essential product attributes",
   "attributes": [
     {
-      "attributeId": 1,
+      "attributeId": 10,
       "required": true,
       "defaultValue": "Standard Brand"
-    },
-    {
-      "attributeId": 2,
-      "required": false,
-      "defaultValue": 0.00
     }
   ]
 }
