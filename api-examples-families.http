@@ -4,7 +4,7 @@
 @baseUrl = http://localhost:3000
 @authToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsImVtYWlsIjoicHJhZ3lhbjE1MTZAZ21haWwuY29tIiwiaWF0IjoxNzU0OTA3NTkwLCJleHAiOjE3NTQ5OTM5OTB9.fMs7cEsCQwpRbHtPeIyJ9T0S8Zq0orspK4L9jT0oKjs
 
-### Create a new family with required and other attributes
+### Create a new family with required and other attributes (including additionalValue)
 POST {{baseUrl}}/families
 Authorization: Bearer {{authToken}}
 Content-Type: application/json
@@ -13,29 +13,100 @@ Content-Type: application/json
   "name": "Electronics",
   "requiredAttributes": [
     {
-      "attributeId": 1
+      "attributeId": 1,
+      "isRequired": true,
+      "additionalValue": "Premium Brand"
     },
     {
-      "attributeId": 2
+      "attributeId": 2,
+      "isRequired": true,
+      "additionalValue": 299.99
     }
   ],
   "otherAttributes": [
     {
-      "attributeId": 3
+      "attributeId": 3,
+      "isRequired": false,
+      "additionalValue": true
     },
     {
-      "attributeId": 4
+      "attributeId": 4,
+      "isRequired": false,
+      "additionalValue": ["feature1", "feature2", "feature3"]
     }
   ]
 }
 
-### Create a family with only name
+### Create a family with complex additionalValue types
+POST {{baseUrl}}/families
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "name": "Smart Devices",
+  "requiredAttributes": [
+    {
+      "attributeId": 5,
+      "isRequired": true,
+      "additionalValue": {
+        "warranty": 24,
+        "features": ["wifi", "bluetooth"],
+        "specifications": {
+          "battery": "5000mAh",
+          "storage": "128GB"
+        }
+      }
+    }
+  ],
+  "otherAttributes": [
+    {
+      "attributeId": 6,
+      "isRequired": false,
+      "additionalValue": "2024-12-31T23:59:59Z"
+    }
+  ]
+}
+
+### Create a family with only name (no attributes)
 POST {{baseUrl}}/families
 Authorization: Bearer {{authToken}}
 Content-Type: application/json
 
 {
   "name": "Books"
+}
+
+### Create family with mixed attribute types and validation
+POST {{baseUrl}}/families
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "name": "Clothing",
+  "requiredAttributes": [
+    {
+      "attributeId": 7,
+      "isRequired": true,
+      "additionalValue": "#FF5733"
+    },
+    {
+      "attributeId": 8,
+      "isRequired": true,
+      "additionalValue": 85.5
+    }
+  ],
+  "otherAttributes": [
+    {
+      "attributeId": 9,
+      "isRequired": false,
+      "additionalValue": "contact@example.com"
+    },
+    {
+      "attributeId": 10,
+      "isRequired": false,
+      "additionalValue": "https://example.com/product"
+    }
+  ]
 }
 
 ### Get all families
@@ -46,7 +117,7 @@ Authorization: Bearer {{authToken}}
 GET {{baseUrl}}/families/1
 Authorization: Bearer {{authToken}}
 
-### Update family name and attributes
+### Update family with validated additionalValues
 PATCH {{baseUrl}}/families/1
 Authorization: Bearer {{authToken}}
 Content-Type: application/json
@@ -55,12 +126,25 @@ Content-Type: application/json
   "name": "Updated Electronics",
   "requiredAttributes": [
     {
-      "attributeId": 1
+      "attributeId": 1,
+      "isRequired": true,
+      "additionalValue": "Ultra Premium Brand"
+    },
+    {
+      "attributeId": 2,
+      "isRequired": true,
+      "additionalValue": 399.99
     }
   ],
   "otherAttributes": [
     {
-      "attributeId": 5
+      "attributeId": 5,
+      "isRequired": false,
+      "additionalValue": {
+        "updated": true,
+        "version": "2.0",
+        "features": ["enhanced-wifi", "bluetooth-5.0"]
+      }
     }
   ]
 }
@@ -74,12 +158,52 @@ Content-Type: application/json
   "name": "Premium Electronics"
 }
 
-### Add an attribute to a family
-POST {{baseUrl}}/families/1/attributes/6?isRequired=true&defaultValue=New Value
+### Add an attribute to a family with additionalValue (STRING type)
+POST {{baseUrl}}/families/1/attributes/6?isRequired=true&additionalValue=New%20String%20Value
 Authorization: Bearer {{authToken}}
 
-### Add an attribute to a family (optional)
-POST {{baseUrl}}/families/1/attributes/7?isRequired=false
+### Add an attribute to a family with additionalValue (NUMBER type)
+POST {{baseUrl}}/families/1/attributes/7?isRequired=false&additionalValue=42.5
+Authorization: Bearer {{authToken}}
+
+### Add an attribute to a family with additionalValue (BOOLEAN type)
+POST {{baseUrl}}/families/1/attributes/8?isRequired=false&additionalValue=true
+Authorization: Bearer {{authToken}}
+
+### Add an attribute to a family with additionalValue (INTEGER type)
+POST {{baseUrl}}/families/1/attributes/9?isRequired=true&additionalValue=100
+Authorization: Bearer {{authToken}}
+
+### Add an attribute to a family with additionalValue (EMAIL type)
+POST {{baseUrl}}/families/1/attributes/10?isRequired=false&additionalValue=test@example.com
+Authorization: Bearer {{authToken}}
+
+### Add an attribute to a family with additionalValue (URL type)
+POST {{baseUrl}}/families/1/attributes/11?isRequired=false&additionalValue=https://example.com
+Authorization: Bearer {{authToken}}
+
+### Add an attribute to a family with additionalValue (COLOR type)
+POST {{baseUrl}}/families/1/attributes/12?isRequired=false&additionalValue=%23FF5733
+Authorization: Bearer {{authToken}}
+
+### Add an attribute to a family with additionalValue (PERCENTAGE type)
+POST {{baseUrl}}/families/1/attributes/13?isRequired=false&additionalValue=85.5
+Authorization: Bearer {{authToken}}
+
+### Add an attribute to a family with additionalValue (DATE type)
+POST {{baseUrl}}/families/1/attributes/14?isRequired=false&additionalValue=2024-12-31
+Authorization: Bearer {{authToken}}
+
+### Add an attribute to a family with additionalValue (DATETIME type)
+POST {{baseUrl}}/families/1/attributes/15?isRequired=false&additionalValue=2024-12-31T23:59:59Z
+Authorization: Bearer {{authToken}}
+
+### Add an attribute to a family with additionalValue (TIME type)
+POST {{baseUrl}}/families/1/attributes/16?isRequired=false&additionalValue=14:30:00
+Authorization: Bearer {{authToken}}
+
+### Add an attribute to a family without additionalValue (optional)
+POST {{baseUrl}}/families/1/attributes/17?isRequired=false
 Authorization: Bearer {{authToken}}
 
 ### Remove an attribute from a family
@@ -90,7 +214,7 @@ Authorization: Bearer {{authToken}}
 DELETE {{baseUrl}}/families/1
 Authorization: Bearer {{authToken}}
 
-### Error cases
+### Error cases and validation examples
 
 ### Try to create family with duplicate name
 POST {{baseUrl}}/families
@@ -110,7 +234,8 @@ Content-Type: application/json
   "name": "Test Family",
   "requiredAttributes": [
     {
-      "attributeId": 999
+      "attributeId": 999,
+      "additionalValue": "This will fail"
     }
   ]
 }
@@ -124,19 +249,182 @@ Content-Type: application/json
   "name": "Test Family 2",
   "requiredAttributes": [
     {
-      "attributeId": 1
+      "attributeId": 1,
+      "additionalValue": "First occurrence"
     }
   ],
   "otherAttributes": [
     {
-      "attributeId": 1
+      "attributeId": 1,
+      "additionalValue": "Duplicate occurrence"
     }
   ]
 }
+
+### Validation Error: Invalid INTEGER value
+POST {{baseUrl}}/families
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "name": "Validation Test",
+  "requiredAttributes": [
+    {
+      "attributeId": 2,
+      "additionalValue": "not-a-number"
+    }
+  ]
+}
+
+### Validation Error: Invalid EMAIL format
+POST {{baseUrl}}/families
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "name": "Email Validation Test",
+  "requiredAttributes": [
+    {
+      "attributeId": 9,
+      "additionalValue": "invalid-email-format"
+    }
+  ]
+}
+
+### Validation Error: Invalid URL format
+POST {{baseUrl}}/families
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "name": "URL Validation Test",
+  "requiredAttributes": [
+    {
+      "attributeId": 10,
+      "additionalValue": "not-a-valid-url"
+    }
+  ]
+}
+
+### Validation Error: Invalid COLOR format
+POST {{baseUrl}}/families
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "name": "Color Validation Test",
+  "requiredAttributes": [
+    {
+      "attributeId": 7,
+      "additionalValue": "invalid-color"
+    }
+  ]
+}
+
+### Validation Error: Invalid PERCENTAGE (out of range)
+POST {{baseUrl}}/families
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "name": "Percentage Validation Test",
+  "requiredAttributes": [
+    {
+      "attributeId": 13,
+      "additionalValue": 150
+    }
+  ]
+}
+
+### Validation Error: Invalid DATE format
+POST {{baseUrl}}/families
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "name": "Date Validation Test",
+  "requiredAttributes": [
+    {
+      "attributeId": 14,
+      "additionalValue": "invalid-date"
+    }
+  ]
+}
+
+### Validation Error: Invalid BOOLEAN value
+POST {{baseUrl}}/families
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "name": "Boolean Validation Test",
+  "requiredAttributes": [
+    {
+      "attributeId": 3,
+      "additionalValue": "maybe"
+    }
+  ]
+}
+
+### Validation Error: Invalid JSON format
+POST {{baseUrl}}/families
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "name": "JSON Validation Test",
+  "requiredAttributes": [
+    {
+      "attributeId": 5,
+      "additionalValue": "invalid-json-string"
+    }
+  ]
+}
+
+### Add attribute with invalid additionalValue (INTEGER expected)
+POST {{baseUrl}}/families/1/attributes/2?isRequired=true&additionalValue=not-a-number
+Authorization: Bearer {{authToken}}
+
+### Add attribute with invalid additionalValue (EMAIL expected)
+POST {{baseUrl}}/families/1/attributes/9?isRequired=false&additionalValue=invalid-email
+Authorization: Bearer {{authToken}}
+
+### Add attribute with invalid additionalValue (URL expected)
+POST {{baseUrl}}/families/1/attributes/10?isRequired=false&additionalValue=not-a-url
+Authorization: Bearer {{authToken}}
 
 ### Try to access family without authentication
 GET {{baseUrl}}/families
 
 ### Try to get non-existent family
 GET {{baseUrl}}/families/999
+Authorization: Bearer {{authToken}}
+
+### Try to update non-existent family
+PATCH {{baseUrl}}/families/999
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "name": "Non-existent Family"
+}
+
+### Try to delete non-existent family
+DELETE {{baseUrl}}/families/999
+Authorization: Bearer {{authToken}}
+
+### Try to add attribute to non-existent family
+POST {{baseUrl}}/families/999/attributes/1?isRequired=true
+Authorization: Bearer {{authToken}}
+
+### Try to remove attribute from non-existent family
+DELETE {{baseUrl}}/families/999/attributes/1
+Authorization: Bearer {{authToken}}
+
+### Try to add non-existent attribute to family
+POST {{baseUrl}}/families/1/attributes/999?isRequired=true
+Authorization: Bearer {{authToken}}
+
+### Try to remove non-assigned attribute from family
+DELETE {{baseUrl}}/families/1/attributes/999
 Authorization: Bearer {{authToken}}

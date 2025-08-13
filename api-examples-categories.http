@@ -1,0 +1,222 @@
+### Category API Examples
+
+# Variables
+@baseUrl = http://localhost:3000
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsImVtYWlsIjoicHJhZ3lhbjE1MTZAZ21haWwuY29tIiwiaWF0IjoxNzU1MDY0MjE4LCJleHAiOjE3NTUxNTA2MTh9.e9DJ94KJUfJq2qYwHONl2xJcBMjzbsYF2cu60yKeXw8
+###
+
+# Create a root category
+POST {{baseUrl}}/categories
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Electronics",
+  "description": "Electronic devices and accessories"
+}
+
+###
+
+# Create a subcategory
+POST {{baseUrl}}/categories
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Smartphones",
+  "description": "Mobile phones and accessories",
+  "parentCategoryId": 1
+}
+
+###
+
+# Create a sub-subcategory
+POST {{baseUrl}}/categories
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "iPhone",
+  "description": "Apple iPhone devices",
+  "parentCategoryId": 2
+}
+
+###
+
+# Get all categories (flat list)
+GET {{baseUrl}}/categories
+Authorization: Bearer {{token}}
+
+###
+
+# Get categories as tree structure
+GET {{baseUrl}}/categories?tree=true
+Authorization: Bearer {{token}}
+
+###
+
+# Get categories tree (dedicated endpoint)
+GET {{baseUrl}}/categories/tree
+Authorization: Bearer {{token}}
+
+###
+
+# Get a specific category
+GET {{baseUrl}}/categories/1
+Authorization: Bearer {{token}}
+
+###
+
+# Get subcategories of a category
+GET {{baseUrl}}/categories/1/subcategories
+Authorization: Bearer {{token}}
+
+###
+
+# Update a category name and description
+PATCH {{baseUrl}}/categories/1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Consumer Electronics",
+  "description": "Updated description for consumer electronic devices"
+}
+
+###
+
+# Move a category to a different parent
+PATCH {{baseUrl}}/categories/3
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "parentCategoryId": 1
+}
+
+###
+
+# Remove parent from category (make it root)
+PATCH {{baseUrl}}/categories/2
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "parentCategoryId": null
+}
+
+###
+
+# Delete a category (must not have subcategories)
+DELETE {{baseUrl}}/categories/3
+Authorization: Bearer {{token}}
+
+###
+
+# Test error cases
+
+# Try to create circular reference
+PATCH {{baseUrl}}/categories/1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "parentCategoryId": 2
+}
+
+###
+
+# Try to delete category with subcategories
+DELETE {{baseUrl}}/categories/1
+Authorization: Bearer {{token}}
+
+###
+
+# Try to access category that doesn't exist
+GET {{baseUrl}}/categories/999
+Authorization: Bearer {{token}}
+
+###
+
+# Try to create category with non-existent parent
+POST {{baseUrl}}/categories
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Test Category",
+  "description": "Test description",
+  "parentCategoryId": 999
+}
+
+###
+
+# Example of complete category hierarchy
+
+# 1. Create Electronics (root)
+POST {{baseUrl}}/categories
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Electronics",
+  "description": "Electronic devices and accessories"
+}
+
+###
+
+# 2. Create Mobile Devices (under Electronics)
+POST {{baseUrl}}/categories
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Mobile Devices",
+  "description": "Portable electronic devices",
+  "parentCategoryId": 1
+}
+
+###
+
+# 3. Create Computers (under Electronics)
+POST {{baseUrl}}/categories
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Computers",
+  "description": "Desktop and laptop computers",
+  "parentCategoryId": 1
+}
+
+###
+
+# 4. Create Smartphones (under Mobile Devices)
+POST {{baseUrl}}/categories
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Smartphones",
+  "description": "Smart mobile phones",
+  "parentCategoryId": 2
+}
+
+###
+
+# 5. Create Tablets (under Mobile Devices)
+POST {{baseUrl}}/categories
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Tablets",
+  "description": "Tablet computers",
+  "parentCategoryId": 2
+}
+
+###
+
+# 6. View the complete tree
+GET {{baseUrl}}/categories/tree
+Authorization: Bearer {{token}}

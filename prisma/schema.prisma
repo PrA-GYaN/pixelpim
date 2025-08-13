@@ -19,6 +19,7 @@ model User {
   attributes      Attribute[]      @relation("UserAttributes")
   attributeGroups AttributeGroup[] @relation("UserAttributeGroups")
   families        Family[]         @relation("UserFamilies")
+  categories      Category[]       @relation("UserCategories")
 }
 
 model Otp {
@@ -93,4 +94,19 @@ model FamilyAttribute {
   family          Family    @relation(fields: [familyId], references: [id], onDelete: Cascade)
 
   @@unique([familyId, attributeId])
+}
+
+model Category {
+  id               Int        @id @default(autoincrement())
+  name             String
+  description      String?
+  parentCategoryId Int?
+  userId           Int
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  parentCategory   Category?  @relation("CategoryParent", fields: [parentCategoryId], references: [id])
+  subcategories    Category[] @relation("CategoryParent")
+  user             User       @relation("UserCategories", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([name, userId])
 }

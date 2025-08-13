@@ -12,7 +12,7 @@
 @testOtp = 123456
 
 # JWT token (update after login/signup)
-@jwtToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+@jwtToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsImVtYWlsIjoicHJhZ3lhbjE1MTZAZ21haWwuY29tIiwiaWF0IjoxNzU1MDY0MjE4LCJleHAiOjE3NTUxNTA2MTh9.e9DJ94KJUfJq2qYwHONl2xJcBMjzbsYF2cu60yKeXw8
 
 ### ============================================
 ### AUTHENTICATION FLOW TESTS
@@ -69,8 +69,8 @@ POST {{baseUrl}}/auth/login
 Content-Type: {{contentType}}
 
 {
-  "email": "{{testEmail}}",
-  "password": "{{testPassword}}"
+  "email": "pragyan1516@gmail.com",
+  "password": "password123"
 }
 
 ###

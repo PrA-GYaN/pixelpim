@@ -6,9 +6,10 @@ import { AuthModule } from './auth/auth.module';
 import { AttributeModule } from './attribute/attribute.module';
 import { AttributeGroupModule } from './attribute-group/attribute-group.module';
 import { FamilyModule } from './family/family.module';
+import { CategoryModule } from './category/category.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule, AttributeModule, AttributeGroupModule, FamilyModule],
+  imports: [PrismaModule, AuthModule, AttributeModule, AttributeGroupModule, FamilyModule, CategoryModule],
   controllers: [AppController],
   providers: [AppService],
 })

@@ -2,11 +2,16 @@ import { Injectable, NotFoundException, ConflictException, ForbiddenException, B
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateFamilyDto } from './dto/create-family.dto';
 import { UpdateFamilyDto } from './dto/update-family.dto';
+import { AttributeValueValidator } from '../attribute/validators/attribute-value.validator';
+import { AttributeType } from '../types/attribute-type.enum';
 import type { Family } from '../../generated/prisma';
 
 @Injectable()
 export class FamilyService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly attributeValidator: AttributeValueValidator
+  ) {}
 
   async create(createFamilyDto: CreateFamilyDto, userId: number): Promise<Family> {
     const { name, requiredAttributes = [], otherAttributes = [] } = createFamilyDto;
@@ -31,16 +36,29 @@ export class FamilyService {
       ...otherAttributes.map(attr => attr.attributeId),
     ];
 
+    const allAttributes = [
+      ...requiredAttributes,
+      ...otherAttributes,
+    ];
+
     if (allAttributeIds.length > 0) {
-      const attributes = await this.prisma.attribute.findMany({
+      const attributesFromDb = await this.prisma.attribute.findMany({
         where: {
           id: { in: allAttributeIds },
           userId,
         },
       });
 
-      if (attributes.length !== allAttributeIds.length) {
+      if (attributesFromDb.length !== allAttributeIds.length) {
         throw new BadRequestException('One or more attributes not found or do not belong to you');
+      }
+
+      // Validate additionalValue for each attribute
+      for (const attr of allAttributes) {
+        const dbAttr = attributesFromDb.find(a => a.id === attr.attributeId);
+        if (dbAttr && attr.additionalValue !== undefined) {
+          this.attributeValidator.validate(dbAttr.type as AttributeType, attr.additionalValue);
+        }
       }
     }
 
@@ -60,12 +78,12 @@ export class FamilyService {
               ...requiredAttributes.map(attr => ({
                 attributeId: attr.attributeId,
                 isRequired: attr.isRequired ?? true,
-                additionalValue: attr.additionalValue,
+                additionalValue: attr.additionalValue !== undefined ? String(attr.additionalValue) : null,
               })),
               ...otherAttributes.map(attr => ({
                 attributeId: attr.attributeId,
                 isRequired: attr.isRequired ?? false,
-                additionalValue: attr.additionalValue,
+                additionalValue: attr.additionalValue !== undefined ? String(attr.additionalValue) : null,
               })),
             ],
           },
@@ -108,12 +126,12 @@ export class FamilyService {
       familyAttributes: family.familyAttributes.map(fa => ({
         id: fa.id,
         isRequired: fa.isRequired,
-        additionalValue: fa.additionalValue,
+        additionalValue: this.attributeValidator.parseStoredValue(fa.attribute.type as AttributeType, fa.additionalValue),
         attribute: {
           id: fa.attribute.id,
           name: fa.attribute.name,
           type: fa.attribute.type,
-          defaultValue: fa.attribute.defaultValue,
+          defaultValue: this.attributeValidator.parseStoredValue(fa.attribute.type as AttributeType, fa.attribute.defaultValue),
           userId: fa.attribute.userId,
         },
       })),
@@ -147,12 +165,12 @@ export class FamilyService {
       familyAttributes: family.familyAttributes.map(fa => ({
         id: fa.id,
         isRequired: fa.isRequired,
-        additionalValue: fa.additionalValue,
+        additionalValue: this.attributeValidator.parseStoredValue(fa.attribute.type as AttributeType, fa.additionalValue),
         attribute: {
           id: fa.attribute.id,
           name: fa.attribute.name,
           type: fa.attribute.type,
-          defaultValue: fa.attribute.defaultValue,
+          defaultValue: this.attributeValidator.parseStoredValue(fa.attribute.type as AttributeType, fa.attribute.defaultValue),
           userId: fa.attribute.userId,
         },
       })),
@@ -185,17 +203,30 @@ export class FamilyService {
       ...requiredAttributes.map(attr => attr.attributeId),
       ...otherAttributes.map(attr => attr.attributeId),
     ];
+    
+    const allAttributes = [
+      ...requiredAttributes,
+      ...otherAttributes,
+    ];
 
     if (allAttributeIds.length > 0) {
-      const attributes = await this.prisma.attribute.findMany({
+      const attributesFromDb = await this.prisma.attribute.findMany({
         where: {
           id: { in: allAttributeIds },
           userId,
         },
       });
 
-      if (attributes.length !== allAttributeIds.length) {
+      if (attributesFromDb.length !== allAttributeIds.length) {
         throw new BadRequestException('One or more attributes not found or do not belong to you');
+      }
+
+      // Validate additionalValue for each attribute
+      for (const attr of allAttributes) {
+        const dbAttr = attributesFromDb.find(a => a.id === attr.attributeId);
+        if (dbAttr && attr.additionalValue !== undefined) {
+          this.attributeValidator.validate(dbAttr.type as AttributeType, attr.additionalValue);
+        }
       }
 
       // Check for duplicate attribute IDs
@@ -217,12 +248,12 @@ export class FamilyService {
                 ...requiredAttributes.map(attr => ({
                   attributeId: attr.attributeId,
                   isRequired: attr.isRequired ?? true,
-                  additionalValue: attr.additionalValue,
+                  additionalValue: attr.additionalValue !== undefined ? String(attr.additionalValue) : null,
                 })),
                 ...otherAttributes.map(attr => ({
                   attributeId: attr.attributeId,
                   isRequired: attr.isRequired ?? false,
-                  additionalValue: attr.additionalValue,
+                  additionalValue: attr.additionalValue !== undefined ? String(attr.additionalValue) : null,
                 })),
               ],
             },
@@ -266,6 +297,11 @@ export class FamilyService {
       throw new BadRequestException('Attribute not found or does not belong to you');
     }
 
+    // Validate the additional value
+    if (additionalValue !== undefined) {
+      this.attributeValidator.validate(attribute.type as AttributeType, additionalValue);
+    }
+
     // Check if attribute is already assigned to family
     const existingFamilyAttribute = await this.prisma.familyAttribute.findUnique({
       where: {
@@ -285,7 +321,7 @@ export class FamilyService {
         familyId,
         attributeId,
         isRequired,
-        additionalValue,
+        additionalValue: additionalValue !== undefined ? String(additionalValue) : null,
       },
       include: {
         attribute: true,
