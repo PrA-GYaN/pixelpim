@@ -2,10 +2,39 @@
 
 This document provides detailed information about all available API endpoints in the PixelPim Backend.
 
+## Table of Contents
+
+1. [Base URL](#base-url)
+2. [File Upload & Cloud Storage](#file-upload--cloud-storage)
+3. [Authentication](#authentication)
+4. [Error Responses](#error-responses)
+5. [Endpoints](#endpoints)
+   - [Authentication Module](#authentication-module)
+   - [Attribute Module](#attribute-module)
+   - [Attribute Group Module](#attribute-group-module)
+   - [Family Module](#family-module)
+   - [Asset Module](#asset-module)
+   - [Asset Group Module](#asset-group-module)
+   - [Category Module](#category-module)
+   - [Product Module](#product-module)
+6. [Rate Limiting](#rate-limiting)
+7. [Data Types](#data-types)
+8. [Testing with cURL](#testing-with-curl)
+
 ## Base URL
 ```
 http://localhost:3000
 ```
+
+## File Upload & Cloud Storage
+
+The API supports file uploads through the Asset Management system with the following features:
+- **File Storage**: Integrated with Cloudinary for cloud-based file storage
+- **File Types**: Supports all common file types (images, documents, videos, etc.)
+- **File Size Limit**: Maximum 50MB per file
+- **Image Processing**: Automatic thumbnail generation and image optimization
+- **CDN Delivery**: Fast global content delivery through Cloudinary's CDN
+- **Organized Storage**: Files can be organized into Asset Groups for better management
 
 ## Authentication
 
@@ -1064,6 +1093,351 @@ Remove an attribute from a family.
 - `404 Not Found` - Family not found or attribute not assigned
 - `403 Forbidden` - You can only access your own families
 
+---
+
+### Asset Module
+
+#### Upload Asset
+Upload a new asset file to the system.
+
+**Endpoint:** `POST /assets/upload`
+
+**Authentication:** Required (JWT token)
+
+**Content-Type:** `multipart/form-data`
+
+**Request Body:**
+- `file`: File (required) - The asset file to upload (max 50MB)
+- `name`: String (required) - Name for the asset
+- `assetGroupId`: Number (optional) - ID of the asset group to assign
+
+**Example:**
+```bash
+curl -X POST http://localhost:3000/assets/upload \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -F "file=@/path/to/your/file.jpg" \
+  -F "name=Product Image 1" \
+  -F "assetGroupId=1"
+```
+
+**Success Response (201):**
+```json
+{
+  "id": 1,
+  "name": "Product Image 1",
+  "fileName": "product-image.jpg",
+  "filePath": "assets/product-image_abc123",
+  "mimeType": "image/jpeg",
+  "uploadDate": "2024-01-01T00:00:00.000Z",
+  "size": 1048576,
+  "userId": 1,
+  "assetGroupId": 1,
+  "createdAt": "2024-01-01T00:00:00.000Z",
+  "updatedAt": "2024-01-01T00:00:00.000Z",
+  "assetGroup": {
+    "id": 1,
+    "groupName": "Product Images",
+    "createdDate": "2024-01-01T00:00:00.000Z",
+    "totalSize": 2097152,
+    "userId": 1
+  },
+  "url": "https://res.cloudinary.com/your-cloud/image/upload/v123456789/assets/product-image_abc123.jpg",
+  "thumbnailUrl": "https://res.cloudinary.com/your-cloud/image/upload/c_thumb,w_150,h_150/assets/product-image_abc123.jpg",
+  "formattedSize": "1.0 MB",
+  "cloudinaryData": {
+    "public_id": "assets/product-image_abc123",
+    "format": "jpg",
+    "resource_type": "image",
+    "created_at": "2024-01-01T00:00:00.000Z"
+  }
+}
+```
+
+**Error Responses:**
+- `400 Bad Request` - File is required
+- `404 Not Found` - Asset group not found
+- `413 Payload Too Large` - File exceeds 50MB limit
+
+---
+
+#### Get All Assets
+Retrieve all assets for the authenticated user with optional filtering by asset group.
+
+**Endpoint:** `GET /assets`
+
+**Authentication:** Required (JWT token)
+
+**Query Parameters:**
+- `assetGroupId`: Number (optional) - Filter by asset group ID
+
+**Example:** `GET /assets?assetGroupId=1`
+
+**Success Response (200):**
+```json
+[
+  {
+    "id": 1,
+    "name": "Product Image 1",
+    "fileName": "product-image.jpg",
+    "filePath": "assets/product-image_abc123",
+    "mimeType": "image/jpeg",
+    "uploadDate": "2024-01-01T00:00:00.000Z",
+    "size": 1048576,
+    "userId": 1,
+    "assetGroupId": 1,
+    "createdAt": "2024-01-01T00:00:00.000Z",
+    "updatedAt": "2024-01-01T00:00:00.000Z",
+    "assetGroup": {
+      "id": 1,
+      "groupName": "Product Images",
+      "createdDate": "2024-01-01T00:00:00.000Z",
+      "totalSize": 2097152,
+      "userId": 1
+    },
+    "url": "https://res.cloudinary.com/your-cloud/image/upload/v123456789/assets/product-image_abc123.jpg",
+    "thumbnailUrl": "https://res.cloudinary.com/your-cloud/image/upload/c_thumb,w_150,h_150/assets/product-image_abc123.jpg",
+    "formattedSize": "1.0 MB"
+  }
+]
+```
+
+---
+
+#### Get Asset by ID
+Retrieve a specific asset by its ID.
+
+**Endpoint:** `GET /assets/:id`
+
+**Authentication:** Required (JWT token)
+
+**Parameters:**
+- `id`: Asset ID (integer)
+
+**Success Response (200):**
+Same format as upload asset response.
+
+**Error Responses:**
+- `404 Not Found` - Asset not found
+- `403 Forbidden` - You can only access your own assets
+
+---
+
+#### Update Asset
+Update an existing asset's metadata.
+
+**Endpoint:** `PATCH /assets/:id`
+
+**Authentication:** Required (JWT token)
+
+**Parameters:**
+- `id`: Asset ID (integer)
+
+**Request Body (partial update):**
+```json
+{
+  "name": "Updated Product Image",
+  "assetGroupId": 2
+}
+```
+
+**Success Response (200):**
+Same format as upload asset response with updated values.
+
+**Error Responses:**
+- `404 Not Found` - Asset not found or asset group not found
+- `403 Forbidden` - You can only access your own assets
+
+---
+
+#### Delete Asset
+Delete an asset and remove it from cloud storage.
+
+**Endpoint:** `DELETE /assets/:id`
+
+**Authentication:** Required (JWT token)
+
+**Parameters:**
+- `id`: Asset ID (integer)
+
+**Success Response (200):**
+```json
+{
+  "message": "Asset successfully deleted"
+}
+```
+
+**Error Responses:**
+- `404 Not Found` - Asset not found
+- `403 Forbidden` - You can only access your own assets
+
+---
+
+### Asset Group Module
+
+#### Create Asset Group
+Create a new asset group for organizing assets.
+
+**Endpoint:** `POST /asset-groups`
+
+**Authentication:** Required (JWT token)
+
+**Request Body:**
+```json
+{
+  "groupName": "Product Images"
+}
+```
+
+**Validation Rules:**
+- `groupName`: Required string, must be unique per user
+
+**Success Response (201):**
+```json
+{
+  "id": 1,
+  "groupName": "Product Images",
+  "createdDate": "2024-01-01T00:00:00.000Z",
+  "totalSize": 0,
+  "userId": 1,
+  "createdAt": "2024-01-01T00:00:00.000Z",
+  "updatedAt": "2024-01-01T00:00:00.000Z",
+  "_count": {
+    "assets": 0
+  }
+}
+```
+
+**Error Responses:**
+- `409 Conflict` - Asset group with this name already exists
+
+---
+
+#### Get All Asset Groups
+Retrieve all asset groups for the authenticated user with asset counts.
+
+**Endpoint:** `GET /asset-groups`
+
+**Authentication:** Required (JWT token)
+
+**Success Response (200):**
+```json
+[
+  {
+    "id": 1,
+    "groupName": "Product Images",
+    "createdDate": "2024-01-01T00:00:00.000Z",
+    "totalSize": 2097152,
+    "userId": 1,
+    "createdAt": "2024-01-01T00:00:00.000Z",
+    "updatedAt": "2024-01-01T00:00:00.000Z",
+    "_count": {
+      "assets": 5
+    }
+  }
+]
+```
+
+---
+
+#### Get Asset Group by ID
+Retrieve a specific asset group by its ID.
+
+**Endpoint:** `GET /asset-groups/:id`
+
+**Authentication:** Required (JWT token)
+
+**Parameters:**
+- `id`: Asset Group ID (integer)
+
+**Success Response (200):**
+```json
+{
+  "id": 1,
+  "groupName": "Product Images",
+  "createdDate": "2024-01-01T00:00:00.000Z",
+  "totalSize": 2097152,
+  "userId": 1,
+  "createdAt": "2024-01-01T00:00:00.000Z",
+  "updatedAt": "2024-01-01T00:00:00.000Z",
+  "_count": {
+    "assets": 5
+  }
+}
+```
+
+**Error Responses:**
+- `404 Not Found` - Asset group not found
+- `403 Forbidden` - You can only access your own asset groups
+
+---
+
+#### Get Assets in Group
+Retrieve all assets within a specific asset group.
+
+**Endpoint:** `GET /asset-groups/:id/assets`
+
+**Authentication:** Required (JWT token)
+
+**Parameters:**
+- `id`: Asset Group ID (integer)
+
+**Success Response (200):**
+Array of assets (same format as Get All Assets response).
+
+**Error Responses:**
+- `404 Not Found` - Asset group not found
+- `403 Forbidden` - You can only access your own asset groups
+
+---
+
+#### Update Asset Group
+Update an existing asset group.
+
+**Endpoint:** `PATCH /asset-groups/:id`
+
+**Authentication:** Required (JWT token)
+
+**Parameters:**
+- `id`: Asset Group ID (integer)
+
+**Request Body (partial update):**
+```json
+{
+  "groupName": "Updated Product Images"
+}
+```
+
+**Success Response (200):**
+Same format as create asset group response with updated values.
+
+**Error Responses:**
+- `404 Not Found` - Asset group not found
+- `403 Forbidden` - You can only access your own asset groups
+- `409 Conflict` - Asset group with this name already exists
+
+---
+
+#### Delete Asset Group
+Delete an asset group (assets within the group will be unassigned, not deleted).
+
+**Endpoint:** `DELETE /asset-groups/:id`
+
+**Authentication:** Required (JWT token)
+
+**Parameters:**
+- `id`: Asset Group ID (integer)
+
+**Success Response (200):**
+```json
+{
+  "message": "Asset group successfully deleted"
+}
+```
+
+**Error Responses:**
+- `404 Not Found` - Asset group not found
+- `403 Forbidden` - You can only access your own asset groups
+
 ## Rate Limiting
 
 Currently, no rate limiting is implemented. For production deployment, consider implementing rate limiting to prevent abuse.
@@ -1153,6 +1527,82 @@ Currently, no rate limiting is implemented. For production deployment, consider 
   email: string;
   iat: number; // Issued at timestamp
   exp: number; // Expiration timestamp
+}
+```
+
+### Asset Object
+```typescript
+{
+  id: number;
+  name: string;
+  fileName: string; // Original filename
+  filePath: string; // Server file path/Cloudinary public_id
+  mimeType: string; // File MIME type
+  uploadDate: string; // ISO 8601 date string
+  size: number; // File size in bytes
+  userId: number;
+  assetGroupId: number | null;
+  createdAt: string; // ISO 8601 date string
+  updatedAt: string; // ISO 8601 date string
+  assetGroup: AssetGroup | null;
+  url: string; // Cloudinary optimized URL
+  thumbnailUrl: string; // Cloudinary thumbnail URL
+  formattedSize: string; // Human-readable file size (e.g., "1.5 MB")
+}
+```
+
+### Asset Group Object
+```typescript
+{
+  id: number;
+  groupName: string;
+  createdDate: string; // ISO 8601 date string
+  totalSize: number; // Total size of all assets in bytes
+  userId: number;
+  createdAt: string; // ISO 8601 date string
+  updatedAt: string; // ISO 8601 date string
+  _count: {
+    assets: number; // Number of assets in the group
+  };
+}
+```
+
+### Product Object
+```typescript
+{
+  id: number;
+  name: string;
+  sku: string;
+  productLink: string | null;
+  imageUrl: string | null;
+  status: "complete" | "incomplete";
+  categoryId: number | null;
+  attributeId: number | null;
+  attributeGroupId: number | null;
+  familyId: number | null;
+  userId: number;
+  createdAt: string; // ISO 8601 date string
+  updatedAt: string; // ISO 8601 date string
+  category: Category | null;
+  attribute: Attribute | null;
+  attributeGroup: AttributeGroup | null;
+  family: Family | null;
+}
+```
+
+### Category Object
+```typescript
+{
+  id: number;
+  name: string;
+  description: string | null;
+  parentCategoryId: number | null;
+  userId: number;
+  createdAt: string; // ISO 8601 date string
+  updatedAt: string; // ISO 8601 date string
+  parentCategory: Category | null;
+  subcategories: Category[];
+  productCount?: number; // Available in some endpoints
 }
 ```
 
@@ -1814,5 +2264,86 @@ curl -X POST http://localhost:3000/families \
 ### Get All Families
 ```bash
 curl -X GET http://localhost:3000/families \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+```
+
+### Upload Asset
+```bash
+curl -X POST http://localhost:3000/assets/upload \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE" \
+  -F "file=@/path/to/your/image.jpg" \
+  -F "name=Product Image 1" \
+  -F "assetGroupId=1"
+```
+
+### Get All Assets
+```bash
+curl -X GET http://localhost:3000/assets \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+```
+
+### Get Assets by Group
+```bash
+curl -X GET "http://localhost:3000/assets?assetGroupId=1" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+```
+
+### Create Asset Group
+```bash
+curl -X POST http://localhost:3000/asset-groups \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE" \
+  -d '{"groupName":"Product Images"}'
+```
+
+### Get All Asset Groups
+```bash
+curl -X GET http://localhost:3000/asset-groups \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+```
+
+### Get Assets in Specific Group
+```bash
+curl -X GET http://localhost:3000/asset-groups/1/assets \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+```
+
+### Create Product
+```bash
+curl -X POST http://localhost:3000/products \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE" \
+  -d '{
+    "name":"iPhone 15 Pro",
+    "sku":"IPHONE15PRO128",
+    "productLink":"https://apple.com/iphone-15-pro",
+    "imageUrl":"https://example.com/images/iphone15pro.jpg",
+    "status":"complete",
+    "categoryId":3,
+    "familyId":1
+  }'
+```
+
+### Get All Products
+```bash
+curl -X GET http://localhost:3000/products \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+```
+
+### Create Category
+```bash
+curl -X POST http://localhost:3000/categories \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE" \
+  -d '{
+    "name":"Electronics",
+    "description":"Electronic devices and accessories",
+    "parentCategoryId":null
+  }'
+```
+
+### Get All Categories
+```bash
+curl -X GET http://localhost:3000/categories \
   -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
 ```

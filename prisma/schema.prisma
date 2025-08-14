@@ -21,6 +21,8 @@ model User {
   families        Family[]         @relation("UserFamilies")
   categories      Category[]       @relation("UserCategories")
   products        Product[]        @relation("UserProducts")
+  assets          Asset[]          @relation("UserAssets")
+  assetGroups     AssetGroup[]     @relation("UserAssetGroups")
 }
 
 model Otp {
@@ -137,5 +139,37 @@ model Product {
   user             User            @relation("UserProducts", fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([sku, userId])
+  @@unique([name, userId])
+}
+
+model AssetGroup {
+  id          Int      @id @default(autoincrement())
+  groupName   String
+  createdDate DateTime @default(now())
+  totalSize   BigInt   @default(0) // Size in bytes
+  userId      Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation("UserAssetGroups", fields: [userId], references: [id], onDelete: Cascade)
+  assets      Asset[]  @relation("AssetGroupAssets")
+
+  @@unique([groupName, userId])
+}
+
+model Asset {
+  id           Int         @id @default(autoincrement())
+  name         String
+  fileName     String      // Original filename
+  filePath     String      // Server file path
+  mimeType     String      // File MIME type
+  uploadDate   DateTime    @default(now())
+  size         BigInt      // File size in bytes
+  userId       Int
+  assetGroupId Int?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  user         User        @relation("UserAssets", fields: [userId], references: [id], onDelete: Cascade)
+  assetGroup   AssetGroup? @relation("AssetGroupAssets", fields: [assetGroupId], references: [id], onDelete: SetNull)
+
   @@unique([name, userId])
 }
