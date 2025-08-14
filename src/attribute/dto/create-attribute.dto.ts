@@ -1,6 +1,7 @@
 import { IsString, IsNotEmpty, IsOptional, IsEnum, Length, Matches } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { AttributeType } from '../../types/attribute-type.enum';
+import { UserAttributeType, userTypeToStorageType } from '../../types/user-attribute-type.enum';
 
 export class CreateAttributeDto {
   @IsString()
@@ -12,10 +13,19 @@ export class CreateAttributeDto {
   })
   name: string;
 
-  @IsEnum(AttributeType, {
-    message: `Type must be one of: ${Object.values(AttributeType).join(', ')}`
+  // Accept both user-friendly types and storage types for backward compatibility
+  @IsEnum([...Object.values(UserAttributeType), ...Object.values(AttributeType)], {
+    message: `Type must be one of: ${Object.values(UserAttributeType).join(', ')} or ${Object.values(AttributeType).join(', ')}`
   })
   @IsNotEmpty({ message: 'Attribute type is required' })
+  @Transform(({ value }) => {
+    // If it's a user-friendly type, convert to storage type
+    if (Object.values(UserAttributeType).includes(value as UserAttributeType)) {
+      return userTypeToStorageType(value as UserAttributeType);
+    }
+    // Otherwise, assume it's already a storage type
+    return value;
+  })
   type: AttributeType;
 
   @IsOptional()

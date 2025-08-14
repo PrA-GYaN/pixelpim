@@ -219,14 +219,16 @@ export class AttributeService {
 
   // Helper methods
   private transformAttributeForResponse(attribute: any): AttributeResponseDto {
-    return {
-      ...attribute,
-      type: attribute.type as AttributeType,
-      defaultValue: this.validator.parseStoredValue(
-        attribute.type as AttributeType,
-        attribute.defaultValue
-      )
-    };
+    // Use the static factory method from the DTO
+    const dto = AttributeResponseDto.fromEntity(attribute);
+    
+    // Parse the stored value using the validator
+    dto.defaultValue = this.validator.parseStoredValue(
+      attribute.type as AttributeType,
+      attribute.defaultValue
+    );
+    
+    return dto;
   }
 
   private async getAttributeType(id: number): Promise<AttributeType> {

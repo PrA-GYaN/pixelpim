@@ -8,17 +8,162 @@
 
 @baseUrl = http://localhost:3000
 @authToken = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsImVtYWlsIjoicHJhZ3lhbjE1MTZAZ21haWwuY29tIiwiaWF0IjoxNzU1MDc2Njk2LCJleHAiOjE3NTUxNjMwOTZ9.pQM2bGyQAKPr-NJhfIu7rDK6ygiXHc_qdcTXbXDDTYI
+
 #################################
-# ATTRIBUTES CRUD OPERATIONS
+# ATTRIBUTE TYPES INFORMATION
 #################################
 
-### Create Attribute
+### Get Available Attribute Types (User-Friendly)
+GET {{baseUrl}}/attributes/types
+Authorization: Bearer {{authToken}}
+
+###
+
+#################################
+# ATTRIBUTES CRUD OPERATIONS (Using User-Friendly Types)
+#################################
+
+### Create Attribute with Short Text (User-Friendly Type)
 POST {{baseUrl}}/attributes
 Content-Type: application/json
 Authorization: Bearer {{authToken}}
 
 {
   "name": "Brand",
+  "type": "Short Text",
+  "defaultValue": "Unknown"
+}
+
+###
+
+### Create Attribute with Paragraph (User-Friendly Type)
+POST {{baseUrl}}/attributes
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "Product Description",
+  "type": "Paragraph",
+  "defaultValue": "No description available"
+}
+
+###
+
+### Create Attribute with HTML (User-Friendly Type)
+POST {{baseUrl}}/attributes
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "Rich Description",
+  "type": "HTML",
+  "defaultValue": "<p>Default HTML content</p>"
+}
+
+###
+
+### Create Attribute with Integer (User-Friendly Type)
+POST {{baseUrl}}/attributes
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "Quantity",
+  "type": "Integer",
+  "defaultValue": 0
+}
+
+###
+
+### Create Attribute with Decimal (User-Friendly Type)
+POST {{baseUrl}}/attributes
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "Price",
+  "type": "Decimal",
+  "defaultValue": 99.99
+}
+
+###
+
+### Create Attribute with Dropdown (User-Friendly Type)
+POST {{baseUrl}}/attributes
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "Size",
+  "type": "Dropdown",
+  "defaultValue": "Medium"
+}
+
+###
+
+### Create Attribute with Multiselect (User-Friendly Type)
+POST {{baseUrl}}/attributes
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "Features",
+  "type": "Multiselect",
+  "defaultValue": ["Waterproof", "Wireless"]
+}
+
+###
+
+### Create Attribute with Date (User-Friendly Type)
+POST {{baseUrl}}/attributes
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "Launch Date",
+  "type": "Date",
+  "defaultValue": "2024-01-01"
+}
+
+###
+
+### Create Attribute with URL (User-Friendly Type)
+POST {{baseUrl}}/attributes
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "Product Website",
+  "type": "URL",
+  "defaultValue": "https://example.com"
+}
+
+###
+
+### Create Attribute with Boolean (User-Friendly Type)
+POST {{baseUrl}}/attributes
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "Is Featured",
+  "type": "Boolean",
+  "defaultValue": false
+}
+
+###
+
+#################################
+# BACKWARD COMPATIBILITY (Using Storage Types)
+#################################
+
+### Create Attribute with Storage Type (Backward Compatible)
+POST {{baseUrl}}/attributes
+Content-Type: application/json
+Authorization: Bearer {{authToken}}
+
+{
+  "name": "Legacy Brand",
   "type": "STRING",
   "defaultValue": "Unknown"
 }

@@ -17,6 +17,7 @@ import { CreateAttributeDto } from './dto/create-attribute.dto';
 import { UpdateAttributeDto } from './dto/update-attribute.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { User } from '../auth/decorators/user.decorator';
+import { UserAttributeType, getAvailableUserTypes, USER_TO_STORAGE_TYPE_MAP } from '../types/user-attribute-type.enum';
 
 @Controller('attributes')
 @UseGuards(JwtAuthGuard)
@@ -24,6 +25,15 @@ export class AttributeController {
   private readonly logger = new Logger(AttributeController.name);
 
   constructor(private readonly attributeService: AttributeService) {}
+
+  @Get('types')
+  getAvailableTypes() {
+    return {
+      userFriendlyTypes: getAvailableUserTypes(),
+      typeMapping: USER_TO_STORAGE_TYPE_MAP,
+      description: 'Available attribute types for creating attributes. Use the user-friendly types in your frontend.'
+    };
+  }
 
   @Post()
   async create(@Body() createAttributeDto: CreateAttributeDto, @User() user: any) {
