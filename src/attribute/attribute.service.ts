@@ -4,6 +4,7 @@ import { CreateAttributeDto } from './dto/create-attribute.dto';
 import { UpdateAttributeDto } from './dto/update-attribute.dto';
 import { AttributeResponseDto } from './dto/attribute-response.dto';
 import { AttributeValueValidator } from './validators/attribute-value.validator';
+import { PaginatedResponse, PaginationUtils } from '../common';
 import type { Attribute } from '../../generated/prisma';
 import { AttributeType } from '../types/attribute-type.enum';
 
@@ -47,43 +48,34 @@ export class AttributeService {
     }
   }
 
-  async findAll(userId: number, includeGroups = false): Promise<AttributeResponseDto[]> {
+  async findAll(userId: number, page: number = 1, limit: number = 10, includeGroups = false): Promise<PaginatedResponse<AttributeResponseDto>> {
     try {
-      const cacheKey = `attributes:user:${userId}:groups:${includeGroups}`;
-      
-      // Try to get from cache first
-      if (this.cacheManager) {
-        const cached = await this.cacheManager.get(cacheKey) as AttributeResponseDto[];
-        if (cached) {
-          this.logger.log(`Returning cached attributes for user: ${userId}`);
-          return cached;
-        }
-      }
-
       this.logger.log(`Fetching attributes for user: ${userId}`);
       
-      const attributes = await this.prisma.attribute.findMany({
-        where: { userId },
-        include: includeGroups ? {
-          attributeGroups: {
-            include: {
-              attributeGroup: {
-                select: { id: true, name: true, description: true }
+      const whereCondition = { userId };
+      const paginationOptions = PaginationUtils.createPrismaOptions(page, limit);
+
+      const [attributes, total] = await Promise.all([
+        this.prisma.attribute.findMany({
+          where: whereCondition,
+          ...paginationOptions,
+          include: includeGroups ? {
+            attributeGroups: {
+              include: {
+                attributeGroup: {
+                  select: { id: true, name: true, description: true }
+                }
               }
             }
-          }
-        } : undefined,
-        orderBy: { createdAt: 'desc' },
-      });
+          } : undefined,
+          orderBy: { createdAt: 'desc' },
+        }),
+        this.prisma.attribute.count({ where: whereCondition }),
+      ]);
       
       const transformedAttributes = attributes.map(attr => this.transformAttributeForResponse(attr));
       
-      // Cache the result
-      if (this.cacheManager) {
-        await this.cacheManager.set(cacheKey, transformedAttributes, 300); // 5 minutes
-      }
-      
-      return transformedAttributes;
+      return PaginationUtils.createPaginatedResponse(transformedAttributes, total, page, limit);
     } catch (error) {
       this.logger.error(`Failed to fetch attributes for user ${userId}: ${error.message}`, error.stack);
       throw error;

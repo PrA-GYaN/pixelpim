@@ -17,6 +17,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { AssetService } from './asset.service';
 import { CreateAssetDto, UpdateAssetDto } from './dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { PaginatedResponse } from '../common';
 
 @Controller('assets')
 @UseGuards(JwtAuthGuard)
@@ -44,10 +45,15 @@ export class AssetController {
   async findAll(
     @Req() req: any,
     @Query('assetGroupId') assetGroupId?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
     const userId = req.user.id;
     const groupId = assetGroupId ? parseInt(assetGroupId, 10) : undefined;
-    return this.assetService.findAll(userId, groupId);
+    const pageNum = page ? parseInt(page) : 1;
+    const limitNum = limit ? parseInt(limit) : 10;
+    
+    return this.assetService.findAll(userId, groupId, pageNum, limitNum);
   }
 
   @Get(':id')

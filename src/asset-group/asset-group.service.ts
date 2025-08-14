@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateAssetGroupDto, UpdateAssetGroupDto } from './dto';
+import { PaginatedResponse, PaginationUtils } from '../common';
 
 @Injectable()
 export class AssetGroupService {
@@ -40,26 +41,35 @@ export class AssetGroupService {
     };
   }
 
-  async findAll(userId: number) {
-    const assetGroups = await this.prisma.assetGroup.findMany({
-      where: { userId },
-      include: {
-        _count: {
-          select: {
-            assets: true,
+  async findAll(userId: number, page: number = 1, limit: number = 10) {
+    const whereCondition = { userId };
+    const paginationOptions = PaginationUtils.createPrismaOptions(page, limit);
+
+    const [assetGroups, total] = await Promise.all([
+      this.prisma.assetGroup.findMany({
+        where: whereCondition,
+        ...paginationOptions,
+        include: {
+          _count: {
+            select: {
+              assets: true,
+            },
           },
         },
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-    });
+        orderBy: {
+          createdAt: 'desc',
+        },
+      }),
+      this.prisma.assetGroup.count({ where: whereCondition }),
+    ]);
 
     // Convert BigInt to Number for JSON serialization
-    return assetGroups.map(group => ({
+    const transformedAssetGroups = assetGroups.map(group => ({
       ...group,
       totalSize: Number(group.totalSize),
     }));
+
+    return PaginationUtils.createPaginatedResponse(transformedAssetGroups, total, page, limit);
   }
 
   async findOne(id: number, userId: number) {
@@ -85,24 +95,34 @@ export class AssetGroupService {
     };
   }
 
-  async getAssetsInGroup(id: number, userId: number) {
+  async getAssetsInGroup(id: number, userId: number, page: number = 1, limit: number = 10) {
     const assetGroup = await this.findOne(id, userId);
 
-    const assets = await this.prisma.asset.findMany({
-      where: {
-        assetGroupId: id,
-        userId,
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-    });
+    const whereCondition = {
+      assetGroupId: id,
+      userId,
+    };
+
+    const paginationOptions = PaginationUtils.createPrismaOptions(page, limit);
+
+    const [assets, total] = await Promise.all([
+      this.prisma.asset.findMany({
+        where: whereCondition,
+        ...paginationOptions,
+        orderBy: {
+          createdAt: 'desc',
+        },
+      }),
+      this.prisma.asset.count({ where: whereCondition }),
+    ]);
 
     // Convert BigInt to Number for JSON serialization
-    return assets.map(asset => ({
+    const transformedAssets = assets.map(asset => ({
       ...asset,
       size: Number(asset.size),
     }));
+
+    return PaginationUtils.createPaginatedResponse(transformedAssets, total, page, limit);
   }
 
   async update(id: number, updateAssetGroupDto: UpdateAssetGroupDto, userId: number) {

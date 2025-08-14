@@ -5,6 +5,7 @@ import { UpdateFamilyDto } from './dto/update-family.dto';
 import { FamilyResponseDto } from './dto/family-response.dto';
 import { AttributeValueValidator } from '../attribute/validators/attribute-value.validator';
 import { AttributeType } from '../types/attribute-type.enum';
+import { PaginatedResponse, PaginationUtils } from '../common';
 import type { Family } from '../../generated/prisma';
 
 @Injectable()
@@ -105,27 +106,34 @@ export class FamilyService {
     }
   }
 
-  async findAll(userId: number): Promise<FamilyResponseDto[]> {
-    const families = await this.prisma.family.findMany({
-      where: { userId },
-      include: {
-        familyAttributes: {
-          include: {
-            attribute: true,
-          },
-        },
-        _count: {
-          select: {
-            products: true,
-          },
-        },
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-    });
+  async findAll(userId: number, page: number = 1, limit: number = 10): Promise<PaginatedResponse<FamilyResponseDto>> {
+    const whereCondition = { userId };
+    const paginationOptions = PaginationUtils.createPrismaOptions(page, limit);
 
-    return families.map(family => ({
+    const [families, total] = await Promise.all([
+      this.prisma.family.findMany({
+        where: whereCondition,
+        ...paginationOptions,
+        include: {
+          familyAttributes: {
+            include: {
+              attribute: true,
+            },
+          },
+          _count: {
+            select: {
+              products: true,
+            },
+          },
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+      }),
+      this.prisma.family.count({ where: whereCondition }),
+    ]);
+
+    const familyResponseDtos = families.map(family => ({
       id: family.id,
       name: family.name,
       userId: family.userId,
@@ -145,6 +153,8 @@ export class FamilyService {
         },
       })),
     }));
+
+    return PaginationUtils.createPaginatedResponse(familyResponseDtos, total, page, limit);
   }
 
   async findOne(id: number, userId: number): Promise<FamilyResponseDto> {

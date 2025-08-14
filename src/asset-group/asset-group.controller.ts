@@ -9,10 +9,12 @@ import {
   UseGuards,
   Req,
   ParseIntPipe,
+  Query,
 } from '@nestjs/common';
 import { AssetGroupService } from './asset-group.service';
 import { CreateAssetGroupDto, UpdateAssetGroupDto } from './dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { PaginatedResponse } from '../common';
 
 @Controller('asset-groups')
 @UseGuards(JwtAuthGuard)
@@ -26,9 +28,16 @@ export class AssetGroupController {
   }
 
   @Get()
-  async findAll(@Req() req: any) {
+  async findAll(
+    @Req() req: any,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
     const userId = req.user.id;
-    return this.assetGroupService.findAll(userId);
+    const pageNum = page ? parseInt(page) : 1;
+    const limitNum = limit ? parseInt(limit) : 10;
+    
+    return this.assetGroupService.findAll(userId, pageNum, limitNum);
   }
 
   @Get(':id')
@@ -38,9 +47,17 @@ export class AssetGroupController {
   }
 
   @Get(':id/assets')
-  async getAssetsInGroup(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
+  async getAssetsInGroup(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() req: any,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
     const userId = req.user.id;
-    return this.assetGroupService.getAssetsInGroup(id, userId);
+    const pageNum = page ? parseInt(page) : 1;
+    const limitNum = limit ? parseInt(limit) : 10;
+    
+    return this.assetGroupService.getAssetsInGroup(id, userId, pageNum, limitNum);
   }
 
   @Patch(':id')

@@ -15,6 +15,7 @@ import { CreateAttributeGroupDto } from './dto/create-attribute-group.dto';
 import { UpdateAttributeGroupDto } from './dto/update-attribute-group.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { User } from '../auth/decorators/user.decorator';
+import { PaginatedResponse } from '../common';
 
 @Controller('attribute-groups')
 @UseGuards(JwtAuthGuard)
@@ -27,8 +28,15 @@ export class AttributeGroupController {
   }
 
   @Get()
-  findAll(@User() user: any) {
-    return this.attributeGroupService.findAll(user.id);
+  findAll(
+    @User() user: any,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const pageNum = page ? parseInt(page) : 1;
+    const limitNum = limit ? parseInt(limit) : 10;
+    
+    return this.attributeGroupService.findAll(user.id, pageNum, limitNum);
   }
 
   @Get(':id')

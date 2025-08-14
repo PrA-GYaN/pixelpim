@@ -5,10 +5,11 @@ This document provides detailed information about all available API endpoints in
 ## Table of Contents
 
 1. [Base URL](#base-url)
-2. [File Upload & Cloud Storage](#file-upload--cloud-storage)
-3. [Authentication](#authentication)
-4. [Error Responses](#error-responses)
-5. [Endpoints](#endpoints)
+2. [Pagination](#pagination)
+3. [File Upload & Cloud Storage](#file-upload--cloud-storage)
+4. [Authentication](#authentication)
+5. [Error Responses](#error-responses)
+6. [Endpoints](#endpoints)
    - [Authentication Module](#authentication-module)
    - [Attribute Module](#attribute-module)
    - [Attribute Group Module](#attribute-group-module)
@@ -17,14 +18,46 @@ This document provides detailed information about all available API endpoints in
    - [Asset Group Module](#asset-group-module)
    - [Category Module](#category-module)
    - [Product Module](#product-module)
-6. [Rate Limiting](#rate-limiting)
-7. [Data Types](#data-types)
-8. [Testing with cURL](#testing-with-curl)
+7. [Rate Limiting](#rate-limiting)
+8. [Data Types](#data-types)
+9. [Testing with cURL](#testing-with-curl)
 
 ## Base URL
 ```
 http://localhost:3000
 ```
+
+## Pagination
+
+All list endpoints support pagination with the following query parameters:
+
+### Parameters
+- `page`: Page number (default: 1, minimum: 1)
+- `limit`: Number of items per page (default: 10, minimum: 1, maximum: 100)
+
+### Response Format
+```json
+{
+  "data": [...], // Array of items
+  "pagination": {
+    "page": 1,
+    "limit": 10,
+    "total": 100,
+    "totalPages": 10,
+    "hasNext": true,
+    "hasPrev": false
+  }
+}
+```
+
+### Examples
+```
+GET /products?page=1&limit=10
+GET /categories?page=2&limit=5
+GET /assets?page=1&limit=20&assetGroupId=1
+```
+
+For detailed pagination examples, see [PAGINATION_GUIDE.md](./PAGINATION_GUIDE.md).
 
 ## File Upload & Cloud Storage
 

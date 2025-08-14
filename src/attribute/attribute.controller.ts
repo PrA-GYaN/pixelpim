@@ -11,6 +11,7 @@ import {
   BadRequestException,
   InternalServerErrorException,
   Logger,
+  Query,
 } from '@nestjs/common';
 import { AttributeService } from './attribute.service';
 import { CreateAttributeDto } from './dto/create-attribute.dto';
@@ -18,6 +19,7 @@ import { UpdateAttributeDto } from './dto/update-attribute.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { User } from '../auth/decorators/user.decorator';
 import { UserAttributeType, getAvailableUserTypes, USER_TO_STORAGE_TYPE_MAP } from '../types/user-attribute-type.enum';
+import { PaginatedResponse } from '../common';
 
 @Controller('attributes')
 @UseGuards(JwtAuthGuard)
@@ -99,9 +101,16 @@ export class AttributeController {
   }
 
   @Get()
-  async findAll(@User() user: any) {
+  async findAll(
+    @User() user: any,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
     try {
-      return await this.attributeService.findAll(user.id);
+      const pageNum = page ? parseInt(page) : 1;
+      const limitNum = limit ? parseInt(limit) : 10;
+      
+      return await this.attributeService.findAll(user.id, pageNum, limitNum);
     } catch (error) {
       return this.handleError(error, 'fetching');
     }

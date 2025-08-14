@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ProductResponseDto } from './dto/product-response.dto';
+import { PaginatedResponse, PaginationUtils } from '../common';
 import type { Product } from '../../generated/prisma';
 
 @Injectable()
@@ -93,8 +94,10 @@ export class ProductService {
     categoryId?: number, 
     attributeId?: number, 
     attributeGroupId?: number, 
-    familyId?: number
-  ): Promise<ProductResponseDto[]> {
+    familyId?: number,
+    page: number = 1,
+    limit: number = 10
+  ): Promise<PaginatedResponse<ProductResponseDto>> {
     try {
       this.logger.log(`Fetching products for user: ${userId}`);
 
@@ -120,42 +123,50 @@ export class ProductService {
         whereCondition.familyId = familyId;
       }
 
-      const products = await this.prisma.product.findMany({
-        where: whereCondition,
-        include: {
-          category: {
-            select: {
-              id: true,
-              name: true,
-              description: true,
-            },
-          },
-          attribute: {
-            select: {
-              id: true,
-              name: true,
-              type: true,
-              defaultValue: true,
-            },
-          },
-          attributeGroup: {
-            select: {
-              id: true,
-              name: true,
-              description: true,
-            },
-          },
-          family: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-        },
-        orderBy: { createdAt: 'desc' },
-      });
+      const paginationOptions = PaginationUtils.createPrismaOptions(page, limit);
 
-      return products.map(product => this.transformProductForResponse(product));
+      const [products, total] = await Promise.all([
+        this.prisma.product.findMany({
+          where: whereCondition,
+          ...paginationOptions,
+          include: {
+            category: {
+              select: {
+                id: true,
+                name: true,
+                description: true,
+              },
+            },
+            attribute: {
+              select: {
+                id: true,
+                name: true,
+                type: true,
+                defaultValue: true,
+              },
+            },
+            attributeGroup: {
+              select: {
+                id: true,
+                name: true,
+                description: true,
+              },
+            },
+            family: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+        }),
+        this.prisma.product.count({ where: whereCondition }),
+      ]);
+
+      const productResponseDtos = products.map(product => this.transformProductForResponse(product));
+      
+      return PaginationUtils.createPaginatedResponse(productResponseDtos, total, page, limit);
     } catch (error) {
       this.logger.error(`Failed to fetch products for user ${userId}: ${error.message}`, error.stack);
       throw error;
@@ -408,52 +419,62 @@ export class ProductService {
     }
   }
 
-  async getProductsByCategory(categoryId: number, userId: number): Promise<ProductResponseDto[]> {
+  async getProductsByCategory(categoryId: number, userId: number, page: number = 1, limit: number = 10): Promise<PaginatedResponse<ProductResponseDto>> {
     try {
       // Verify category ownership
       await this.validateCategory(categoryId, userId);
 
       this.logger.log(`Fetching products for category: ${categoryId}, user: ${userId}`);
 
-      const products = await this.prisma.product.findMany({
-        where: {
-          categoryId,
-          userId,
-        },
-        include: {
-          category: {
-            select: {
-              id: true,
-              name: true,
-              description: true,
-            },
-          },
-          attribute: {
-            select: {
-              id: true,
-              name: true,
-              type: true,
-              defaultValue: true,
-            },
-          },
-          attributeGroup: {
-            select: {
-              id: true,
-              name: true,
-              description: true,
-            },
-          },
-          family: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-        },
-        orderBy: { createdAt: 'desc' },
-      });
+      const whereCondition = {
+        categoryId,
+        userId,
+      };
 
-      return products.map(product => this.transformProductForResponse(product));
+      const paginationOptions = PaginationUtils.createPrismaOptions(page, limit);
+
+      const [products, total] = await Promise.all([
+        this.prisma.product.findMany({
+          where: whereCondition,
+          ...paginationOptions,
+          include: {
+            category: {
+              select: {
+                id: true,
+                name: true,
+                description: true,
+              },
+            },
+            attribute: {
+              select: {
+                id: true,
+                name: true,
+                type: true,
+                defaultValue: true,
+              },
+            },
+            attributeGroup: {
+              select: {
+                id: true,
+                name: true,
+                description: true,
+              },
+            },
+            family: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+        }),
+        this.prisma.product.count({ where: whereCondition }),
+      ]);
+
+      const productResponseDtos = products.map(product => this.transformProductForResponse(product));
+      
+      return PaginationUtils.createPaginatedResponse(productResponseDtos, total, page, limit);
     } catch (error) {
       if (error instanceof NotFoundException || error instanceof BadRequestException) {
         throw error;
@@ -464,52 +485,62 @@ export class ProductService {
     }
   }
 
-  async getProductsByAttribute(attributeId: number, userId: number): Promise<ProductResponseDto[]> {
+  async getProductsByAttribute(attributeId: number, userId: number, page: number = 1, limit: number = 10): Promise<PaginatedResponse<ProductResponseDto>> {
     try {
       // Verify attribute ownership
       await this.validateAttribute(attributeId, userId);
 
       this.logger.log(`Fetching products for attribute: ${attributeId}, user: ${userId}`);
 
-      const products = await this.prisma.product.findMany({
-        where: {
-          attributeId,
-          userId,
-        },
-        include: {
-          category: {
-            select: {
-              id: true,
-              name: true,
-              description: true,
-            },
-          },
-          attribute: {
-            select: {
-              id: true,
-              name: true,
-              type: true,
-              defaultValue: true,
-            },
-          },
-          attributeGroup: {
-            select: {
-              id: true,
-              name: true,
-              description: true,
-            },
-          },
-          family: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-        },
-        orderBy: { createdAt: 'desc' },
-      });
+      const whereCondition = {
+        attributeId,
+        userId,
+      };
 
-      return products.map(product => this.transformProductForResponse(product));
+      const paginationOptions = PaginationUtils.createPrismaOptions(page, limit);
+
+      const [products, total] = await Promise.all([
+        this.prisma.product.findMany({
+          where: whereCondition,
+          ...paginationOptions,
+          include: {
+            category: {
+              select: {
+                id: true,
+                name: true,
+                description: true,
+              },
+            },
+            attribute: {
+              select: {
+                id: true,
+                name: true,
+                type: true,
+                defaultValue: true,
+              },
+            },
+            attributeGroup: {
+              select: {
+                id: true,
+                name: true,
+                description: true,
+              },
+            },
+            family: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+        }),
+        this.prisma.product.count({ where: whereCondition }),
+      ]);
+
+      const productResponseDtos = products.map(product => this.transformProductForResponse(product));
+      
+      return PaginationUtils.createPaginatedResponse(productResponseDtos, total, page, limit);
     } catch (error) {
       if (error instanceof NotFoundException || error instanceof BadRequestException) {
         throw error;
@@ -520,52 +551,62 @@ export class ProductService {
     }
   }
 
-  async getProductsByAttributeGroup(attributeGroupId: number, userId: number): Promise<ProductResponseDto[]> {
+  async getProductsByAttributeGroup(attributeGroupId: number, userId: number, page: number = 1, limit: number = 10): Promise<PaginatedResponse<ProductResponseDto>> {
     try {
       // Verify attribute group ownership
       await this.validateAttributeGroup(attributeGroupId, userId);
 
       this.logger.log(`Fetching products for attribute group: ${attributeGroupId}, user: ${userId}`);
 
-      const products = await this.prisma.product.findMany({
-        where: {
-          attributeGroupId,
-          userId,
-        },
-        include: {
-          category: {
-            select: {
-              id: true,
-              name: true,
-              description: true,
-            },
-          },
-          attribute: {
-            select: {
-              id: true,
-              name: true,
-              type: true,
-              defaultValue: true,
-            },
-          },
-          attributeGroup: {
-            select: {
-              id: true,
-              name: true,
-              description: true,
-            },
-          },
-          family: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-        },
-        orderBy: { createdAt: 'desc' },
-      });
+      const whereCondition = {
+        attributeGroupId,
+        userId,
+      };
 
-      return products.map(product => this.transformProductForResponse(product));
+      const paginationOptions = PaginationUtils.createPrismaOptions(page, limit);
+
+      const [products, total] = await Promise.all([
+        this.prisma.product.findMany({
+          where: whereCondition,
+          ...paginationOptions,
+          include: {
+            category: {
+              select: {
+                id: true,
+                name: true,
+                description: true,
+              },
+            },
+            attribute: {
+              select: {
+                id: true,
+                name: true,
+                type: true,
+                defaultValue: true,
+              },
+            },
+            attributeGroup: {
+              select: {
+                id: true,
+                name: true,
+                description: true,
+              },
+            },
+            family: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+        }),
+        this.prisma.product.count({ where: whereCondition }),
+      ]);
+
+      const productResponseDtos = products.map(product => this.transformProductForResponse(product));
+      
+      return PaginationUtils.createPaginatedResponse(productResponseDtos, total, page, limit);
     } catch (error) {
       if (error instanceof NotFoundException || error instanceof BadRequestException) {
         throw error;
@@ -576,52 +617,62 @@ export class ProductService {
     }
   }
 
-  async getProductsByFamily(familyId: number, userId: number): Promise<ProductResponseDto[]> {
+  async getProductsByFamily(familyId: number, userId: number, page: number = 1, limit: number = 10): Promise<PaginatedResponse<ProductResponseDto>> {
     try {
       // Verify family ownership
       await this.validateFamily(familyId, userId);
 
       this.logger.log(`Fetching products for family: ${familyId}, user: ${userId}`);
 
-      const products = await this.prisma.product.findMany({
-        where: {
-          familyId,
-          userId,
-        },
-        include: {
-          category: {
-            select: {
-              id: true,
-              name: true,
-              description: true,
-            },
-          },
-          attribute: {
-            select: {
-              id: true,
-              name: true,
-              type: true,
-              defaultValue: true,
-            },
-          },
-          attributeGroup: {
-            select: {
-              id: true,
-              name: true,
-              description: true,
-            },
-          },
-          family: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-        },
-        orderBy: { createdAt: 'desc' },
-      });
+      const whereCondition = {
+        familyId,
+        userId,
+      };
 
-      return products.map(product => this.transformProductForResponse(product));
+      const paginationOptions = PaginationUtils.createPrismaOptions(page, limit);
+
+      const [products, total] = await Promise.all([
+        this.prisma.product.findMany({
+          where: whereCondition,
+          ...paginationOptions,
+          include: {
+            category: {
+              select: {
+                id: true,
+                name: true,
+                description: true,
+              },
+            },
+            attribute: {
+              select: {
+                id: true,
+                name: true,
+                type: true,
+                defaultValue: true,
+              },
+            },
+            attributeGroup: {
+              select: {
+                id: true,
+                name: true,
+                description: true,
+              },
+            },
+            family: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+        }),
+        this.prisma.product.count({ where: whereCondition }),
+      ]);
+
+      const productResponseDtos = products.map(product => this.transformProductForResponse(product));
+      
+      return PaginationUtils.createPaginatedResponse(productResponseDtos, total, page, limit);
     } catch (error) {
       if (error instanceof NotFoundException || error instanceof BadRequestException) {
         throw error;

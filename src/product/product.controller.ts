@@ -19,6 +19,7 @@ import { UpdateProductDto } from './dto/update-product.dto';
 import { ProductResponseDto } from './dto/product-response.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { User as GetUser } from '../auth/decorators/user.decorator';
+import { PaginatedResponse } from '../common';
 import type { User } from '../../generated/prisma';
 
 @Controller('products')
@@ -47,13 +48,17 @@ export class ProductController {
     @Query('attributeId') attributeId?: string,
     @Query('attributeGroupId') attributeGroupId?: string,
     @Query('familyId') familyId?: string,
-  ): Promise<ProductResponseDto[]> {
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ): Promise<PaginatedResponse<ProductResponseDto>> {
     this.logger.log(`User ${user.id} fetching products`);
     
     const categoryIdInt = categoryId ? parseInt(categoryId) : undefined;
     const attributeIdInt = attributeId ? parseInt(attributeId) : undefined;
     const attributeGroupIdInt = attributeGroupId ? parseInt(attributeGroupId) : undefined;
     const familyIdInt = familyId ? parseInt(familyId) : undefined;
+    const pageNum = page ? parseInt(page) : 1;
+    const limitNum = limit ? parseInt(limit) : 10;
     
     return this.productService.findAll(
       user.id, 
@@ -61,7 +66,9 @@ export class ProductController {
       categoryIdInt, 
       attributeIdInt, 
       attributeGroupIdInt, 
-      familyIdInt
+      familyIdInt,
+      pageNum,
+      limitNum
     );
   }
 
@@ -79,40 +86,60 @@ export class ProductController {
   async getProductsByCategory(
     @Param('categoryId', ParseIntPipe) categoryId: number,
     @GetUser() user: User,
-  ): Promise<ProductResponseDto[]> {
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ): Promise<PaginatedResponse<ProductResponseDto>> {
     this.logger.log(`User ${user.id} fetching products for category: ${categoryId}`);
     
-    return this.productService.getProductsByCategory(categoryId, user.id);
+    const pageNum = page ? parseInt(page) : 1;
+    const limitNum = limit ? parseInt(limit) : 10;
+    
+    return this.productService.getProductsByCategory(categoryId, user.id, pageNum, limitNum);
   }
 
   @Get('attribute/:attributeId')
   async getProductsByAttribute(
     @Param('attributeId', ParseIntPipe) attributeId: number,
     @GetUser() user: User,
-  ): Promise<ProductResponseDto[]> {
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ): Promise<PaginatedResponse<ProductResponseDto>> {
     this.logger.log(`User ${user.id} fetching products for attribute: ${attributeId}`);
     
-    return this.productService.getProductsByAttribute(attributeId, user.id);
+    const pageNum = page ? parseInt(page) : 1;
+    const limitNum = limit ? parseInt(limit) : 10;
+    
+    return this.productService.getProductsByAttribute(attributeId, user.id, pageNum, limitNum);
   }
 
   @Get('attribute-group/:attributeGroupId')
   async getProductsByAttributeGroup(
     @Param('attributeGroupId', ParseIntPipe) attributeGroupId: number,
     @GetUser() user: User,
-  ): Promise<ProductResponseDto[]> {
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ): Promise<PaginatedResponse<ProductResponseDto>> {
     this.logger.log(`User ${user.id} fetching products for attribute group: ${attributeGroupId}`);
     
-    return this.productService.getProductsByAttributeGroup(attributeGroupId, user.id);
+    const pageNum = page ? parseInt(page) : 1;
+    const limitNum = limit ? parseInt(limit) : 10;
+    
+    return this.productService.getProductsByAttributeGroup(attributeGroupId, user.id, pageNum, limitNum);
   }
 
   @Get('family/:familyId')
   async getProductsByFamily(
     @Param('familyId', ParseIntPipe) familyId: number,
     @GetUser() user: User,
-  ): Promise<ProductResponseDto[]> {
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ): Promise<PaginatedResponse<ProductResponseDto>> {
     this.logger.log(`User ${user.id} fetching products for family: ${familyId}`);
     
-    return this.productService.getProductsByFamily(familyId, user.id);
+    const pageNum = page ? parseInt(page) : 1;
+    const limitNum = limit ? parseInt(limit) : 10;
+    
+    return this.productService.getProductsByFamily(familyId, user.id, pageNum, limitNum);
   }
 
   @Get(':id')

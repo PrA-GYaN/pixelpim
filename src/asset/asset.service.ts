@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateAssetDto, UpdateAssetDto } from './dto';
 import { CloudinaryUtil, CloudinaryUploadResult } from '../utils/cloudinary.util';
+import { PaginatedResponse, PaginationUtils } from '../common';
 
 @Injectable()
 export class AssetService {
@@ -71,31 +72,39 @@ export class AssetService {
     };
   }
 
-  async findAll(userId: number, assetGroupId?: number) {
-    const where: any = { userId };
+  async findAll(userId: number, assetGroupId?: number, page: number = 1, limit: number = 10) {
+    const whereCondition: any = { userId };
     
     if (assetGroupId !== undefined) {
-      where.assetGroupId = assetGroupId;
+      whereCondition.assetGroupId = assetGroupId;
     }
 
-    const assets = await this.prisma.asset.findMany({
-      where,
-      include: {
-        assetGroup: true,
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-    });
+    const paginationOptions = PaginationUtils.createPrismaOptions(page, limit);
+
+    const [assets, total] = await Promise.all([
+      this.prisma.asset.findMany({
+        where: whereCondition,
+        ...paginationOptions,
+        include: {
+          assetGroup: true,
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+      }),
+      this.prisma.asset.count({ where: whereCondition }),
+    ]);
 
     // Add Cloudinary URLs to each asset
-    return assets.map(asset => ({
+    const transformedAssets = assets.map(asset => ({
       ...asset,
       size: Number(asset.size), // Convert BigInt to Number for JSON serialization
       url: CloudinaryUtil.getOptimizedUrl(asset.filePath),
       thumbnailUrl: CloudinaryUtil.getThumbnailUrl(asset.filePath),
       formattedSize: CloudinaryUtil.formatFileSize(Number(asset.size)),
     }));
+
+    return PaginationUtils.createPaginatedResponse(transformedAssets, total, page, limit);
   }
 
   async findOne(id: number, userId: number) {

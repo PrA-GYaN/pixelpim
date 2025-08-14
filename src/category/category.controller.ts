@@ -19,6 +19,7 @@ import { UpdateCategoryDto } from './dto/update-category.dto';
 import { CategoryResponseDto, CategoryTreeResponseDto } from './dto/category-response.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { User as GetUser } from '../auth/decorators/user.decorator';
+import { PaginatedResponse } from '../common';
 import type { User } from '../../generated/prisma';
 
 @Controller('categories')
@@ -43,16 +44,22 @@ export class CategoryController {
   async findAll(
     @GetUser() user: User,
     @Query('tree') tree?: string,
-  ): Promise<any[] | CategoryTreeResponseDto[]> {
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ): Promise<PaginatedResponse<CategoryResponseDto> | CategoryTreeResponseDto[]> {
     this.logger.log(`User ${user.id} fetching categories${tree ? ' as tree' : ''}`);
     
     const includeTree = tree === 'true';
     
     if (includeTree) {
+      // Tree structure doesn't need pagination as it's a hierarchical view
       return this.categoryService.getCategoryTree(user.id);
     }
     
-    return this.categoryService.findAll(user.id);
+    const pageNum = page ? parseInt(page) : 1;
+    const limitNum = limit ? parseInt(limit) : 10;
+    
+    return this.categoryService.findAll(user.id, pageNum, limitNum);
   }
 
   @Get('tree')
@@ -76,10 +83,15 @@ export class CategoryController {
   async getSubcategories(
     @Param('id', ParseIntPipe) id: number,
     @GetUser() user: User,
-  ): Promise<CategoryResponseDto[]> {
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ): Promise<PaginatedResponse<CategoryResponseDto>> {
     this.logger.log(`User ${user.id} fetching subcategories for category: ${id}`);
     
-    return this.categoryService.getSubcategories(id, user.id);
+    const pageNum = page ? parseInt(page) : 1;
+    const limitNum = limit ? parseInt(limit) : 10;
+    
+    return this.categoryService.getSubcategories(id, user.id, pageNum, limitNum);
   }
 
   @Patch(':id')

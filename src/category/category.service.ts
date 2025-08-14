@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import { CategoryResponseDto, CategoryTreeResponseDto } from './dto/category-response.dto';
+import { PaginatedResponse, PaginationUtils } from '../common';
 import type { Category } from '../../generated/prisma';
 
 @Injectable()
@@ -43,63 +44,72 @@ export class CategoryService {
     }
   }
 
-  async findAll(userId: number, includeTree = false): Promise<any[]> {
+  async findAll(userId: number, page: number = 1, limit: number = 10): Promise<PaginatedResponse<CategoryResponseDto>> {
     try {
       this.logger.log(`Fetching categories for user: ${userId}`);
 
-      // Fetch all categories with deep nesting for hierarchical structure
-      const categories = await this.prisma.category.findMany({
-        where: { 
-          userId,
-          parentCategoryId: null // Only fetch root categories
-        },
-        include: {
-          subcategories: {
-            include: {
-              subcategories: {
-                include: {
-                  subcategories: {
-                    include: {
-                      subcategories: {
-                        include: {
-                          _count: {
-                            select: {
-                              products: true,
+      const whereCondition = { 
+        userId,
+        parentCategoryId: null // Only fetch root categories
+      };
+
+      const paginationOptions = PaginationUtils.createPrismaOptions(page, limit);
+
+      const [categories, total] = await Promise.all([
+        this.prisma.category.findMany({
+          where: whereCondition,
+          ...paginationOptions,
+          include: {
+            subcategories: {
+              include: {
+                subcategories: {
+                  include: {
+                    subcategories: {
+                      include: {
+                        subcategories: {
+                          include: {
+                            _count: {
+                              select: {
+                                products: true,
+                              },
                             },
                           },
                         },
-                      },
-                      _count: {
-                        select: {
-                          products: true,
+                        _count: {
+                          select: {
+                            products: true,
+                          },
                         },
                       },
-                    }
-                  },
-                  _count: {
-                    select: {
-                      products: true,
                     },
-                  },
-                }
-              },
-              _count: {
-                select: {
-                  products: true,
+                    _count: {
+                      select: {
+                        products: true,
+                      },
+                    },
+                  }
                 },
+                _count: {
+                  select: {
+                    products: true,
+                  },
+                },
+              }
+            },
+            _count: {
+              select: {
+                products: true,
               },
-            }
-          },
-          _count: {
-            select: {
-              products: true,
             },
           },
-        },
-        orderBy: { name: 'asc' },
-      });
+          orderBy: { name: 'asc' },
+        }),
+        this.prisma.category.count({ where: whereCondition }),
+      ]);
 
-      return categories.map(category => this.transformCategoryForHierarchicalResponseWithCount(category));
+      const categoryResponseDtos = categories.map(category => this.transformCategoryForHierarchicalResponseWithCount(category));
+      
+      return PaginationUtils.createPaginatedResponse(categoryResponseDtos, total, page, limit);
     } catch (error) {
       this.logger.error(`Failed to fetch categories for user ${userId}: ${error.message}`, error.stack);
       throw error;
@@ -282,24 +292,34 @@ export class CategoryService {
     }
   }
 
-  async getSubcategories(id: number, userId: number): Promise<CategoryResponseDto[]> {
+  async getSubcategories(id: number, userId: number, page: number = 1, limit: number = 10): Promise<PaginatedResponse<CategoryResponseDto>> {
     try {
       // Verify ownership of parent category
       await this.findOne(id, userId);
 
-      const subcategories = await this.prisma.category.findMany({
-        where: {
-          parentCategoryId: id,
-          userId,
-        },
-        include: {
-          parentCategory: true,
-          subcategories: true,
-        },
-        orderBy: { name: 'asc' },
-      });
+      const whereCondition = {
+        parentCategoryId: id,
+        userId,
+      };
 
-      return subcategories.map(category => this.transformCategoryForResponse(category));
+      const paginationOptions = PaginationUtils.createPrismaOptions(page, limit);
+
+      const [subcategories, total] = await Promise.all([
+        this.prisma.category.findMany({
+          where: whereCondition,
+          ...paginationOptions,
+          include: {
+            parentCategory: true,
+            subcategories: true,
+          },
+          orderBy: { name: 'asc' },
+        }),
+        this.prisma.category.count({ where: whereCondition }),
+      ]);
+
+      const categoryResponseDtos = subcategories.map(category => this.transformCategoryForResponse(category));
+      
+      return PaginationUtils.createPaginatedResponse(categoryResponseDtos, total, page, limit);
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;

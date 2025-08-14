@@ -16,6 +16,7 @@ import { UpdateFamilyDto } from './dto/update-family.dto';
 import { FamilyResponseDto } from './dto/family-response.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { User } from '../auth/decorators/user.decorator';
+import { PaginatedResponse } from '../common';
 
 @Controller('families')
 @UseGuards(JwtAuthGuard)
@@ -28,8 +29,15 @@ export class FamilyController {
   }
 
   @Get()
-  findAll(@User() user: any): Promise<FamilyResponseDto[]> {
-    return this.familyService.findAll(user.id);
+  findAll(
+    @User() user: any,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ): Promise<PaginatedResponse<FamilyResponseDto>> {
+    const pageNum = page ? parseInt(page) : 1;
+    const limitNum = limit ? parseInt(limit) : 10;
+    
+    return this.familyService.findAll(user.id, pageNum, limitNum);
   }
 
   @Get(':id')

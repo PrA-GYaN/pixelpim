@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, ConflictException, BadRequestException, 
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateAttributeGroupDto } from './dto/create-attribute-group.dto';
 import { UpdateAttributeGroupDto } from './dto/update-attribute-group.dto';
+import { PaginatedResponse, PaginationUtils } from '../common';
 
 @Injectable()
 export class AttributeGroupService {
@@ -67,32 +68,41 @@ export class AttributeGroupService {
     }
   }
 
-  async findAll(userId: number) {
-    return await this.prisma.attributeGroup.findMany({
-      where: { userId },
-      select: {
-        id: true,
-        name: true,
-        description: true,
-        userId: true,
-        attributes: {
-          select: {
-            id: true,
-            attribute: {
-              select: {
-                id: true,
-                name: true,
-                type: true,
-                userId: true,
+  async findAll(userId: number, page: number = 1, limit: number = 10) {
+    const whereCondition = { userId };
+    const paginationOptions = PaginationUtils.createPrismaOptions(page, limit);
+
+    const [attributeGroups, total] = await Promise.all([
+      this.prisma.attributeGroup.findMany({
+        where: whereCondition,
+        ...paginationOptions,
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          userId: true,
+          attributes: {
+            select: {
+              id: true,
+              attribute: {
+                select: {
+                  id: true,
+                  name: true,
+                  type: true,
+                  userId: true,
+                },
               },
             },
           },
         },
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-    });
+        orderBy: {
+          createdAt: 'desc',
+        },
+      }),
+      this.prisma.attributeGroup.count({ where: whereCondition }),
+    ]);
+
+    return PaginationUtils.createPaginatedResponse(attributeGroups, total, page, limit);
   }
 
   async findOne(id: number, userId: number) {
