@@ -1,0 +1,727 @@
+###################################################
+# Product Variants API Examples
+# Description: Manage product variant relationships
+###################################################
+
+# Variables - Update these for your environment
+@baseUrl = http://localhost:3000
+@access_token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsImVtYWlsIjoicHJhZ3lhbjE1MTZAZ21haWwuY29tIiwiaWF0IjoxNzU1MjQyMjIyLCJleHAiOjE3NTUzMjg2MjJ9.jQQN0GQQjc2IUTmrUjU2KGyYxEECe6AWQ2RSb0OWJ90
+@productId = 1
+@variantProductId1 = 2
+@variantProductId2 = 3
+@variantProductId3 = 4
+
+###################################################
+# CREATE VARIANT RELATIONSHIPS
+###################################################
+
+### Create Multiple Variant Relationships (Full Connectivity)
+POST {{baseUrl}}/products/variants
+Content-Type: application/json
+Authorization: Bearer {{access_token}}
+
+{
+  "productId": {{productId}},
+  "variantProductIds": [{{variantProductId1}}, {{variantProductId2}}, {{variantProductId3}}]
+}
+
+# This will create ALL possible relationships:
+# - Product 1 ↔ Product 2
+# - Product 1 ↔ Product 3
+# - Product 1 ↔ Product 4
+# - Product 2 ↔ Product 3
+# - Product 2 ↔ Product 4
+# - Product 3 ↔ Product 4
+
+### Create Single Variant Relationship
+POST {{baseUrl}}/products/variants
+Content-Type: application/json
+Authorization: Bearer {{access_token}}
+
+{
+  "productId": {{productId}},
+  "variantProductIds": [{{variantProductId1}}]
+}
+
+###################################################
+# RETRIEVE VARIANT RELATIONSHIPS
+###################################################
+
+### Get All Variants of a Product
+GET {{baseUrl}}/products/{{productId}}/variants
+Authorization: Bearer {{access_token}}
+
+###################################################
+# TEST THE NEW FULL CONNECTIVITY BEHAVIOR
+###################################################
+
+### Test: Create 3 products as variants
+POST {{baseUrl}}/products/variants
+Content-Type: application/json
+Authorization: Bearer {{access_token}}
+
+{
+  "productId": 1,
+  "variantProductIds": [2, 3]
+}
+
+### Test: Verify Product 1 has variants [2, 3]
+GET {{baseUrl}}/products/1/variants
+Authorization: Bearer {{access_token}}
+
+### Test: Verify Product 2 has variants [1, 3] (NEW BEHAVIOR)
+GET {{baseUrl}}/products/2/variants
+Authorization: Bearer {{access_token}}
+
+### Test: Verify Product 3 has variants [1, 2] (NEW BEHAVIOR)
+GET {{baseUrl}}/products/3/variants
+Authorization: Bearer {{access_token}}
+
+###################################################
+# REMOVE VARIANT RELATIONSHIPS
+###################################################
+
+### Remove Specific Variant Relationship (Test Case 1)
+DELETE {{baseUrl}}/products/variants
+Content-Type: application/json
+Authorization: Bearer {{access_token}}
+
+{
+  "productId": 1,
+  "variantProductId": 2
+}
+
+### Remove Another Variant Relationship (Test Case 2)
+DELETE {{baseUrl}}/products/variants
+Content-Type: application/json
+Authorization: Bearer {{access_token}}
+
+{
+  "productId": 2,
+  "variantProductId": 3
+}
+
+### Remove Variant Relationship (with variables)
+DELETE {{baseUrl}}/products/variants
+Content-Type: application/json
+Authorization: Bearer {{access_token}}
+
+{
+  "productId": {{productId}},
+  "variantProductId": {{variantProductId1}}
+}
+
+### Test removing non-existent relationship (should return 404)
+DELETE {{baseUrl}}/products/variants
+Content-Type: application/json
+Authorization: Bearer {{access_token}}
+
+{
+  "productId": 999,
+  "variantProductId": 998
+}
+
+
+###################################################
+# VERIFY DELETE RESPONSE WORKFLOW
+###################################################
+
+### Step 1: Check current variants for product 1
+GET {{baseUrl}}/products/1/variants
+Authorization: Bearer {{access_token}}
+
+### Step 2: Delete a specific variant relationship
+DELETE {{baseUrl}}/products/variants
+Content-Type: application/json
+Authorization: Bearer {{access_token}}
+
+{
+  "productId": 1,
+  "variantProductId": 2
+}
+
+### Step 3: Verify the relationship was removed
+GET {{baseUrl}}/products/1/variants
+Authorization: Bearer {{access_token}}
+
+### Step 4: Verify the relationship was removed from the other side too
+GET {{baseUrl}}/products/2/variants
+Authorization: Bearer {{access_token}}
+
+### Step 5: Try to delete the same relationship again (should return 404)
+DELETE {{baseUrl}}/products/variants
+Content-Type: application/json
+Authorization: Bearer {{access_token}}
+
+{
+  "productId": 1,
+  "variantProductId": 2
+}
+
+###################################################
+# COMPREHENSIVE DELETE TESTING - NEW BEHAVIOR
+###################################################
+
+### Test Scenario: Demonstrate New Remove Behavior
+# Step 1: Create a fully connected variant group (1, 2, 3)
+POST {{baseUrl}}/products/variants
+Content-Type: application/json
+Authorization: Bearer {{access_token}}
+
+{
+  "productId": 1,
+  "variantProductIds": [2, 3]
+}
+
+### Step 2: Verify all relationships exist
+# Should show: 1↔2, 2↔3, 1↔3
+GET {{baseUrl}}/products/1/variants
+Authorization: Bearer {{access_token}}
+
+GET {{baseUrl}}/products/2/variants
+Authorization: Bearer {{access_token}}
+
+GET {{baseUrl}}/products/3/variants
+Authorization: Bearer {{access_token}}
+
+### Step 3: Remove product 3 from the variant group by deleting 1↔3
+# NEW BEHAVIOR: This will remove BOTH 1↔3 AND 2↔3 relationships
+# Only 1↔2 will remain
+DELETE {{baseUrl}}/products/variants
+Content-Type: application/json
+Authorization: Bearer {{access_token}}
+
+{
+  "productId": 1,
+  "variantProductId": 3
+}
+
+### Step 4: Verify the new state
+# Product 1 should now only have variant [2]
+GET {{baseUrl}}/products/1/variants
+Authorization: Bearer {{access_token}}
+
+# Product 2 should now only have variant [1]
+GET {{baseUrl}}/products/2/variants
+Authorization: Bearer {{access_token}}
+
+# Product 3 should now have NO variants
+GET {{baseUrl}}/products/3/variants
+Authorization: Bearer {{access_token}}
+
+###################################################
+# COMPREHENSIVE DELETE TESTING - ORIGINAL BEHAVIOR  
+###################################################
+
+### Test 1: Successful deletion (should return 200)
+DELETE {{baseUrl}}/products/variants
+Content-Type: application/json
+Authorization: Bearer {{access_token}}
+
+{
+  "productId": 1,
+  "variantProductId": 2
+}
+
+### Test 2: Same product IDs (should return 400)
+DELETE {{baseUrl}}/products/variants
+Content-Type: application/json
+Authorization: Bearer {{access_token}}
+
+{
+  "productId": 1,
+  "variantProductId": 1
+}
+
+### Test 3: Non-existent products (should return 400)
+DELETE {{baseUrl}}/products/variants
+Content-Type: application/json
+Authorization: Bearer {{access_token}}
+
+{
+  "productId": 999,
+  "variantProductId": 998
+}
+
+### Test 4: Non-existent relationship (should return 404)
+DELETE {{baseUrl}}/products/variants
+Content-Type: application/json
+Authorization: Bearer {{access_token}}
+
+{
+  "productId": 1,
+  "variantProductId": 5
+}
+
+### Test 5: Invalid data types (should return 400)
+DELETE {{baseUrl}}/products/variants
+Content-Type: application/json
+Authorization: Bearer {{access_token}}
+
+{
+  "productId": "invalid",
+  "variantProductId": "also_invalid"
+}
+
+### Test 6: Negative numbers (should return 400)
+DELETE {{baseUrl}}/products/variants
+Content-Type: application/json
+Authorization: Bearer {{access_token}}
+
+{
+  "productId": -1,
+  "variantProductId": 2
+}
+
+### Test 7: Zero values (should return 400)
+DELETE {{baseUrl}}/products/variants
+Content-Type: application/json
+Authorization: Bearer {{access_token}}
+
+{
+  "productId": 0,
+  "variantProductId": 2
+}
+
+###################################################
+# DEBUG AND TROUBLESHOOTING
+###################################################
+
+### Debug: Test DELETE with proper JSON formatting
+DELETE {{baseUrl}}/products/variants
+Content-Type: application/json
+Authorization: Bearer {{access_token}}
+
+{
+  "productId": 1,
+  "variantProductId": 2
+}
+
+### Debug: Test what happens with string values (should fail)
+DELETE {{baseUrl}}/products/variants
+Content-Type: application/json
+Authorization: Bearer {{access_token}}
+
+{
+  "productId": "1",
+  "variantProductId": "2"
+}
+
+### Debug: Test with missing Content-Type (should fail)
+DELETE {{baseUrl}}/products/variants
+Authorization: Bearer {{access_token}}
+
+{
+  "productId": 1,
+  "variantProductId": 2
+}
+
+###################################################
+# API DOCUMENTATION
+###################################################
+
+## Endpoints Overview
+
+### 1. Create Variant Relationships
+**POST** `/products/variants`
+
+Creates relationships between a product and one or more variant products.
+- **NEW**: Creates a fully connected variant group where every product is connected to every other product
+- Supports both single and multiple variant creation
+- Automatically prevents duplicate relationships
+- Ensures proper ordering (productAId < productBId)
+
+**Request Body:**
+```json
+{
+  "productId": number,          // Main product ID
+  "variantProductIds": number[] // Array of variant product IDs
+}
+```
+
+**Example Behavior:**
+If you call:
+```json
+{
+  "productId": 1,
+  "variantProductIds": [2, 3]
+}
+```
+
+The system will create ALL possible relationships:
+- Product 1 ↔ Product 2
+- Product 1 ↔ Product 3  
+- Product 2 ↔ Product 3
+
+This means:
+- Product 1 will have variants: [2, 3]
+- Product 2 will have variants: [1, 3]
+- Product 3 will have variants: [1, 2]
+
+**Request Body:**
+```json
+{
+  "productId": number,          // Main product ID
+  "variantProductIds": number[] // Array of variant product IDs
+}
+```
+
+**Success Response (201):**
+```json
+{
+  "message": "Successfully added 2 variant relationships",
+  "created": 2
+}
+```
+
+### 2. Get Product Variants
+**GET** `/products/{id}/variants`
+
+Retrieves all products that are variants of the specified product.
+- Returns bidirectional relationships
+- Includes product details for both sides
+
+**Success Response (200):**
+```json
+[
+  {
+    "id": 1,
+    "productAId": 1,
+    "productBId": 2,
+    "productA": {
+      "id": 1,
+      "name": "T-Shirt Red Small",
+      "sku": "TSHIRT-RED-S",
+      "imageUrl": "https://example.com/red-small.jpg",
+      "status": "complete"
+    },
+    "productB": {
+      "id": 2,
+      "name": "T-Shirt Red Medium",
+      "sku": "TSHIRT-RED-M",
+      "imageUrl": "https://example.com/red-medium.jpg",
+      "status": "complete"
+    }
+  }
+]
+```
+
+### 3. Remove Variant Relationship
+**DELETE** `/products/variants`
+
+**NEW BEHAVIOR**: Removes a specific variant relationship between two products AND removes the "variantProductId" from ALL its variant relationships, keeping only relationships that don't involve the removed product.
+
+**Example:**
+If you have relationships: 1↔2, 2↔3, 1↔3
+And you delete relationship 1↔3, the system will:
+1. Remove the specific relationship: 1↔3
+2. Remove product 3 from ALL its other relationships: 2↔3
+3. Keep only: 1↔2
+
+**Request Body:**
+```json
+{
+  "productId": number,        // First product ID
+  "variantProductId": number  // Second product ID (will be removed from all relationships)
+}
+```
+
+**Success Response (200):**
+```json
+{
+  "message": "Successfully removed 2 variant relationships. Product 3 has been disconnected from the variant group, while other relationships remain intact."
+}
+```
+
+**Error Responses:**
+
+### Validation Error (400):
+```json
+{
+  "statusCode": 400,
+  "message": "Product IDs must be valid integers",
+  "error": "Bad Request"
+}
+```
+
+### Product Not Found (400):
+```json
+{
+  "statusCode": 400,
+  "message": "One or both products not found or do not belong to you",
+  "error": "Bad Request"
+}
+```
+
+### Variant Relationship Not Found (404):
+```json
+{
+  "statusCode": 404,
+  "message": "Variant relationship not found",
+  "error": "Not Found"
+}
+```
+
+### Same Product Error (400):
+```json
+{
+  "statusCode": 400,
+  "message": "Cannot remove variant relationship with the same product",
+  "error": "Bad Request"
+}
+```
+
+###################################################
+# PRACTICAL EXAMPLES
+###################################################
+
+## Example 1: T-Shirt Size Variants
+
+### Step 1: Create the base products first
+```http
+POST {{baseUrl}}/products
+{
+  "name": "T-Shirt Red Small",
+  "sku": "TSHIRT-RED-S",
+  "status": "complete",
+  "categoryId": 1
+}
+
+POST {{baseUrl}}/products
+{
+  "name": "T-Shirt Red Medium", 
+  "sku": "TSHIRT-RED-M",
+  "status": "complete",
+  "categoryId": 1
+}
+
+POST {{baseUrl}}/products
+{
+  "name": "T-Shirt Red Large",
+  "sku": "TSHIRT-RED-L", 
+  "status": "complete",
+  "categoryId": 1
+}
+```
+
+### Step 2: Link them as variants (creates full connectivity)
+```http
+POST {{baseUrl}}/products/variants
+{
+  "productId": 1,
+  "variantProductIds": [2, 3]
+}
+```
+
+**Result:** This creates 3 relationships:
+- Product 1 (Small) ↔ Product 2 (Medium)
+- Product 1 (Small) ↔ Product 3 (Large)
+- Product 2 (Medium) ↔ Product 3 (Large)
+
+**Now when you query:**
+- `GET /products/1/variants` returns products [2, 3]
+- `GET /products/2/variants` returns products [1, 3]
+- `GET /products/3/variants` returns products [1, 2]
+
+## Example 2: Adding More Variants to Existing Group
+
+### Adding XL size to the existing group
+```http
+POST {{baseUrl}}/products
+{
+  "name": "T-Shirt Red Extra Large",
+  "sku": "TSHIRT-RED-XL", 
+  "status": "complete",
+  "categoryId": 1
+}
+
+# Add the new product (ID: 4) to the existing variant group
+POST {{baseUrl}}/products/variants
+{
+  "productId": 4,
+  "variantProductIds": [1, 2, 3]
+}
+```
+
+**Result:** This adds 3 more relationships:
+- Product 4 (XL) ↔ Product 1 (Small)
+- Product 4 (XL) ↔ Product 2 (Medium)
+- Product 4 (XL) ↔ Product 3 (Large)
+
+**Final state - all products have variants:**
+- Product 1: variants [2, 3, 4]
+- Product 2: variants [1, 3, 4]
+- Product 3: variants [1, 2, 4]
+- Product 4: variants [1, 2, 3]
+
+## Example 2: Phone Color Variants
+
+### Create phone variants and link them
+```http
+# Create base product
+POST {{baseUrl}}/products
+{
+  "name": "iPhone 15 Black",
+  "sku": "IPHONE15-BLACK",
+  "categoryId": 2,
+  "status": "complete"
+}
+
+# Create variant product
+POST {{baseUrl}}/products
+{
+  "name": "iPhone 15 White",
+  "sku": "IPHONE15-WHITE", 
+  "categoryId": 2,
+  "status": "complete"
+}
+
+# Link as variants
+POST {{baseUrl}}/products/variants
+{
+  "productId": 10,
+  "variantProductIds": [11]
+}
+```
+
+## Example 3: Managing Variant Relationships - NEW BEHAVIOR
+
+### Create a fully connected variant group
+```http
+POST {{baseUrl}}/products/variants
+{
+  "productId": 1,
+  "variantProductIds": [2, 3]
+}
+```
+
+**Initial State:**
+- Product 1 ↔ Product 2
+- Product 1 ↔ Product 3  
+- Product 2 ↔ Product 3
+
+**Query results:**
+- Product 1 variants: [2, 3]
+- Product 2 variants: [1, 3]
+- Product 3 variants: [1, 2]
+
+### Remove product 3 from the entire variant group
+```http
+DELETE {{baseUrl}}/products/variants
+{
+  "productId": 1,
+  "variantProductId": 3
+}
+```
+
+**NEW BEHAVIOR - Final State:**
+- Product 1 ↔ Product 2 (only this relationship remains)
+
+**Query results after deletion:**
+- Product 1 variants: [2]
+- Product 2 variants: [1]
+- Product 3 variants: [] (no variants)
+
+**What happened:**
+1. Removed specific relationship: 1↔3
+2. Removed product 3 from all other relationships: 2↔3
+3. Kept relationships that don't involve product 3: 1↔2
+
+### Alternative approach - Remove product 2 instead
+```http
+DELETE {{baseUrl}}/products/variants
+{
+  "productId": 1,
+  "variantProductId": 2
+}
+```
+
+**This would result in:**
+- Product 1 ↔ Product 3 (only this relationship remains)
+- Product 2 would be completely disconnected
+
+
+###################################################
+# IMPORTANT NOTES
+###################################################
+
+## System Behavior:
+1. **Automatic Ordering**: System ensures productAId < productBId to prevent duplicates
+2. **Fully Connected Variants**: Creating variants creates ALL possible relationships between ALL products in the group
+3. **Symmetric Relationships**: If A is variant of B, then B is variant of A (bidirectional)
+4. **Complete Graph**: When you add products to a variant group, every product becomes a variant of every other product
+5. **Duplicate Prevention**: Cannot create duplicate variant relationships
+6. **User Isolation**: Can only create variants between your own products
+7. **Cascade Deletion**: Product deletion removes all variant relationships
+8. **NEW - Smart Variant Removal**: When removing a variant relationship A↔B, the system removes product B from ALL its variant relationships, while keeping other relationships that don't involve product B intact
+
+## Validation Rules:
+- Both products must exist and belong to the requesting user
+- Cannot create variants with the same product ID
+- Variant relationships are unique per product pair
+- Product IDs must be positive integers
+- **Important**: Make sure to send product IDs as numbers in JSON, not strings
+
+## Common Issues:
+- **"Validation failed (numeric string is expected)"**: This error occurs when:
+  - Product IDs are sent as strings instead of numbers in JSON
+  - The Content-Type header is missing or incorrect
+  - The request body is malformed
+
+**Correct format:**
+```json
+{
+  "productId": 1,          // Number, not "1"
+  "variantProductId": 2    // Number, not "2"
+}
+```
+
+###################################################
+# ERROR HANDLING
+###################################################
+
+## Common HTTP Status Codes:
+- **200 OK**: Successful retrieval or deletion
+- **201 Created**: Successful variant creation
+- **400 Bad Request**: Invalid data or product not found
+- **401 Unauthorized**: Missing or invalid authentication
+- **404 Not Found**: Variant relationship not found
+- **409 Conflict**: Variant relationship already exists
+
+## Example Error Responses:
+
+### Product Not Found (400):
+```json
+{
+  "statusCode": 400,
+  "message": "Main product not found or does not belong to you",
+  "error": "Bad Request"
+}
+```
+
+### Duplicate Relationship (409):
+```json
+{
+  "statusCode": 409,
+  "message": "These products are already linked as variants",
+  "error": "Conflict"
+}
+```
+
+### Variant Not Found (404):
+```json
+{
+  "statusCode": 404,
+  "message": "Variant relationship not found",
+  "error": "Not Found"
+}
+```
+
+### Authentication Error (401):
+```json
+{
+  "statusCode": 401,
+  "message": "Unauthorized",
+  "error": "Unauthorized"
+}
+```

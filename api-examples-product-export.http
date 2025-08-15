@@ -1,0 +1,333 @@
+### Product Export API Examples
+
+@baseUrl = http://localhost:3000
+@authToken = Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsImVtYWlsIjoicHJhZ3lhbjE1MTZAZ21haWwuY29tIiwiaWF0IjoxNzU1MDc2Njk2LCJleHAiOjE3NTUxNjMwOTZ9.pQM2bGyQAKPr-NJhfIu7rDK6ygiXHc_qdcTXbXDDTYI
+
+# Note: Update @baseUrl with your API base URL (e.g., http://localhost:3000 for local development)
+# Note: Update @authToken with a valid JWT token
+
+### Export Products with Basic Attributes
+POST {{baseUrl}}/products/export
+Authorization: {{authToken}}
+Content-Type: application/json
+
+{
+  "productIds": [1, 2, 3],
+  "attributes": [
+    "id",
+    "name",
+    "sku",
+    "status"
+  ],
+  "format": "json",
+  "filename": "basic_products_export.json"
+}
+
+### Response Example:
+# {
+#   "data": [
+#     {
+#       "id": 1,
+#       "name": "Sample Product 1",
+#       "sku": "PROD-001",
+#       "status": "complete"
+#     },
+#     {
+#       "id": 2,
+#       "name": "Sample Product 2",
+#       "sku": "PROD-002",
+#       "status": "incomplete"
+#     }
+#   ],
+#   "format": "json",
+#   "filename": "basic_products_export.json",
+#   "totalRecords": 2,
+#   "selectedAttributes": ["id", "name", "sku", "status"],
+#   "exportedAt": "2025-08-15T12:00:00.000Z"
+# }
+
+###
+
+### Export Products with Category Information
+POST {{baseUrl}}/products/export
+Authorization: {{authToken}}
+Content-Type: application/json
+
+{
+  "productIds": [1, 2, 3, 4, 5],
+  "attributes": [
+    "id",
+    "name",
+    "sku",
+    "status",
+    "categoryName",
+    "categoryDescription"
+  ],
+  "format": "json"
+}
+
+###
+
+### Export Products with Full Attribute Information
+POST {{baseUrl}}/products/export
+Authorization: {{authToken}}
+Content-Type: application/json
+
+{
+  "productIds": [1, 2, 3, 4, 5],
+  "attributes": [
+    "id",
+    "name",
+    "sku",
+    "status",
+    "categoryName",
+    "attributeName",
+    "attributeType",
+    "attributeDefaultValue",
+    "attributeGroupName",
+    "familyName"
+  ],
+  "format": "json",
+  "filename": "detailed_products_export.json"
+}
+
+###
+
+### Export Products with Variant Information
+POST {{baseUrl}}/products/export
+Authorization: {{authToken}}
+Content-Type: application/json
+
+{
+  "productIds": [1, 2, 3],
+  "attributes": [
+    "id",
+    "name",
+    "sku",
+    "variantCount",
+    "variantNames",
+    "variantSkus"
+  ],
+  "format": "json"
+}
+
+### Response Example:
+# {
+#   "data": [
+#     {
+#       "id": 1,
+#       "name": "Sample Product 1",
+#       "sku": "PROD-001",
+#       "variantCount": 2,
+#       "variantNames": "Product 1 Red, Product 1 Blue",
+#       "variantSkus": "PROD-001-RED, PROD-001-BLUE"
+#     }
+#   ],
+#   "format": "json",
+#   "filename": "products_export_2025-08-15.json",
+#   "totalRecords": 1,
+#   "selectedAttributes": ["id", "name", "sku", "variantCount", "variantNames", "variantSkus"],
+#   "exportedAt": "2025-08-15T12:00:00.000Z"
+# }
+
+###
+
+### Export Products with Timestamps
+POST {{baseUrl}}/products/export
+Authorization: {{authToken}}
+Content-Type: application/json
+
+{
+  "productIds": [1, 2, 3, 4, 5],
+  "attributes": [
+    "id",
+    "name",
+    "sku",
+    "status",
+    "createdAt",
+    "updatedAt"
+  ],
+  "format": "json"
+}
+
+###
+
+### Export All Available Product Attributes
+POST {{baseUrl}}/products/export
+Authorization: {{authToken}}
+Content-Type: application/json
+
+{
+  "productIds": [1, 2],
+  "attributes": [
+    "id",
+    "name",
+    "sku",
+    "status",
+    "productLink",
+    "imageUrl",
+    "categoryId",
+    "categoryName",
+    "categoryDescription",
+    "attributeId",
+    "attributeName",
+    "attributeType",
+    "attributeDefaultValue",
+    "attributeGroupId",
+    "attributeGroupName",
+    "attributeGroupDescription",
+    "familyId",
+    "familyName",
+    "variantCount",
+    "variantNames",
+    "variantSkus",
+    "userId",
+    "createdAt",
+    "updatedAt"
+  ],
+  "format": "json",
+  "filename": "complete_products_export.json"
+}
+
+###
+
+### Export Single Product
+POST {{baseUrl}}/products/export
+Authorization: {{authToken}}
+Content-Type: application/json
+
+{
+  "productIds": [1],
+  "attributes": [
+    "id",
+    "name",
+    "sku",
+    "status",
+    "categoryName",
+    "familyName"
+  ]
+}
+
+###
+
+### CSV Format Export (Future Enhancement)
+# Note: CSV format can be implemented on the frontend by converting the JSON response
+# The backend returns structured data that can easily be converted to CSV
+
+POST {{baseUrl}}/products/export
+Authorization: {{authToken}}
+Content-Type: application/json
+
+{
+  "productIds": [1, 2, 3, 4, 5],
+  "attributes": [
+    "id",
+    "name",
+    "sku",
+    "status",
+    "categoryName"
+  ],
+  "format": "csv",
+  "filename": "products_export.csv"
+}
+
+###
+
+### Available Product Attributes:
+
+# Basic Product Information:
+# - "id": Product ID
+# - "name": Product Name
+# - "sku": Product SKU
+# - "status": Product Status
+# - "productLink": Product Link/URL
+# - "imageUrl": Product Image URL
+# - "userId": User ID (owner)
+# - "createdAt": Creation timestamp
+# - "updatedAt": Last update timestamp
+
+# Category Information:
+# - "categoryId": Category ID
+# - "categoryName": Category Name
+# - "categoryDescription": Category Description
+
+# Attribute Information:
+# - "attributeId": Primary Attribute ID
+# - "attributeName": Primary Attribute Name
+# - "attributeType": Primary Attribute Type
+# - "attributeDefaultValue": Primary Attribute Default Value
+
+# Attribute Group Information:
+# - "attributeGroupId": Attribute Group ID
+# - "attributeGroupName": Attribute Group Name
+# - "attributeGroupDescription": Attribute Group Description
+
+# Family Information:
+# - "familyId": Family ID
+# - "familyName": Family Name
+
+# Variant Information:
+# - "variantCount": Number of variants
+# - "variantNames": Comma-separated variant names
+# - "variantSkus": Comma-separated variant SKUs
+
+###
+
+### Error Responses:
+
+### Missing Product IDs
+POST {{baseUrl}}/products/export
+Authorization: {{authToken}}
+Content-Type: application/json
+
+{
+  "productIds": [],
+  "attributes": ["id", "name"]
+}
+
+# Response: 400 Bad Request
+# {
+#   "statusCode": 400,
+#   "message": ["At least one product ID must be provided"],
+#   "error": "Bad Request"
+# }
+
+###
+
+### Missing Attributes
+POST {{baseUrl}}/products/export
+Authorization: {{authToken}}
+Content-Type: application/json
+
+{
+  "productIds": [1, 2],
+  "attributes": []
+}
+
+# Response: 400 Bad Request
+# {
+#   "statusCode": 400,
+#   "message": ["At least one attribute must be selected"],
+#   "error": "Bad Request"
+# }
+
+###
+
+### Invalid Product IDs (Products not found or not owned by user)
+POST {{baseUrl}}/products/export
+Authorization: {{authToken}}
+Content-Type: application/json
+
+{
+  "productIds": [999, 1000],
+  "attributes": ["id", "name"]
+}
+
+# Response: 404 Not Found
+# {
+#   "statusCode": 404,
+#   "message": "No products found with the provided IDs or access denied",
+#   "error": "Not Found"
+# }
+
+###

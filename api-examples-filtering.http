@@ -1,0 +1,129 @@
+# Advanced Filtering API Examples
+
+## Attribute Filtering
+
+### Basic attribute search with pagination
+GET /attributes?search=color&page=1&limit=10
+
+### Filter by user-friendly type
+GET /attributes?userFriendlyType=text&sortBy=name&sortOrder=asc
+
+### Filter by date (latest/newest first)
+GET /attributes?dateFilter=latest&limit=20
+
+### Filter attributes with default values
+GET /attributes?hasDefaultValue=true&sortBy=createdAt&sortOrder=desc
+
+### Filter attributes that are in groups
+GET /attributes?inGroups=true&search=size
+
+### Complex attribute filtering
+GET /attributes?search=product&userFriendlyType=number&hasDefaultValue=true&sortBy=updatedAt&sortOrder=desc&page=1&limit=15
+
+### Filter by date range
+GET /attributes?createdAfter=2024-01-01&createdBefore=2024-12-31&sortBy=name
+
+## Attribute Groups Filtering
+
+### Search attribute groups by name or description
+GET /attributes/groups?search=product&sortBy=totalAttributes&sortOrder=desc
+
+### Filter groups with descriptions
+GET /attributes/groups?hasDescription=true&sortBy=name&sortOrder=asc
+
+### Filter by attribute count range
+GET /attributes/groups?minAttributes=3&maxAttributes=10&dateFilter=latest
+
+### Complex group filtering
+GET /attributes/groups?search=product&hasDescription=true&minAttributes=2&sortBy=createdAt&sortOrder=desc
+
+## Family Filtering
+
+### Basic family search
+GET /families?search=electronics&page=1&limit=10
+
+### Sort by total products
+GET /families?sortBy=totalProducts&sortOrder=desc
+
+### Sort by total attributes
+GET /families?sortBy=totalAttributes&sortOrder=asc
+
+### Filter by families containing specific attributes (ANY of the attributes)
+GET /families?attributeIds=1,2,3&attributeFilter=any&sortBy=name
+
+### Filter by families containing ALL specified attributes
+GET /families?attributeIds=1,2&attributeFilter=all&sortBy=totalProducts&sortOrder=desc
+
+### Filter families with products
+GET /families?hasProducts=true&sortBy=totalProducts&sortOrder=desc
+
+### Filter families with required attributes
+GET /families?hasRequiredAttributes=true&sortBy=name&sortOrder=asc
+
+### Filter by product count range
+GET /families?minProducts=5&maxProducts=50&sortBy=totalProducts&sortOrder=desc
+
+### Filter by attribute count range
+GET /families?minAttributes=3&maxAttributes=15&sortBy=totalAttributes&sortOrder=desc
+
+### Complex family filtering
+GET /families?search=phone&attributeIds=1,2&attributeFilter=any&hasProducts=true&minProducts=10&sortBy=totalProducts&sortOrder=desc&page=1&limit=20
+
+### Filter by date range
+GET /families?createdAfter=2024-01-01&dateFilter=latest&sortBy=createdAt&sortOrder=desc
+
+## Advanced Use Cases
+
+### Find recent attributes of specific types
+GET /attributes?userFriendlyType=number&dateFilter=latest&limit=5
+
+### Find families with many products but few attributes
+GET /families?minProducts=20&maxAttributes=5&sortBy=totalProducts&sortOrder=desc
+
+### Find attribute groups with specific characteristics
+GET /attributes/groups?hasDescription=true&minAttributes=5&sortBy=totalAttributes&sortOrder=desc
+
+### Search with multiple criteria
+GET /families?search=mobile&hasProducts=true&hasRequiredAttributes=true&sortBy=name&sortOrder=asc
+
+## Response Format
+
+All filtered endpoints return paginated responses with the following structure:
+
+```json
+{
+  "data": [...], // Array of items
+  "pagination": {
+    "page": 1,
+    "limit": 10,
+    "total": 100,
+    "totalPages": 10,
+    "hasNext": true,
+    "hasPrev": false
+  }
+}
+```
+
+## Available Sort Fields
+
+### Attributes
+- `name` (default)
+- `type` 
+- `createdAt`
+- `updatedAt`
+- `totalAttributes` (for groups)
+
+### Families
+- `name` (default)
+- `createdAt`
+- `updatedAt`
+- `totalProducts`
+- `totalAttributes`
+
+## Available Sort Orders
+- `asc` (ascending, default)
+- `desc` (descending)
+
+## Date Filters
+- `latest` - Sort by most recent first
+- `oldest` - Sort by oldest first

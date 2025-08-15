@@ -3,6 +3,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ProductResponseDto } from './dto/product-response.dto';
+import { CreateProductVariantDto, RemoveProductVariantDto, ProductVariantResponseDto } from './dto/product-variant.dto';
+import { ExportProductDto, ExportProductResponseDto, ProductAttribute, ExportFormat } from './dto/export-product.dto';
 import { PaginatedResponse, PaginationUtils } from '../common';
 import type { Product } from '../../generated/prisma';
 
@@ -737,6 +739,19 @@ export class ProductService {
   }
 
   private transformProductForResponse(product: any): ProductResponseDto {
+    // Extract variants from the product data
+    const variants: any[] = [];
+    
+    if (product.variantLinksA) {
+      // When this product is productA, add all productB variants
+      variants.push(...product.variantLinksA.map((link: any) => link.productB));
+    }
+    
+    if (product.variantLinksB) {
+      // When this product is productB, add all productA variants
+      variants.push(...product.variantLinksB.map((link: any) => link.productA));
+    }
+
     return {
       id: product.id,
       name: product.name,
@@ -771,6 +786,14 @@ export class ProductService {
         id: product.family.id,
         name: product.family.name,
       } : undefined,
+      variants: variants.length > 0 ? variants.map(variant => ({
+        id: variant.id,
+        name: variant.name,
+        sku: variant.sku,
+        imageUrl: variant.imageUrl,
+        status: variant.status,
+      })) : undefined,
+      totalVariants: variants.length,
     };
   }
 
@@ -803,5 +826,508 @@ export class ProductService {
 
     // Default error
     throw new BadRequestException(`Failed to ${operation} product`);
+  }
+
+  // Product Variant Management Methods
+
+  async createVariant(createVariantDto: CreateProductVariantDto, userId: number): Promise<{ message: string; created: number }> {
+    try {
+      const { productId, variantProductIds } = createVariantDto;
+
+      // Verify the main product exists and belongs to the user
+      const mainProduct = await this.prisma.product.findFirst({
+        where: { id: productId, userId },
+      });
+
+      if (!mainProduct) {
+        throw new BadRequestException('Main product not found or does not belong to you');
+      }
+
+      // Verify all variant products exist and belong to the user
+      const variantProducts = await this.prisma.product.findMany({
+        where: {
+          id: { in: variantProductIds },
+          userId,
+        },
+      });
+
+      if (variantProducts.length !== variantProductIds.length) {
+        throw new BadRequestException('One or more variant products not found or do not belong to you');
+      }
+
+      // Create all possible combinations between all products in the variant group
+      // This creates a fully connected graph where every product is connected to every other product
+      const allProductIds = [productId, ...variantProductIds];
+      const variantData: { productAId: number; productBId: number }[] = [];
+
+      // Generate all unique pairs
+      for (let i = 0; i < allProductIds.length; i++) {
+        for (let j = i + 1; j < allProductIds.length; j++) {
+          const [smallerId, largerId] = allProductIds[i] < allProductIds[j] 
+            ? [allProductIds[i], allProductIds[j]] 
+            : [allProductIds[j], allProductIds[i]];
+          variantData.push({ productAId: smallerId, productBId: largerId });
+        }
+      }
+
+      // Create variants using createMany (will ignore duplicates)
+      const result = await this.prisma.productVariant.createMany({
+        data: variantData,
+        skipDuplicates: true,
+      });
+
+      this.logger.log(`Created ${result.count} variant relationships for product ${productId} and its variant group`);
+      return { message: `Successfully added ${result.count} variant relationships to create a fully connected variant group`, created: result.count };
+    } catch (error) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      this.logger.error(`Failed to create product variants: ${error.message}`, error.stack);
+      throw new BadRequestException('Failed to create product variants');
+    }
+  }
+
+  async removeVariant(removeVariantDto: RemoveProductVariantDto, userId: number): Promise<{ message: string }> {
+    try {
+      this.logger.log(`RemoveVariant called with DTO: ${JSON.stringify(removeVariantDto)}, userId: ${userId}`);
+      
+      const { productId, variantProductId } = removeVariantDto;
+      
+      // Validate that we have proper numbers
+      if (!Number.isInteger(productId) || !Number.isInteger(variantProductId)) {
+        throw new BadRequestException('Product IDs must be valid integers');
+      }
+      
+      if (productId <= 0 || variantProductId <= 0) {
+        throw new BadRequestException('Product IDs must be positive integers');
+      }
+      
+      if (productId === variantProductId) {
+        throw new BadRequestException('Cannot remove variant relationship with the same product');
+      }
+
+      this.logger.log(`Removing variant relationship between ${productId} and ${variantProductId}`);
+
+      // Ensure proper ordering
+      const [smallerId, largerId] = productId < variantProductId ? [productId, variantProductId] : [variantProductId, productId];
+
+      // Verify both products belong to the user
+      const products = await this.prisma.product.findMany({
+        where: {
+          id: { in: [smallerId, largerId] },
+          userId,
+        },
+      });
+
+      if (products.length !== 2) {
+        throw new BadRequestException('One or both products not found or do not belong to you');
+      }
+
+      // Find the specific variant relationship to remove
+      const variant = await this.prisma.productVariant.findUnique({
+        where: {
+          productAId_productBId: {
+            productAId: smallerId,
+            productBId: largerId,
+          },
+        },
+      });
+
+      if (!variant) {
+        throw new NotFoundException('Variant relationship not found');
+      }
+
+      // Get all current variants for both products to understand the full graph
+      const allVariantsForBothProducts = await this.prisma.productVariant.findMany({
+        where: {
+          OR: [
+            { productAId: { in: [smallerId, largerId] } },
+            { productBId: { in: [smallerId, largerId] } },
+          ],
+        },
+      });
+
+      // Find all products connected to the larger ID (the one we want to remove from all relationships)
+      const connectedToLargerProduct = new Set<number>();
+      
+      allVariantsForBothProducts.forEach(v => {
+        if (v.productAId === largerId) {
+          connectedToLargerProduct.add(v.productBId);
+        }
+        if (v.productBId === largerId) {
+          connectedToLargerProduct.add(v.productAId);
+        }
+      });
+
+      // Remove the smaller product from the connected set since we want to keep its relationship with others
+      connectedToLargerProduct.delete(smallerId);
+
+      // Use a transaction to ensure atomicity
+      await this.prisma.$transaction(async (tx) => {
+        // First, delete the specific relationship requested
+        await tx.productVariant.delete({
+          where: {
+            productAId_productBId: {
+              productAId: smallerId,
+              productBId: largerId,
+            },
+          },
+        });
+
+        // Then, remove the larger product from all its other relationships
+        if (connectedToLargerProduct.size > 0) {
+          await tx.productVariant.deleteMany({
+            where: {
+              OR: [
+                {
+                  productAId: largerId,
+                  productBId: { in: Array.from(connectedToLargerProduct) },
+                },
+                {
+                  productAId: { in: Array.from(connectedToLargerProduct) },
+                  productBId: largerId,
+                },
+              ],
+            },
+          });
+        }
+      });
+
+      const removedRelationships = 1 + connectedToLargerProduct.size;
+      this.logger.log(`Removed ${removedRelationships} variant relationships involving product ${largerId}`);
+      
+      return { 
+        message: `Successfully removed ${removedRelationships} variant relationships. Product ${largerId} has been disconnected from the variant group, while other relationships remain intact.` 
+      };
+    } catch (error) {
+      if (error instanceof BadRequestException || error instanceof NotFoundException) {
+        throw error;
+      }
+      this.logger.error(`Failed to remove product variant: ${error.message}`, error.stack);
+      throw new BadRequestException('Failed to remove product variant');
+    }
+  }
+
+  async getProductVariants(productId: number, userId: number): Promise<ProductVariantResponseDto[]> {
+    try {
+      // Verify the product exists and belongs to the user
+      const product = await this.prisma.product.findFirst({
+        where: { id: productId, userId },
+      });
+
+      if (!product) {
+        throw new BadRequestException('Product not found or does not belong to you');
+      }
+
+      // Get all variants where this product is either productA or productB
+      const variants = await this.prisma.productVariant.findMany({
+        where: {
+          OR: [
+            { productAId: productId },
+            { productBId: productId },
+          ],
+        },
+        include: {
+          productA: {
+            select: {
+              id: true,
+              name: true,
+              sku: true,
+              imageUrl: true,
+              status: true,
+            },
+          },
+          productB: {
+            select: {
+              id: true,
+              name: true,
+              sku: true,
+              imageUrl: true,
+              status: true,
+            },
+          },
+        },
+      });
+
+      // Transform the response to handle null/undefined differences
+      return variants.map(variant => ({
+        ...variant,
+        productA: {
+          ...variant.productA,
+          imageUrl: variant.productA.imageUrl ?? undefined,
+        },
+        productB: {
+          ...variant.productB,
+          imageUrl: variant.productB.imageUrl ?? undefined,
+        },
+      })) as ProductVariantResponseDto[];
+    } catch (error) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      this.logger.error(`Failed to get product variants: ${error.message}`, error.stack);
+      throw new BadRequestException('Failed to get product variants');
+    }
+  }
+
+  /**
+   * Export products with user-selected attributes
+   * @param exportDto - Export configuration with product IDs and selected attributes
+   * @param userId - The ID of the user
+   * @returns Promise<ExportProductResponseDto>
+   */
+  async exportProducts(exportDto: ExportProductDto, userId: number): Promise<ExportProductResponseDto> {
+    try {
+      this.logger.log(`Exporting ${exportDto.productIds.length} products for user: ${userId}`);
+
+      // Determine what data to include based on selected attributes
+      const includeRelations = this.determineIncludeRelations(exportDto.attributes);
+
+      // Fetch products with required relations
+      const products = await this.prisma.product.findMany({
+        where: {
+          id: { in: exportDto.productIds },
+          userId,
+        },
+        include: includeRelations,
+        orderBy: { id: 'asc' },
+      });
+
+      if (products.length === 0) {
+        throw new NotFoundException('No products found with the provided IDs or access denied');
+      }
+
+      // Get variant data for products that need it
+      const variantData = new Map<number, any[]>();
+      if (this.needsVariantData(exportDto.attributes)) {
+        for (const product of products) {
+          const variants = await this.getProductVariantsForExport(product.id);
+          variantData.set(product.id, variants);
+        }
+      }
+
+      // Transform products to export format based on selected attributes
+      const exportData = products.map(product => {
+        const transformedProduct = this.transformProductForExport(product, exportDto.attributes, variantData.get(product.id) || []);
+        return transformedProduct;
+      });
+
+      const filename = exportDto.filename || `products_export_${new Date().toISOString().split('T')[0]}.${exportDto.format || ExportFormat.JSON}`;
+
+      this.logger.log(`Successfully exported ${exportData.length} products`);
+
+      return {
+        data: exportData,
+        format: exportDto.format || ExportFormat.JSON,
+        filename,
+        totalRecords: exportData.length,
+        selectedAttributes: exportDto.attributes,
+        exportedAt: new Date(),
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+        throw error;
+      }
+
+      this.logger.error(`Failed to export products: ${error.message}`, error.stack);
+      throw new BadRequestException('Failed to export products');
+    }
+  }
+
+  /**
+   * Determine which relations to include based on selected attributes
+   */
+  private determineIncludeRelations(attributes: ProductAttribute[]): any {
+    const includeRelations: any = {};
+
+    // Check if we need category data
+    if (attributes.some(attr => ['categoryName', 'categoryDescription'].includes(attr))) {
+      includeRelations.category = {
+        select: {
+          id: true,
+          name: true,
+          description: true,
+        },
+      };
+    }
+
+    // Check if we need attribute data
+    if (attributes.some(attr => ['attributeName', 'attributeType', 'attributeDefaultValue'].includes(attr))) {
+      includeRelations.attribute = {
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          defaultValue: true,
+        },
+      };
+    }
+
+    // Check if we need attribute group data
+    if (attributes.some(attr => ['attributeGroupName', 'attributeGroupDescription'].includes(attr))) {
+      includeRelations.attributeGroup = {
+        select: {
+          id: true,
+          name: true,
+          description: true,
+        },
+      };
+    }
+
+    // Check if we need family data
+    if (attributes.some(attr => ['familyName'].includes(attr))) {
+      includeRelations.family = {
+        select: {
+          id: true,
+          name: true,
+        },
+      };
+    }
+
+    return includeRelations;
+  }
+
+  /**
+   * Check if variant data is needed
+   */
+  private needsVariantData(attributes: ProductAttribute[]): boolean {
+    return attributes.some(attr => ['variantCount', 'variantNames', 'variantSkus'].includes(attr));
+  }
+
+  /**
+   * Get variants for a product for export purposes
+   */
+  private async getProductVariantsForExport(productId: number): Promise<any[]> {
+    try {
+      const variants = await this.prisma.productVariant.findMany({
+        where: {
+          OR: [
+            { productAId: productId },
+            { productBId: productId },
+          ],
+        },
+        include: {
+          productA: {
+            select: {
+              id: true,
+              name: true,
+              sku: true,
+            },
+          },
+          productB: {
+            select: {
+              id: true,
+              name: true,
+              sku: true,
+            },
+          },
+        },
+      });
+
+      // Collect variants (excluding the current product)
+      const variantProducts: any[] = [];
+      variants.forEach(variant => {
+        if (variant.productAId === productId) {
+          variantProducts.push(variant.productB);
+        } else {
+          variantProducts.push(variant.productA);
+        }
+      });
+
+      return variantProducts;
+    } catch (error) {
+      this.logger.error(`Failed to fetch variants for product ${productId}: ${error.message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Transform product data for export based on selected attributes
+   */
+  private transformProductForExport(product: any, selectedAttributes: ProductAttribute[], variants: any[]): any {
+    const exportRecord: any = {};
+
+    selectedAttributes.forEach(attr => {
+      switch (attr) {
+        case ProductAttribute.ID:
+          exportRecord.id = product.id;
+          break;
+        case ProductAttribute.NAME:
+          exportRecord.name = product.name;
+          break;
+        case ProductAttribute.SKU:
+          exportRecord.sku = product.sku;
+          break;
+        case ProductAttribute.STATUS:
+          exportRecord.status = product.status;
+          break;
+        case ProductAttribute.PRODUCT_LINK:
+          exportRecord.productLink = product.productLink || '';
+          break;
+        case ProductAttribute.IMAGE_URL:
+          exportRecord.imageUrl = product.imageUrl || '';
+          break;
+        case ProductAttribute.CATEGORY_ID:
+          exportRecord.categoryId = product.categoryId || '';
+          break;
+        case ProductAttribute.CATEGORY_NAME:
+          exportRecord.categoryName = product.category?.name || '';
+          break;
+        case ProductAttribute.CATEGORY_DESCRIPTION:
+          exportRecord.categoryDescription = product.category?.description || '';
+          break;
+        case ProductAttribute.ATTRIBUTE_ID:
+          exportRecord.attributeId = product.attributeId || '';
+          break;
+        case ProductAttribute.ATTRIBUTE_NAME:
+          exportRecord.attributeName = product.attribute?.name || '';
+          break;
+        case ProductAttribute.ATTRIBUTE_TYPE:
+          exportRecord.attributeType = product.attribute?.type || '';
+          break;
+        case ProductAttribute.ATTRIBUTE_DEFAULT_VALUE:
+          exportRecord.attributeDefaultValue = product.attribute?.defaultValue || '';
+          break;
+        case ProductAttribute.ATTRIBUTE_GROUP_ID:
+          exportRecord.attributeGroupId = product.attributeGroupId || '';
+          break;
+        case ProductAttribute.ATTRIBUTE_GROUP_NAME:
+          exportRecord.attributeGroupName = product.attributeGroup?.name || '';
+          break;
+        case ProductAttribute.ATTRIBUTE_GROUP_DESCRIPTION:
+          exportRecord.attributeGroupDescription = product.attributeGroup?.description || '';
+          break;
+        case ProductAttribute.FAMILY_ID:
+          exportRecord.familyId = product.familyId || '';
+          break;
+        case ProductAttribute.FAMILY_NAME:
+          exportRecord.familyName = product.family?.name || '';
+          break;
+        case ProductAttribute.VARIANT_COUNT:
+          exportRecord.variantCount = variants.length;
+          break;
+        case ProductAttribute.VARIANT_NAMES:
+          exportRecord.variantNames = variants.map(v => v.name).join(', ');
+          break;
+        case ProductAttribute.VARIANT_SKUS:
+          exportRecord.variantSkus = variants.map(v => v.sku).join(', ');
+          break;
+        case ProductAttribute.USER_ID:
+          exportRecord.userId = product.userId;
+          break;
+        case ProductAttribute.CREATED_AT:
+          exportRecord.createdAt = product.createdAt.toISOString();
+          break;
+        case ProductAttribute.UPDATED_AT:
+          exportRecord.updatedAt = product.updatedAt.toISOString();
+          break;
+        default:
+          // Handle any unknown attributes gracefully
+          this.logger.warn(`Unknown attribute: ${attr}`);
+          break;
+      }
+    });
+
+    return exportRecord;
   }
 }

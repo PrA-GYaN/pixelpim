@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateFamilyDto } from './dto/create-family.dto';
 import { UpdateFamilyDto } from './dto/update-family.dto';
 import { FamilyResponseDto } from './dto/family-response.dto';
+import { FamilyFilterDto, FamilySortField, SortOrder, DateFilter } from './dto/family-filter.dto';
 import { AttributeValueValidator } from '../attribute/validators/attribute-value.validator';
 import { AttributeType } from '../types/attribute-type.enum';
 import { PaginatedResponse, PaginationUtils } from '../common';
@@ -155,6 +156,163 @@ export class FamilyService {
     }));
 
     return PaginationUtils.createPaginatedResponse(familyResponseDtos, total, page, limit);
+  }
+
+  async findAllWithFilters(userId: number, filters: FamilyFilterDto): Promise<PaginatedResponse<FamilyResponseDto>> {
+    // Build where condition
+    const whereCondition: any = { userId };
+    
+    // Search filter
+    if (filters.search) {
+      whereCondition.name = {
+        contains: filters.search,
+        mode: 'insensitive'
+      };
+    }
+    
+    // Attribute filters
+    if (filters.attributeIds && filters.attributeIds.length > 0) {
+      if (filters.attributeFilter === 'all') {
+        // Family must contain ALL specified attributes
+        whereCondition.familyAttributes = {
+          every: {
+            attributeId: { in: filters.attributeIds }
+          }
+        };
+      } else {
+        // Family must contain ANY of the specified attributes (default)
+        whereCondition.familyAttributes = {
+          some: {
+            attributeId: { in: filters.attributeIds }
+          }
+        };
+      }
+    }
+    
+    // Has products filter
+    if (filters.hasProducts !== undefined) {
+      if (filters.hasProducts === 'true') {
+        whereCondition.products = { some: {} };
+      } else if (filters.hasProducts === 'false') {
+        whereCondition.products = { none: {} };
+      }
+    }
+    
+    // Has required attributes filter
+    if (filters.hasRequiredAttributes !== undefined) {
+      if (filters.hasRequiredAttributes === 'true') {
+        whereCondition.familyAttributes = {
+          ...whereCondition.familyAttributes,
+          some: { isRequired: true }
+        };
+      } else if (filters.hasRequiredAttributes === 'false') {
+        whereCondition.familyAttributes = {
+          ...whereCondition.familyAttributes,
+          none: { isRequired: true }
+        };
+      }
+    }
+    
+    // Date range filters
+    if (filters.createdAfter) {
+      whereCondition.createdAt = { gte: new Date(filters.createdAfter) };
+    }
+    if (filters.createdBefore) {
+      whereCondition.createdAt = { 
+        ...whereCondition.createdAt,
+        lte: new Date(filters.createdBefore) 
+      };
+    }
+    
+    // Build order by
+    let orderBy: any = {};
+    
+    if (filters.dateFilter) {
+      orderBy = { createdAt: filters.dateFilter === DateFilter.LATEST ? 'desc' : 'asc' };
+    } else if (filters.sortBy) {
+      switch (filters.sortBy) {
+        case FamilySortField.TOTAL_PRODUCTS:
+          orderBy = { products: { _count: filters.sortOrder || SortOrder.ASC } };
+          break;
+        case FamilySortField.TOTAL_ATTRIBUTES:
+          orderBy = { familyAttributes: { _count: filters.sortOrder || SortOrder.ASC } };
+          break;
+        default:
+          orderBy = { [filters.sortBy]: filters.sortOrder || SortOrder.ASC };
+      }
+    } else {
+      orderBy = { name: 'asc' };
+    }
+    
+    const paginationOptions = PaginationUtils.createPrismaOptions(filters.page || 1, filters.limit || 10);
+
+    const [families, total] = await Promise.all([
+      this.prisma.family.findMany({
+        where: whereCondition,
+        ...paginationOptions,
+        include: {
+          familyAttributes: {
+            include: {
+              attribute: true,
+            },
+          },
+          _count: {
+            select: {
+              products: true,
+              familyAttributes: true,
+            },
+          },
+        },
+        orderBy,
+      }),
+      this.prisma.family.count({ where: whereCondition }),
+    ]);
+
+    // Filter by counts if specified
+    let filteredFamilies = families;
+    if (filters.minProducts !== undefined || filters.maxProducts !== undefined ||
+        filters.minAttributes !== undefined || filters.maxAttributes !== undefined) {
+      filteredFamilies = families.filter(family => {
+        const productCount = family._count.products;
+        const attributeCount = family._count.familyAttributes;
+        
+        if (filters.minProducts !== undefined && productCount < filters.minProducts) return false;
+        if (filters.maxProducts !== undefined && productCount > filters.maxProducts) return false;
+        if (filters.minAttributes !== undefined && attributeCount < filters.minAttributes) return false;
+        if (filters.maxAttributes !== undefined && attributeCount > filters.maxAttributes) return false;
+        
+        return true;
+      });
+    }
+
+    const familyResponseDtos = filteredFamilies.map(family => ({
+      id: family.id,
+      name: family.name,
+      userId: family.userId,
+      createdAt: family.createdAt,
+      updatedAt: family.updatedAt,
+      productCount: family._count.products,
+      totalAttributes: family._count.familyAttributes,
+      familyAttributes: family.familyAttributes.map(fa => ({
+        id: fa.id,
+        isRequired: fa.isRequired,
+        additionalValue: this.attributeValidator.parseStoredValue(fa.attribute.type as AttributeType, fa.additionalValue),
+        attribute: {
+          id: fa.attribute.id,
+          name: fa.attribute.name,
+          type: fa.attribute.type,
+          defaultValue: this.attributeValidator.parseStoredValue(fa.attribute.type as AttributeType, fa.attribute.defaultValue),
+          userId: fa.attribute.userId,
+        },
+      })),
+    }));
+
+    return PaginationUtils.createPaginatedResponse(
+      familyResponseDtos, 
+      total, 
+      filters.page || 1, 
+      filters.limit || 10
+    );
   }
 
   async findOne(id: number, userId: number): Promise<FamilyResponseDto> {

@@ -16,6 +16,7 @@ import {
 import { AttributeService } from './attribute.service';
 import { CreateAttributeDto } from './dto/create-attribute.dto';
 import { UpdateAttributeDto } from './dto/update-attribute.dto';
+import { AttributeFilterDto, AttributeGroupFilterDto } from './dto/attribute-filter.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { User } from '../auth/decorators/user.decorator';
 import { UserAttributeType, getAvailableUserTypes, USER_TO_STORAGE_TYPE_MAP } from '../types/user-attribute-type.enum';
@@ -103,16 +104,33 @@ export class AttributeController {
   @Get()
   async findAll(
     @User() user: any,
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
+    @Query() filters: AttributeFilterDto,
   ) {
     try {
-      const pageNum = page ? parseInt(page) : 1;
-      const limitNum = limit ? parseInt(limit) : 10;
+      // If no filters are provided, use the basic findAll method
+      if (Object.keys(filters).length === 0 || 
+          (Object.keys(filters).length === 2 && filters.page && filters.limit)) {
+        const pageNum = filters.page || 1;
+        const limitNum = filters.limit || 10;
+        return await this.attributeService.findAll(user.id, pageNum, limitNum);
+      }
       
-      return await this.attributeService.findAll(user.id, pageNum, limitNum);
+      // Use the filtered search
+      return await this.attributeService.findAllWithFilters(user.id, filters);
     } catch (error) {
       return this.handleError(error, 'fetching');
+    }
+  }
+
+  @Get('groups')
+  async findAllGroups(
+    @User() user: any,
+    @Query() filters: AttributeGroupFilterDto,
+  ) {
+    try {
+      return await this.attributeService.findAllGroupsWithFilters(user.id, filters);
+    } catch (error) {
+      return this.handleError(error, 'fetching attribute groups');
     }
   }
 

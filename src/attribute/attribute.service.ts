@@ -3,10 +3,12 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateAttributeDto } from './dto/create-attribute.dto';
 import { UpdateAttributeDto } from './dto/update-attribute.dto';
 import { AttributeResponseDto } from './dto/attribute-response.dto';
+import { AttributeFilterDto, AttributeGroupFilterDto, AttributeSortField, SortOrder, DateFilter } from './dto/attribute-filter.dto';
 import { AttributeValueValidator } from './validators/attribute-value.validator';
 import { PaginatedResponse, PaginationUtils } from '../common';
 import type { Attribute } from '../../generated/prisma';
 import { AttributeType } from '../types/attribute-type.enum';
+import { UserAttributeType, storageTypeToUserType, userTypeToStorageType } from '../types/user-attribute-type.enum';
 
 @Injectable()
 export class AttributeService {
@@ -78,6 +80,210 @@ export class AttributeService {
       return PaginationUtils.createPaginatedResponse(transformedAttributes, total, page, limit);
     } catch (error) {
       this.logger.error(`Failed to fetch attributes for user ${userId}: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
+  async findAllWithFilters(userId: number, filters: AttributeFilterDto): Promise<PaginatedResponse<AttributeResponseDto>> {
+    try {
+      this.logger.log(`Fetching attributes with filters for user: ${userId}`, filters);
+      
+      // Build where condition
+      const whereCondition: any = { userId };
+      
+      // Search filter
+      if (filters.search) {
+        whereCondition.name = {
+          contains: filters.search,
+          mode: 'insensitive'
+        };
+      }
+      
+      // User-friendly type filter
+      if (filters.userFriendlyType) {
+        const storageType = userTypeToStorageType(filters.userFriendlyType);
+        if (storageType) {
+          whereCondition.type = storageType;
+        }
+      }
+      
+      // Default value filter
+      if (filters.hasDefaultValue !== undefined) {
+        if (filters.hasDefaultValue === 'true') {
+          whereCondition.defaultValue = { not: null };
+        } else if (filters.hasDefaultValue === 'false') {
+          whereCondition.defaultValue = null;
+        }
+      }
+      
+      // In groups filter
+      if (filters.inGroups !== undefined) {
+        if (filters.inGroups === 'true') {
+          whereCondition.attributeGroups = { some: {} };
+        } else if (filters.inGroups === 'false') {
+          whereCondition.attributeGroups = { none: {} };
+        }
+      }
+      
+      // Date range filters
+      if (filters.createdAfter) {
+        whereCondition.createdAt = { gte: new Date(filters.createdAfter) };
+      }
+      if (filters.createdBefore) {
+        whereCondition.createdAt = { 
+          ...whereCondition.createdAt,
+          lte: new Date(filters.createdBefore) 
+        };
+      }
+      
+      // Build order by
+      let orderBy: any = {};
+      
+      if (filters.dateFilter) {
+        orderBy = { createdAt: filters.dateFilter === DateFilter.LATEST ? 'desc' : 'asc' };
+      } else if (filters.sortBy) {
+        const sortField = filters.sortBy === AttributeSortField.TOTAL_ATTRIBUTES 
+          ? { attributeGroups: { _count: filters.sortOrder || SortOrder.ASC } }
+          : { [filters.sortBy]: filters.sortOrder || SortOrder.ASC };
+        orderBy = sortField;
+      } else {
+        orderBy = { name: 'asc' };
+      }
+      
+      const paginationOptions = PaginationUtils.createPrismaOptions(filters.page || 1, filters.limit || 10);
+
+      const [attributes, total] = await Promise.all([
+        this.prisma.attribute.findMany({
+          where: whereCondition,
+          ...paginationOptions,
+          include: {
+            attributeGroups: {
+              include: {
+                attributeGroup: {
+                  select: { id: true, name: true, description: true }
+                }
+              }
+            }
+          },
+          orderBy,
+        }),
+        this.prisma.attribute.count({ where: whereCondition }),
+      ]);
+      
+      const transformedAttributes = attributes.map(attr => this.transformAttributeForResponse(attr));
+      
+      return PaginationUtils.createPaginatedResponse(
+        transformedAttributes, 
+        total, 
+        filters.page || 1, 
+        filters.limit || 10
+      );
+    } catch (error) {
+      this.logger.error(`Failed to fetch attributes with filters for user ${userId}: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
+  async findAllGroupsWithFilters(userId: number, filters: AttributeGroupFilterDto): Promise<PaginatedResponse<any>> {
+    try {
+      this.logger.log(`Fetching attribute groups with filters for user: ${userId}`, filters);
+      
+      // Build where condition
+      const whereCondition: any = { userId };
+      
+      // Search filter
+      if (filters.search) {
+        whereCondition.OR = [
+          { name: { contains: filters.search, mode: 'insensitive' } },
+          { description: { contains: filters.search, mode: 'insensitive' } }
+        ];
+      }
+      
+      // Description filter
+      if (filters.hasDescription !== undefined) {
+        if (filters.hasDescription === 'true') {
+          whereCondition.description = { not: null };
+        } else if (filters.hasDescription === 'false') {
+          whereCondition.description = null;
+        }
+      }
+      
+      // Date range filters
+      if (filters.createdAfter) {
+        whereCondition.createdAt = { gte: new Date(filters.createdAfter) };
+      }
+      if (filters.createdBefore) {
+        whereCondition.createdAt = { 
+          ...whereCondition.createdAt,
+          lte: new Date(filters.createdBefore) 
+        };
+      }
+      
+      // Build order by
+      let orderBy: any = {};
+      
+      if (filters.dateFilter) {
+        orderBy = { createdAt: filters.dateFilter === DateFilter.LATEST ? 'desc' : 'asc' };
+      } else if (filters.sortBy) {
+        const sortField = filters.sortBy === AttributeSortField.TOTAL_ATTRIBUTES 
+          ? { attributes: { _count: filters.sortOrder || SortOrder.ASC } }
+          : { [filters.sortBy]: filters.sortOrder || SortOrder.ASC };
+        orderBy = sortField;
+      } else {
+        orderBy = { name: 'asc' };
+      }
+      
+      const paginationOptions = PaginationUtils.createPrismaOptions(filters.page || 1, filters.limit || 10);
+
+      const [groups, total] = await Promise.all([
+        this.prisma.attributeGroup.findMany({
+          where: whereCondition,
+          ...paginationOptions,
+          include: {
+            attributes: {
+              include: {
+                attribute: true
+              }
+            },
+            _count: {
+              select: { attributes: true }
+            }
+          },
+          orderBy,
+        }),
+        this.prisma.attributeGroup.count({ where: whereCondition }),
+      ]);
+      
+      // Filter by attribute count if specified
+      let filteredGroups = groups;
+      if (filters.minAttributes !== undefined || filters.maxAttributes !== undefined) {
+        filteredGroups = groups.filter(group => {
+          const count = group._count.attributes;
+          if (filters.minAttributes !== undefined && count < filters.minAttributes) return false;
+          if (filters.maxAttributes !== undefined && count > filters.maxAttributes) return false;
+          return true;
+        });
+      }
+      
+      const transformedGroups = filteredGroups.map(group => ({
+        id: group.id,
+        name: group.name,
+        description: group.description,
+        userId: group.userId,
+        createdAt: group.createdAt,
+        updatedAt: group.updatedAt,
+        totalAttributes: group._count.attributes,
+        attributes: group.attributes.map(attr => this.transformAttributeForResponse(attr.attribute))
+      }));
+      
+      return PaginationUtils.createPaginatedResponse(
+        transformedGroups, 
+        total, 
+        filters.page || 1, 
+        filters.limit || 10
+      );
+    } catch (error) {
+      this.logger.error(`Failed to fetch attribute groups with filters for user ${userId}: ${error.message}`, error.stack);
       throw error;
     }
   }

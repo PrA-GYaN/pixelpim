@@ -39,7 +39,7 @@ model Otp {
 
 model Attribute {
   id               Int                       @id @default(autoincrement())
-  name             String                    @unique
+  name             String
   type             String
   defaultValue     String?
   userId           Int
@@ -49,11 +49,13 @@ model Attribute {
   attributeGroups  AttributeGroupAttribute[]
   familyAttributes FamilyAttribute[]
   products         Product[]                 @relation("ProductAttributes")
+
+  @@unique([name, userId])
 }
 
 model AttributeGroup {
   id          Int                       @id @default(autoincrement())
-  name        String                    @unique
+  name        String
   description String?
   userId      Int
   createdAt   DateTime                  @default(now())
@@ -61,6 +63,8 @@ model AttributeGroup {
   user        User                      @relation("UserAttributeGroups", fields: [userId], references: [id], onDelete: Cascade)
   attributes  AttributeGroupAttribute[]
   products    Product[]                 @relation("ProductAttributeGroups")
+
+  @@unique([name, userId])
 }
 
 model AttributeGroupAttribute {
@@ -138,8 +142,24 @@ model Product {
   family           Family?         @relation("ProductFamilies", fields: [familyId], references: [id])
   user             User            @relation("UserProducts", fields: [userId], references: [id], onDelete: Cascade)
 
+  // Variant relationships (symmetric many-to-many)
+  variantLinksA    ProductVariant[] @relation("ProductVariantA")
+  variantLinksB    ProductVariant[] @relation("ProductVariantB")
+
   @@unique([sku, userId])
   @@unique([name, userId])
+}
+
+model ProductVariant {
+  id         Int     @id @default(autoincrement())
+  productAId Int
+  productBId Int
+
+  productA   Product @relation("ProductVariantA", fields: [productAId], references: [id], onDelete: Cascade)
+  productB   Product @relation("ProductVariantB", fields: [productBId], references: [id], onDelete: Cascade)
+
+  @@unique([productAId, productBId])
+  @@map("product_variants")
 }
 
 model AssetGroup {

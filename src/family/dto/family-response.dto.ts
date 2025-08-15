@@ -27,5 +27,6 @@ export class FamilyResponseDto {
   updatedAt: Date;
   familyAttributes: FamilyAttributeResponseDto[];
   productCount?: number; // For findAll endpoint
+  totalAttributes?: number; // Total number of attributes in family
   products?: ProductSummaryDto[]; // For findOne endpoint
 }

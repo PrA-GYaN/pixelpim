@@ -14,6 +14,7 @@ import { FamilyService } from './family.service';
 import { CreateFamilyDto } from './dto/create-family.dto';
 import { UpdateFamilyDto } from './dto/update-family.dto';
 import { FamilyResponseDto } from './dto/family-response.dto';
+import { FamilyFilterDto } from './dto/family-filter.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { User } from '../auth/decorators/user.decorator';
 import { PaginatedResponse } from '../common';
@@ -31,13 +32,18 @@ export class FamilyController {
   @Get()
   findAll(
     @User() user: any,
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
+    @Query() filters: FamilyFilterDto,
   ): Promise<PaginatedResponse<FamilyResponseDto>> {
-    const pageNum = page ? parseInt(page) : 1;
-    const limitNum = limit ? parseInt(limit) : 10;
+    // If no filters are provided, use the basic findAll method
+    if (Object.keys(filters).length === 0 || 
+        (Object.keys(filters).length === 2 && filters.page && filters.limit)) {
+      const pageNum = filters.page || 1;
+      const limitNum = filters.limit || 10;
+      return this.familyService.findAll(user.id, pageNum, limitNum);
+    }
     
-    return this.familyService.findAll(user.id, pageNum, limitNum);
+    // Use the filtered search
+    return this.familyService.findAllWithFilters(user.id, filters);
   }
 
   @Get(':id')

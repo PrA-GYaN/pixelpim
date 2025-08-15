@@ -17,6 +17,8 @@ import { ProductService } from './product.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ProductResponseDto } from './dto/product-response.dto';
+import { CreateProductVariantDto, RemoveProductVariantDto } from './dto/product-variant.dto';
+import { ExportProductDto, ExportProductResponseDto } from './dto/export-product.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { User as GetUser } from '../auth/decorators/user.decorator';
 import { PaginatedResponse } from '../common';
@@ -172,5 +174,55 @@ export class ProductController {
     this.logger.log(`User ${user.id} deleting product: ${id}`);
     
     return this.productService.remove(id, user.id);
+  }
+
+  // Product Variant Management Endpoints
+
+  @Post('variants')
+  @HttpCode(HttpStatus.CREATED)
+  async createVariant(
+    @Body() createVariantDto: CreateProductVariantDto,
+    @GetUser() user: User,
+  ) {
+    this.logger.log(`User ${user.id} creating product variant relationships`);
+    
+    return this.productService.createVariant(createVariantDto, user.id);
+  }
+
+  @Delete('variants/:productId/:variantProductId')
+  @HttpCode(HttpStatus.OK)
+  async removeVariant(
+    @Param('productId', ParseIntPipe) productId: number,
+    @Param('variantProductId', ParseIntPipe) variantProductId: number,
+    @GetUser() user: User,
+  ) {
+    this.logger.log(`User ${user.id} removing product variant relationship`);
+    this.logger.log(`Removing variant relationship: productId=${productId}, variantProductId=${variantProductId}`);
+    
+    const removeVariantDto = { productId, variantProductId };
+    return this.productService.removeVariant(removeVariantDto, user.id);
+  }
+
+  @Get(':id/variants')
+  async getProductVariants(
+    @Param('id', ParseIntPipe) productId: number,
+    @GetUser() user: User,
+  ) {
+    this.logger.log(`User ${user.id} getting variants for product: ${productId}`);
+    
+    return this.productService.getProductVariants(productId, user.id);
+  }
+
+  // Product Export Endpoint
+
+  @Post('export')
+  @HttpCode(HttpStatus.OK)
+  async exportProducts(
+    @Body() exportDto: ExportProductDto,
+    @GetUser() user: User,
+  ): Promise<ExportProductResponseDto> {
+    this.logger.log(`User ${user.id} exporting ${exportDto.productIds.length} products with attributes: ${exportDto.attributes.join(', ')}`);
+    
+    return this.productService.exportProducts(exportDto, user.id);
   }
 }

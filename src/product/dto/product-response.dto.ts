@@ -1,3 +1,11 @@
+export class ProductVariantSummaryDto {
+  id: number;
+  name: string;
+  sku: string;
+  imageUrl?: string;
+  status: string;
+}
+
 export class ProductResponseDto {
   id: number;
   name: string;
@@ -32,6 +40,8 @@ export class ProductResponseDto {
     id: number;
     name: string;
   };
+  variants?: ProductVariantSummaryDto[]; // All products that are variants of this product
+  totalVariants?: number; // Count of variants
 }
 
 export class CreateProductResponseDto {
