@@ -45,6 +45,7 @@ export class ProductController {
   @Get()
   async findAll(
     @GetUser() user: User,
+    @Query('search') search?: string,
     @Query('status') status?: string,
     @Query('categoryId') categoryId?: string,
     @Query('attributeId') attributeId?: string,
@@ -64,6 +65,7 @@ export class ProductController {
     
     return this.productService.findAll(
       user.id, 
+      search,
       status, 
       categoryIdInt, 
       attributeIdInt, 

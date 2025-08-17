@@ -105,6 +105,7 @@ export class ProductService {
 
   async findAll(
     userId: number, 
+    search?: string,
     status?: string, 
     categoryId?: number, 
     attributeId?: number, 
@@ -117,6 +118,23 @@ export class ProductService {
       this.logger.log(`Fetching products for user: ${userId}`);
 
       const whereCondition: any = { userId };
+
+      if (search) {
+        whereCondition.OR = [
+          {
+            name: {
+              contains: search,
+              mode: 'insensitive',
+            },
+          },
+          {
+            sku: {
+              contains: search,
+              mode: 'insensitive',
+            },
+          },
+        ];
+      }
 
       if (status) {
         whereCondition.status = status;

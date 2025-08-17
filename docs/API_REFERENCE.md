@@ -2011,13 +2011,16 @@ Retrieve all products with filtering options.
 **Authentication:** Required (JWT token)
 
 **Query Parameters:**
+- `search`: Search products by name or SKU (case-insensitive)
 - `status`: Filter by status ("complete" or "incomplete")
 - `categoryId`: Filter by category ID
 - `attributeId`: Filter by attribute ID
 - `attributeGroupId`: Filter by attribute group ID
 - `familyId`: Filter by family ID
+- `page`: Page number (default: 1)
+- `limit`: Number of items per page (default: 10)
 
-**Example:** `GET /products?status=complete&categoryId=1&familyId=2`
+**Example:** `GET /products?search=iphone&status=complete&categoryId=1&familyId=2`
 
 **Success Response (200):**
 ```json
@@ -2360,6 +2363,14 @@ curl -X POST http://localhost:3000/products \
 ### Get All Products
 ```bash
 curl -X GET http://localhost:3000/products \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+
+# With search
+curl -X GET "http://localhost:3000/products?search=iphone" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+
+# With multiple filters
+curl -X GET "http://localhost:3000/products?search=galaxy&status=complete&page=1&limit=5" \
   -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
 ```
 

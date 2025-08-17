@@ -32,6 +32,8 @@ All paginated responses follow this format:
 GET /products?page=1&limit=10
 GET /products?page=2&limit=5&status=active
 GET /products?page=1&limit=20&categoryId=1
+GET /products?search=iphone&page=1&limit=10
+GET /products?search=galaxy&status=complete&page=1&limit=5
 ```
 
 ### Get Products by Category (Paginated)
