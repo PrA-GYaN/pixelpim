@@ -44,6 +44,7 @@ export class ProductService {
           sku: createProductDto.sku,
           productLink: createProductDto.productLink,
           imageUrl: createProductDto.imageUrl,
+          subImages: createProductDto.subImages || [],
           status: createProductDto.status || 'incomplete',
           categoryId: createProductDto.categoryId,
           attributeId: createProductDto.attributeId,
@@ -78,6 +79,18 @@ export class ProductService {
             select: {
               id: true,
               name: true,
+              familyAttributes: {
+                include: {
+                  attribute: {
+                    select: {
+                      id: true,
+                      name: true,
+                      type: true,
+                      defaultValue: true,
+                    },
+                  },
+                },
+              },
             },
           },
         },
@@ -158,6 +171,18 @@ export class ProductService {
               select: {
                 id: true,
                 name: true,
+                familyAttributes: {
+                  include: {
+                    attribute: {
+                      select: {
+                        id: true,
+                        name: true,
+                        type: true,
+                        defaultValue: true,
+                      },
+                    },
+                  },
+                },
               },
             },
           },
@@ -211,6 +236,18 @@ export class ProductService {
             select: {
               id: true,
               name: true,
+              familyAttributes: {
+                include: {
+                  attribute: {
+                    select: {
+                      id: true,
+                      name: true,
+                      type: true,
+                      defaultValue: true,
+                    },
+                  },
+                },
+              },
             },
           },
         },
@@ -267,6 +304,18 @@ export class ProductService {
             select: {
               id: true,
               name: true,
+              familyAttributes: {
+                include: {
+                  attribute: {
+                    select: {
+                      id: true,
+                      name: true,
+                      type: true,
+                      defaultValue: true,
+                    },
+                  },
+                },
+              },
             },
           },
         },
@@ -333,6 +382,10 @@ export class ProductService {
         updateData.imageUrl = updateProductDto.imageUrl;
       }
 
+      if (updateProductDto.subImages !== undefined) {
+        updateData.subImages = updateProductDto.subImages;
+      }
+
       if (updateProductDto.status !== undefined) {
         updateData.status = updateProductDto.status;
       }
@@ -383,6 +436,18 @@ export class ProductService {
             select: {
               id: true,
               name: true,
+              familyAttributes: {
+                include: {
+                  attribute: {
+                    select: {
+                      id: true,
+                      name: true,
+                      type: true,
+                      defaultValue: true,
+                    },
+                  },
+                },
+              },
             },
           },
         },
@@ -466,6 +531,18 @@ export class ProductService {
               select: {
                 id: true,
                 name: true,
+                familyAttributes: {
+                  include: {
+                    attribute: {
+                      select: {
+                        id: true,
+                        name: true,
+                        type: true,
+                        defaultValue: true,
+                      },
+                    },
+                  },
+                },
               },
             },
           },
@@ -532,6 +609,18 @@ export class ProductService {
               select: {
                 id: true,
                 name: true,
+                familyAttributes: {
+                  include: {
+                    attribute: {
+                      select: {
+                        id: true,
+                        name: true,
+                        type: true,
+                        defaultValue: true,
+                      },
+                    },
+                  },
+                },
               },
             },
           },
@@ -598,6 +687,18 @@ export class ProductService {
               select: {
                 id: true,
                 name: true,
+                familyAttributes: {
+                  include: {
+                    attribute: {
+                      select: {
+                        id: true,
+                        name: true,
+                        type: true,
+                        defaultValue: true,
+                      },
+                    },
+                  },
+                },
               },
             },
           },
@@ -664,6 +765,18 @@ export class ProductService {
               select: {
                 id: true,
                 name: true,
+                familyAttributes: {
+                  include: {
+                    attribute: {
+                      select: {
+                        id: true,
+                        name: true,
+                        type: true,
+                        defaultValue: true,
+                      },
+                    },
+                  },
+                },
               },
             },
           },
@@ -758,6 +871,7 @@ export class ProductService {
       sku: product.sku,
       productLink: product.productLink,
       imageUrl: product.imageUrl,
+      subImages: product.subImages || [],
       status: product.status,
       categoryId: product.categoryId,
       attributeId: product.attributeId,
@@ -785,6 +899,22 @@ export class ProductService {
       family: product.family ? {
         id: product.family.id,
         name: product.family.name,
+        requiredAttributes: product.family.familyAttributes
+          ?.filter((fa: any) => fa.isRequired)
+          ?.map((fa: any) => ({
+            id: fa.attribute.id,
+            name: fa.attribute.name,
+            type: fa.attribute.type,
+            defaultValue: fa.attribute.defaultValue,
+          })) || [],
+        optionalAttributes: product.family.familyAttributes
+          ?.filter((fa: any) => !fa.isRequired)
+          ?.map((fa: any) => ({
+            id: fa.attribute.id,
+            name: fa.attribute.name,
+            type: fa.attribute.type,
+            defaultValue: fa.attribute.defaultValue,
+          })) || [],
       } : undefined,
       variants: variants.length > 0 ? variants.map(variant => ({
         id: variant.id,
@@ -1180,6 +1310,18 @@ export class ProductService {
         select: {
           id: true,
           name: true,
+          familyAttributes: {
+            include: {
+              attribute: {
+                select: {
+                  id: true,
+                  name: true,
+                  type: true,
+                  defaultValue: true,
+                },
+              },
+            },
+          },
         },
       };
     }

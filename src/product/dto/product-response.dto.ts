@@ -12,6 +12,7 @@ export class ProductResponseDto {
   sku: string;
   productLink?: string;
   imageUrl?: string;
+  subImages?: string[];
   status: string;
   categoryId?: number;
   attributeId?: number;
@@ -39,6 +40,18 @@ export class ProductResponseDto {
   family?: {
     id: number;
     name: string;
+    requiredAttributes?: {
+      id: number;
+      name: string;
+      type: string;
+      defaultValue?: string;
+    }[];
+    optionalAttributes?: {
+      id: number;
+      name: string;
+      type: string;
+      defaultValue?: string;
+    }[];
   };
   variants?: ProductVariantSummaryDto[]; // All products that are variants of this product
   totalVariants?: number; // Count of variants

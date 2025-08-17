@@ -1,5 +1,5 @@
-import { IsString, IsNotEmpty, IsOptional, IsUrl, IsInt, IsIn } from 'class-validator';
-import { Transform } from 'class-transformer';
+import { IsString, IsNotEmpty, IsOptional, IsUrl, IsInt, IsIn, IsArray } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
 
 export class CreateProductDto {
   @IsString()
@@ -21,6 +21,13 @@ export class CreateProductDto {
   @IsString()
   @IsUrl({}, { message: 'Image URL must be a valid URL' })
   imageUrl?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @IsUrl({}, { each: true, message: 'Each sub image must be a valid URL' })
+  @Type(() => String)
+  subImages?: string[];
 
   @IsOptional()
   @IsString()

@@ -1,6 +1,6 @@
 import { PartialType } from '@nestjs/mapped-types';
-import { IsString, IsOptional, IsUrl, IsIn, IsInt } from 'class-validator';
-import { Transform } from 'class-transformer';
+import { IsString, IsOptional, IsUrl, IsIn, IsInt, IsArray } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
 import { CreateProductDto } from './create-product.dto';
 
 export class UpdateProductDto extends PartialType(CreateProductDto) {
@@ -23,6 +23,13 @@ export class UpdateProductDto extends PartialType(CreateProductDto) {
   @IsString()
   @IsUrl({}, { message: 'Image URL must be a valid URL' })
   imageUrl?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @IsUrl({}, { each: true, message: 'Each sub image must be a valid URL' })
+  @Type(() => String)
+  subImages?: string[];
 
   @IsOptional()
   @IsString()
