@@ -3,6 +3,7 @@ import { IsArray, IsInt, IsOptional, IsString, IsEnum, ArrayMinSize } from 'clas
 export enum ExportFormat {
   CSV = 'csv',
   JSON = 'json',
+  EXCEL = 'excel',
 }
 
 export enum ProductAttribute {
