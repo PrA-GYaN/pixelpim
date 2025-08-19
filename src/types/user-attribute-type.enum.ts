@@ -19,7 +19,7 @@ export const USER_TO_STORAGE_TYPE_MAP = {
   [UserAttributeType.HTML]: 'TEXT', // HTML content stored as TEXT
   [UserAttributeType.INTEGER]: 'INTEGER',
   [UserAttributeType.DECIMAL]: 'NUMBER',
-  [UserAttributeType.DROPDOWN]: 'ENUM',
+  [UserAttributeType.DROPDOWN]: 'ARRAY',
   [UserAttributeType.MULTISELECT]: 'ARRAY',
   [UserAttributeType.DATE]: 'DATE',
   [UserAttributeType.URL]: 'URL',
