@@ -59,8 +59,8 @@ export class AssetService {
 
     return {
       ...asset,
-      size: Number(asset.size), // Convert BigInt to Number for JSON serialization
-      url: cloudinaryResult.secure_url,
+      size: Number(asset.size), 
+      url: cloudinaryResult.url,
       thumbnailUrl: CloudinaryUtil.getThumbnailUrl(cloudinaryResult.public_id),
       formattedSize: CloudinaryUtil.formatFileSize(Number(asset.size)),
       cloudinaryData: {
