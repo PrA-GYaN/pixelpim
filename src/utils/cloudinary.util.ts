@@ -311,4 +311,16 @@ export class CloudinaryUtil {
     const matches = url.match(/\/v\d+\/(.+)\./);
     return matches ? matches[1] : '';
   }
+
+  static extractPublicId(secureUrl: string): string {
+    try {
+      const url = new URL(secureUrl);
+      const parts = url.pathname.split('/'); // e.g., ['', 'image', 'upload', 'v12345', 'pixelpim', 'assets', 'filename_xyz.jpg']
+      const publicIdWithExtension = parts.slice(4).join('/'); // remove '/image/upload/v12345'
+      return publicIdWithExtension.replace(/\.[^/.]+$/, ''); // remove extension (e.g., '.jpg')
+    } catch (err) {
+      throw new Error(`Failed to extract public_id from URL: ${secureUrl}`);
+    }
+  }
+  
 }
