@@ -78,16 +78,16 @@ export class FamilyService {
           userId,
           familyAttributes: {
             create: [
-              ...requiredAttributes.map(attr => ({
-                attributeId: attr.attributeId,
-                isRequired: attr.isRequired ?? true,
-                additionalValue: attr.additionalValue !== undefined ? String(attr.additionalValue) : null,
-              })),
-              ...otherAttributes.map(attr => ({
-                attributeId: attr.attributeId,
-                isRequired: attr.isRequired ?? false,
-                additionalValue: attr.additionalValue !== undefined ? String(attr.additionalValue) : null,
-              })),
+                ...requiredAttributes.map(attr => ({
+                  attributeId: attr.attributeId,
+                  isRequired: true,
+                  additionalValue: attr.additionalValue !== undefined ? String(attr.additionalValue) : null,
+                })),
+                ...otherAttributes.map(attr => ({
+                  attributeId: attr.attributeId,
+                  isRequired: false,
+                  additionalValue: attr.additionalValue !== undefined ? String(attr.additionalValue) : null,
+                })),
             ],
           },
         },
@@ -443,16 +443,16 @@ export class FamilyService {
             familyAttributes: {
               deleteMany: {},
               create: [
-                ...requiredAttributes.map(attr => ({
-                  attributeId: attr.attributeId,
-                  isRequired: attr.isRequired ?? true,
-                  additionalValue: attr.additionalValue !== undefined ? String(attr.additionalValue) : null,
-                })),
-                ...otherAttributes.map(attr => ({
-                  attributeId: attr.attributeId,
-                  isRequired: attr.isRequired ?? false,
-                  additionalValue: attr.additionalValue !== undefined ? String(attr.additionalValue) : null,
-                })),
+                  ...requiredAttributes.map(attr => ({
+                    attributeId: attr.attributeId,
+                    isRequired: true,
+                    additionalValue: attr.additionalValue !== undefined ? String(attr.additionalValue) : null,
+                  })),
+                  ...otherAttributes.map(attr => ({
+                    attributeId: attr.attributeId,
+                    isRequired: false,
+                    additionalValue: attr.additionalValue !== undefined ? String(attr.additionalValue) : null,
+                  })),
               ],
             },
           }),
