@@ -97,35 +97,21 @@ export class CategoryService {
   async findOne(
     id: number,
     userId: number,
-  ): Promise<CategoryTreeResponseDto> {
+  ): Promise<CategoryResponseDto> {
     try {
       this.logger.log(`Fetching full tree for category ID=${id}`);
 
-      const [allCategories, products] = await Promise.all([
-        this.prisma.category.findMany({
-          where: { userId },
-          orderBy: { name: 'asc' },
-        }),
-        this.prisma.product.findMany({
-          where: { categoryId: id },
-          select: {
-            id: true,
-            name: true,
-            sku: true,
-            status: true,
-            imageUrl: true,
-          },
-          orderBy: { createdAt: 'desc' },
-        }),
-      ]);
-
-      const root = allCategories.find((c) => c.id === id);
-      if (!root) {
+      const category = await this.prisma.category.findUnique({
+        where: { id, userId },
+        include: {
+          parentCategory: true,
+          subcategories: true,
+        },
+      });
+      if (!category) {
         throw new NotFoundException(`Category with ID ${id} not found or unauthorized`);
       }
-
-  const tree = this.buildCategoryTree(root, 0, [], allCategories);
-  return tree;
+      return this.transformCategoryResponse(category);
     } catch (error) {
       if (error instanceof NotFoundException) throw error;
       this.logger.error(`findOne error: ${error.message}`, error.stack);
