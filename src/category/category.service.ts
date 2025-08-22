@@ -442,7 +442,26 @@ export class CategoryService {
     const descendants = await this.getAllDescendants(categoryId, userId);
     
     if (descendants.some(desc => desc.id === newParentId)) {
-      throw new BadRequestException('Cannot create circular reference in category hierarchy');
+      // Handle the promotion to avoid circular reference
+      await this.prisma.$transaction(async (tx) => {
+        // Get category's old parent
+        const category = await tx.category.findFirst({
+          where: { id: categoryId, userId },
+          select: { parentCategoryId: true },
+        });
+
+        if (!category) {
+          throw new NotFoundException(`Category with ID ${categoryId} not found`);
+        }
+
+        const oldParentId = category.parentCategoryId;
+
+        // Move the newParent to have parent = oldParentId
+        await tx.category.update({
+          where: { id: newParentId },
+          data: { parentCategoryId: oldParentId },
+        });
+      });
     }
   }
 
