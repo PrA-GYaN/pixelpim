@@ -1,4 +1,11 @@
-import { Injectable, NotFoundException, ConflictException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+  ForbiddenException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
@@ -6,34 +13,13 @@ import { CategoryResponseDto, CategoryTreeResponseDto } from './dto/category-res
 import { PaginatedResponse, PaginationUtils } from '../common';
 import type { Category } from '../../generated/prisma';
 
-// import {
-//   Injectable,
-//   NotFoundException,
-//   ConflictException,
-//   BadRequestException,
-//   Logger,
-// } from '@nestjs/common';
-// import { Category } from '@prisma/client';
-// import { PrismaService } from '../prisma/prisma.service';
-// import { CreateCategoryDto } from './dto/create-category.dto';
-// import { UpdateCategoryDto } from './dto/update-category.dto';
-// import {
-//   CategoryResponseDto,
-//   CategoryTreeResponseDto,
-// } from './dto/category-response.dto';
-// import { PaginatedResponse, PaginationUtils } from '../common';
-
 @Injectable()
 export class CategoryService {
   private readonly logger = new Logger(CategoryService.name);
 
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Create a category */
-  async create(
-    createDto: CreateCategoryDto,
-    userId: number,
-  ): Promise<CategoryResponseDto> {
+  async create(createDto: CreateCategoryDto, userId: number): Promise<CategoryResponseDto> {
     try {
       this.logger.log(`Creating category '${createDto.name}' for user ${userId}`);
 
@@ -42,19 +28,18 @@ export class CategoryService {
         await this.validateNoCircularReference(createDto.parentCategoryId, userId);
       }
 
-      const result = await this.prisma.category.create({
+      const created = await this.prisma.category.create({
         data: { ...createDto, userId },
-        include: { parentCategory: true, subcategories: true },
       });
 
-      this.logger.log(`Created category ID=${result.id}`);
-      return this.transformCategoryResponse(result);
+      this.logger.log(`Created category ID=${created.id}`);
+
+      return this.findOne(created.id, userId);
     } catch (error) {
       this.handleDatabaseError(error, 'create');
     }
   }
 
-  /** Fetch root categories with pagination, including counts */
   async findAll(
     userId: number,
     page = 1,
@@ -93,25 +78,21 @@ export class CategoryService {
     }
   }
 
-  /** Fetch full tree under specific category, plus its products */
-  async findOne(
-    id: number,
-    userId: number,
-  ): Promise<CategoryResponseDto> {
+  async findOne(id: number, userId: number): Promise<CategoryResponseDto> {
     try {
       this.logger.log(`Fetching full tree for category ID=${id}`);
 
-      const category = await this.prisma.category.findUnique({
-        where: { id, userId },
-        include: {
-          parentCategory: true,
-          subcategories: true,
-        },
+      const allCategories = await this.prisma.category.findMany({
+        where: { userId },
+        orderBy: { name: 'asc' },
       });
-      if (!category) {
+
+      const rootCategory = allCategories.find((cat) => cat.id === id);
+      if (!rootCategory) {
         throw new NotFoundException(`Category with ID ${id} not found or unauthorized`);
       }
-      return this.transformCategoryResponse(category);
+
+      return this.buildSubcategoryTree(rootCategory, allCategories);
     } catch (error) {
       if (error instanceof NotFoundException) throw error;
       this.logger.error(`findOne error: ${error.message}`, error.stack);
@@ -119,12 +100,7 @@ export class CategoryService {
     }
   }
 
-  /** Update category metadata or parent */
-  async update(
-    id: number,
-    dto: UpdateCategoryDto,
-    userId: number,
-  ): Promise<CategoryResponseDto> {
+  async update(id: number, dto: UpdateCategoryDto, userId: number): Promise<CategoryResponseDto> {
     try {
       await this.findOne(id, userId);
       this.logger.log(`Updating category ID=${id}`);
@@ -139,14 +115,12 @@ export class CategoryService {
         }
       }
 
-      const updated = await this.prisma.category.update({
+      await this.prisma.category.update({
         where: { id },
         data: dto,
-        include: { parentCategory: true, subcategories: true },
       });
 
-      this.logger.log(`Updated category ID=${id}`);
-      return this.transformCategoryResponse(updated);
+      return this.findOne(id, userId);
     } catch (error) {
       if (error instanceof NotFoundException || error instanceof BadRequestException) {
         throw error;
@@ -155,7 +129,6 @@ export class CategoryService {
     }
   }
 
-  /** Delete category if it has no subcategories */
   async remove(id: number, userId: number): Promise<{ message: string }> {
     try {
       await this.findOne(id, userId);
@@ -180,7 +153,6 @@ export class CategoryService {
     }
   }
 
-  /** Get full nested tree of all user categories */
   async getCategoryTree(userId: number): Promise<CategoryTreeResponseDto[]> {
     try {
       this.logger.log(`Fetching full category tree for user ${userId}`);
@@ -198,7 +170,6 @@ export class CategoryService {
     }
   }
 
-  /** Get subcategories under specific category (paginated) */
   async getSubcategories(
     id: number,
     userId: number,
@@ -230,7 +201,22 @@ export class CategoryService {
     }
   }
 
-  /** Recursive helper to build tree in-memory */
+  private buildSubcategoryTree(category: Category, allCategories: Category[]): CategoryResponseDto {
+    const children = allCategories.filter((c) => c.parentCategoryId === category.id);
+
+    return {
+      id: category.id,
+      name: category.name,
+      description: category.description ?? undefined,
+      parentCategoryId: category.parentCategoryId ?? undefined,
+      userId: category.userId,
+      createdAt: (category as any).createdAt,
+      updatedAt: (category as any).updatedAt,
+      parentCategory: undefined,
+      subcategories: children.map((child) => this.buildSubcategoryTree(child, allCategories)),
+    };
+  }
+
   private buildCategoryTree(
     category: Category,
     level: number,
@@ -252,7 +238,6 @@ export class CategoryService {
     };
   }
 
-  /** Ensure parent category exists and belongs to user */
   private async validateParentCategory(parentId: number, userId: number) {
     const exists = await this.prisma.category.findFirst({
       where: { id: parentId, userId },
@@ -262,7 +247,6 @@ export class CategoryService {
     }
   }
 
-  /** Prevent cycles when assigning parent */
   private async validateNoCircularReference(
     parentId: number,
     userId: number,
@@ -289,46 +273,12 @@ export class CategoryService {
     }
   }
 
-  /** Convert a flat category (with relations) into response DTO */
-  private transformCategoryResponse(cat: any): CategoryResponseDto {
-    return {
-      id: cat.id,
-      name: cat.name,
-      description: cat.description ?? null,
-      parentCategoryId: cat.parentCategoryId,
-      userId: cat.userId,
-      createdAt: (cat as any).createdAt,
-      updatedAt: (cat as any).updatedAt,
-      parentCategory: cat.parentCategory
-        ? {
-            id: cat.parentCategory.id,
-            name: cat.parentCategory.name,
-            description: cat.parentCategory.description ?? null,
-            parentCategoryId: cat.parentCategory.parentCategoryId,
-            userId: cat.parentCategory.userId,
-            createdAt: (cat.parentCategory as any).createdAt,
-            updatedAt: (cat.parentCategory as any).updatedAt,
-          }
-        : undefined,
-      subcategories: cat.subcategories?.map((sub: any) => ({
-        id: sub.id,
-        name: sub.name,
-        description: sub.description ?? null,
-        parentCategoryId: sub.parentCategoryId,
-        userId: sub.userId,
-        createdAt: (sub as any).createdAt,
-        updatedAt: (sub as any).updatedAt,
-      })) ?? [],
-    };
-  }
-
-  /** Transform flat category with product counts into hierarchical DTO with counts */
   private transformHierarchicalResponseWithCount(cat: any, isChild = false): any {
     const base = {
       id: cat.id,
       name: cat.name,
-      description: cat.description ?? null,
-      parentCategoryId: cat.parentCategoryId,
+      description: cat.description ?? undefined,
+      parentCategoryId: cat.parentCategoryId ?? undefined,
       productCount: cat._count?.products ?? 0,
       subcategories: cat.subcategories?.map((s: any) =>
         this.transformHierarchicalResponseWithCount(s, true),
@@ -339,27 +289,44 @@ export class CategoryService {
       : {
           ...base,
           userId: cat.userId,
-          createdAt: (cat as any).createdAt,
-          updatedAt: (cat as any).updatedAt,
+          createdAt: cat.createdAt,
+          updatedAt: cat.updatedAt,
+          parentCategory: cat.parentCategory ?? undefined,
         };
   }
 
-  /** Handle Prisma errors */
+  private transformCategoryResponse(cat: any): CategoryResponseDto {
+    return {
+      id: cat.id,
+      name: cat.name,
+      description: cat.description ?? undefined,
+      parentCategoryId: cat.parentCategoryId ?? undefined,
+      userId: cat.userId,
+      createdAt: cat.createdAt,
+      updatedAt: cat.updatedAt,
+      parentCategory: cat.parentCategory ?? undefined,
+      subcategories: cat.subcategories?.map((sc: any) => ({
+        id: sc.id,
+        name: sc.name,
+        description: sc.description ?? undefined,
+        parentCategoryId: sc.parentCategoryId ?? undefined,
+        userId: sc.userId,
+        createdAt: sc.createdAt,
+        updatedAt: sc.updatedAt,
+        parentCategory: undefined,
+        subcategories: [], // only one level
+      })) ?? [],
+    };
+  }
+
   private handleDatabaseError(error: any, operation: string): never {
-    this.logger.error(`DB error during '${operation}': ${error.message}`, error.stack);
-    if (error.code === 'P2002') {
-      throw new ConflictException('Duplicate category name');
-    }
-    if (error.code === 'P2000') {
-      throw new BadRequestException('Value too long');
+    if (error.code === 'P2003') {
+      throw new BadRequestException('Foreign key constraint failed');
     }
     if (error.code === 'P2025') {
-      throw new NotFoundException('Category not found');
+      throw new NotFoundException('Record not found');
     }
-    if (error.status) {
-      throw error;
-    }
+    this.logger.error(`${operation} database error: ${error.message}`, error.stack);
     throw new BadRequestException(`Failed to ${operation} category`);
   }
 }
-
