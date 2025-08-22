@@ -27,6 +27,7 @@ export class CategoryTreeResponseDto {
   level: number;
   path: string[];
   subcategories: CategoryTreeResponseDto[];
+  products?: ProductSummaryDto[];
 }
 
 export class CreateCategoryResponseDto {
