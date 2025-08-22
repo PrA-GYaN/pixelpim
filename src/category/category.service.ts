@@ -117,63 +117,93 @@ export class CategoryService {
   }
 
   async findOne(id: number, userId: number): Promise<CategoryResponseDto> {
-    try {
-      this.logger.log(`Fetching category: ${id} for user: ${userId}`);
+  try {
+    this.logger.log(`Fetching category: ${id} for user: ${userId}`);
 
-      const category = await this.prisma.category.findFirst({
-        where: {
-          id,
-          userId, // Ensure user owns the category
-        },
-        include: {
-          parentCategory: true,
-          subcategories: {
-            include: {
-              subcategories: {
-                include: {
-                  _count: {
-                    select: {
-                      products: true,
-                    },
-                  },
-                },
-              },
-              _count: {
-                select: {
-                  products: true,
-                },
-              },
-            },
+    // Fetch all categories for this user (for recursive subcategories)
+    const allCategories = await this.prisma.category.findMany({
+      where: { userId },
+      orderBy: { name: 'asc' },
+    });
+
+    // Fetch the main category
+    const category = await this.prisma.category.findFirst({
+      where: { id, userId },
+      include: {
+        parentCategory: true,
+        products: {
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            status: true,
+            imageUrl: true,
           },
-          products: {
-            select: {
-              id: true,
-              name: true,
-              sku: true,
-              status: true,
-              imageUrl: true,
-            },
-            orderBy: {
-              createdAt: 'desc',
-            },
-          },
+          orderBy: { createdAt: 'desc' },
         },
-      });
+      },
+    });
 
-      if (!category) {
-        throw new NotFoundException(`Category with ID ${id} not found or access denied`);
-      }
-
-      return this.transformCategoryForResponseWithProducts(category);
-    } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
-
-      this.logger.error(`Failed to fetch category ${id}: ${error.message}`, error.stack);
-      throw new BadRequestException('Failed to fetch category');
+    if (!category) {
+      throw new NotFoundException(`Category with ID ${id} not found or access denied`);
     }
+
+    // Build recursive subcategory tree
+    const buildSubcategoriesRecursively = (parentId: number): CategoryResponseDto[] => {
+      return allCategories
+        .filter(cat => cat.parentCategoryId === parentId)
+        .map(sub => ({
+          id: sub.id,
+          name: sub.name,
+          description: sub.description ?? undefined,
+          parentCategoryId: sub.parentCategoryId ?? undefined,
+          userId: sub.userId,
+          createdAt: sub.createdAt,
+          updatedAt: sub.updatedAt,
+          subcategories: buildSubcategoriesRecursively(sub.id),
+        }));
+    };
+
+    // Return full category response
+    return {
+      id: category.id,
+      name: category.name,
+      description: category.description ?? undefined,
+      parentCategoryId: category.parentCategoryId ?? undefined,
+      userId: category.userId,
+      createdAt: category.createdAt,
+      updatedAt: category.updatedAt,
+      parentCategory: category.parentCategory
+        ? {
+            id: category.parentCategory.id,
+            name: category.parentCategory.name,
+            description: category.parentCategory.description ?? undefined,
+            parentCategoryId: category.parentCategory.parentCategoryId ?? undefined,
+            userId: category.parentCategory.userId,
+            createdAt: category.parentCategory.createdAt,
+            updatedAt: category.parentCategory.updatedAt,
+          }
+        : undefined,
+      subcategories: buildSubcategoriesRecursively(category.id),
+      products: category.products.map(product => ({
+        id: product.id,
+        name: product.name,
+        sku: product.sku,
+        status: product.status,
+        imageUrl: product.imageUrl,
+      })),
+    };
+  } catch (error) {
+    if (error instanceof NotFoundException) {
+      throw error;
+    }
+
+    this.logger.error(`Failed to fetch category ${id}: ${error.message}`, error.stack);
+    throw new BadRequestException('Failed to fetch category');
   }
+}
+
+
 
   async update(id: number, updateCategoryDto: UpdateCategoryDto, userId: number): Promise<CategoryResponseDto> {
     try {
