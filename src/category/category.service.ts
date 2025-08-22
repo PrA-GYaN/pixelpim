@@ -241,8 +241,10 @@ export class CategoryService {
         if (updateCategoryDto.parentCategoryId) {
           await this.validateParentCategory(updateCategoryDto.parentCategoryId, userId);
           
-          // Check for circular reference
-          await this.validateNoCircularReference(updateCategoryDto.parentCategoryId, userId, id);
+          // Check for circular reference (fixed to check if new parent is a descendant)
+          await this.validateNoCircularReferenceForUpdate(id, updateCategoryDto.parentCategoryId, userId);
+        } else {
+          // If setting to null, no circular check needed
         }
       }
 
@@ -430,11 +432,16 @@ export class CategoryService {
     }
   }
 
-  private async validateNoCircularReference(parentId: number, userId: number, excludeId?: number): Promise<void> {
-    // Get all descendants of the potential parent
-    const descendants = await this.getAllDescendants(parentId, userId);
+  private async validateNoCircularReference(parentId: number, userId: number): Promise<void> {
+    // For create, since the category doesn't exist yet, no circular reference possible
+    // This method is a no-op for create, but kept for consistency
+  }
+
+  private async validateNoCircularReferenceForUpdate(categoryId: number, newParentId: number, userId: number): Promise<void> {
+    // Get all descendants of the category being updated
+    const descendants = await this.getAllDescendants(categoryId, userId);
     
-    if (excludeId && descendants.some(desc => desc.id === excludeId)) {
+    if (descendants.some(desc => desc.id === newParentId)) {
       throw new BadRequestException('Cannot create circular reference in category hierarchy');
     }
   }
