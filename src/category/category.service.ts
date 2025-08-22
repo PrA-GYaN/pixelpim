@@ -123,8 +123,20 @@ export class CategoryService {
     // Fetch all categories for this user (for recursive subcategories)
     const allCategories = await this.prisma.category.findMany({
       where: { userId },
+      include: {
+        products: {
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            status: true,
+            imageUrl: true,
+          },
+        },
+      },
       orderBy: { name: 'asc' },
     });
+
 
     // Fetch the main category
     const category = await this.prisma.category.findFirst({
@@ -150,19 +162,27 @@ export class CategoryService {
 
     // Build recursive subcategory tree
     const buildSubcategoriesRecursively = (parentId: number): CategoryResponseDto[] => {
-      return allCategories
-        .filter(cat => cat.parentCategoryId === parentId)
-        .map(sub => ({
-          id: sub.id,
-          name: sub.name,
-          description: sub.description ?? undefined,
-          parentCategoryId: sub.parentCategoryId ?? undefined,
-          userId: sub.userId,
-          createdAt: sub.createdAt,
-          updatedAt: sub.updatedAt,
-          subcategories: buildSubcategoriesRecursively(sub.id),
-        }));
-    };
+        return allCategories
+          .filter(cat => cat.parentCategoryId === parentId)
+          .map(sub => ({
+            id: sub.id,
+            name: sub.name,
+            description: sub.description ?? undefined,
+            parentCategoryId: sub.parentCategoryId ?? undefined,
+            userId: sub.userId,
+            createdAt: sub.createdAt,
+            updatedAt: sub.updatedAt,
+            subcategories: buildSubcategoriesRecursively(sub.id),
+            products: sub.products?.map(product => ({
+              id: product.id,
+              name: product.name,
+              sku: product.sku,
+              status: product.status,
+              imageUrl: product.imageUrl,
+            })) || [],
+          }));
+      };
+
 
     // Return full category response
     return {
