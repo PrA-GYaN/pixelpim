@@ -9,7 +9,10 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
-import { CategoryResponseDto, CategoryTreeResponseDto } from './dto/category-response.dto';
+import {
+  CategoryResponseDto,
+  CategoryTreeResponseDto,
+} from './dto/category-response.dto';
 import { PaginatedResponse, PaginationUtils } from '../common';
 import type { Category } from '../../generated/prisma';
 
@@ -19,17 +22,33 @@ export class CategoryService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(createDto: CreateCategoryDto, userId: number): Promise<CategoryResponseDto> {
+  async create(
+    createDto: CreateCategoryDto,
+    userId: number,
+  ): Promise<CategoryResponseDto> {
     try {
       this.logger.log(`Creating category '${createDto.name}' for user ${userId}`);
 
-      if (createDto.parentCategoryId) {
+      if (createDto.parentCategoryId != null) {
         await this.validateParentCategory(createDto.parentCategoryId, userId);
-        await this.validateNoCircularReference(createDto.parentCategoryId, userId);
+        await this.validateNoCircularReference(
+          createDto.parentCategoryId,
+          userId,
+          null,
+        );
       }
 
+      // Prisma expects undefined instead of null for optional fields
+      const data = {
+        name: createDto.name,
+        description: createDto.description ?? undefined,
+        parentCategoryId:
+          createDto.parentCategoryId !== null ? createDto.parentCategoryId : undefined,
+        userId,
+      };
+
       const created = await this.prisma.category.create({
-        data: { ...createDto, userId },
+        data,
       });
 
       this.logger.log(`Created category ID=${created.id}`);
@@ -70,7 +89,9 @@ export class CategoryService {
         this.prisma.category.count({ where }),
       ]);
 
-      const data = categories.map((cat) => this.transformHierarchicalResponseWithCount(cat));
+      const data = categories.map((cat) =>
+        this.transformHierarchicalResponseWithCount(cat),
+      );
       return PaginationUtils.createPaginatedResponse(data, total, page, limit);
     } catch (error) {
       this.logger.error(`findAll error: ${error.message}`, error.stack);
@@ -89,7 +110,9 @@ export class CategoryService {
 
       const rootCategory = allCategories.find((cat) => cat.id === id);
       if (!rootCategory) {
-        throw new NotFoundException(`Category with ID ${id} not found or unauthorized`);
+        throw new NotFoundException(
+          `Category with ID ${id} not found or unauthorized`,
+        );
       }
 
       return this.buildSubcategoryTree(rootCategory, allCategories);
@@ -100,8 +123,13 @@ export class CategoryService {
     }
   }
 
-  async update(id: number, dto: UpdateCategoryDto, userId: number): Promise<CategoryResponseDto> {
+  async update(
+    id: number,
+    dto: UpdateCategoryDto,
+    userId: number,
+  ): Promise<CategoryResponseDto> {
     try {
+      // Make sure category exists & user owns it
       await this.findOne(id, userId);
       this.logger.log(`Updating category ID=${id}`);
 
@@ -109,20 +137,36 @@ export class CategoryService {
         if (dto.parentCategoryId === id) {
           throw new BadRequestException('Cannot set category as its own parent');
         }
-        if (dto.parentCategoryId) {
+        if (dto.parentCategoryId != null) {
           await this.validateParentCategory(dto.parentCategoryId, userId);
-          await this.validateNoCircularReference(dto.parentCategoryId, userId, id);
+          await this.validateNoCircularReference(
+            dto.parentCategoryId,
+            userId,
+            id,
+          );
         }
       }
 
+      // Prepare data with undefined instead of null for optional fields
+      const data: any = {
+        ...(dto.name !== undefined ? { name: dto.name } : {}),
+        description:
+          dto.description === null ? undefined : dto.description ?? undefined,
+        parentCategoryId:
+          dto.parentCategoryId !== null ? dto.parentCategoryId : undefined,
+      };
+
       await this.prisma.category.update({
         where: { id },
-        data: dto,
+        data,
       });
 
       return this.findOne(id, userId);
     } catch (error) {
-      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+      if (
+        error instanceof NotFoundException ||
+        error instanceof BadRequestException
+      ) {
         throw error;
       }
       this.handleDatabaseError(error, 'update');
@@ -145,7 +189,10 @@ export class CategoryService {
       this.logger.log(`Deleted category ID=${id}`);
       return { message: 'Category successfully deleted' };
     } catch (error) {
-      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+      if (
+        error instanceof NotFoundException ||
+        error instanceof BadRequestException
+      ) {
         throw error;
       }
       this.logger.error(`remove error: ${error.message}`, error.stack);
@@ -163,7 +210,9 @@ export class CategoryService {
       });
 
       const roots = allCategories.filter((c) => !c.parentCategoryId);
-      return roots.map((root) => this.buildCategoryTree(root, 0, [], allCategories));
+      return roots.map((root) =>
+        this.buildCategoryTree(root, 0, [], allCategories),
+      );
     } catch (error) {
       this.logger.error(`getCategoryTree error: ${error.message}`, error.stack);
       throw new BadRequestException('Failed to fetch category tree');
@@ -201,7 +250,10 @@ export class CategoryService {
     }
   }
 
-  private buildSubcategoryTree(category: Category, allCategories: Category[]): CategoryResponseDto {
+  private buildSubcategoryTree(
+    category: Category,
+    allCategories: Category[],
+  ): CategoryResponseDto {
     const children = allCategories.filter((c) => c.parentCategoryId === category.id);
 
     return {
@@ -213,7 +265,9 @@ export class CategoryService {
       createdAt: (category as any).createdAt,
       updatedAt: (category as any).updatedAt,
       parentCategory: undefined,
-      subcategories: children.map((child) => this.buildSubcategoryTree(child, allCategories)),
+      subcategories: children.map((child) =>
+        this.buildSubcategoryTree(child, allCategories),
+      ),
     };
   }
 
@@ -247,29 +301,26 @@ export class CategoryService {
     }
   }
 
+  /** 
+   * Circular reference detection: 
+   * Walk **up** the parent chain from `parentId` checking if we hit `excludeId`.
+   */
   private async validateNoCircularReference(
     parentId: number,
     userId: number,
-    excludeId?: number,
+    excludeId: number | null,
   ) {
-    const visited = new Set<number>();
-    const queue = [parentId];
-
-    while (queue.length) {
-      const current = queue.shift()!;
-      const children = await this.prisma.category.findMany({
-        where: { parentCategoryId: current, userId },
-        select: { id: true },
-      });
-      for (const child of children) {
-        if (excludeId !== undefined && child.id === excludeId) {
-          throw new BadRequestException('Circular reference detected');
-        }
-        if (!visited.has(child.id)) {
-          visited.add(child.id);
-          queue.push(child.id);
-        }
+    let currentId: number | null = parentId;
+    while (currentId != null) {
+      if (excludeId !== null && currentId === excludeId) {
+        throw new BadRequestException('Circular reference detected');
       }
+      const current = await this.prisma.category.findUnique({
+        where: { id: currentId },
+        select: { parentCategoryId: true, userId: true },
+      });
+      if (!current || current.userId !== userId) break;
+      currentId = current.parentCategoryId ?? null;
     }
   }
 
@@ -280,9 +331,10 @@ export class CategoryService {
       description: cat.description ?? undefined,
       parentCategoryId: cat.parentCategoryId ?? undefined,
       productCount: cat._count?.products ?? 0,
-      subcategories: cat.subcategories?.map((s: any) =>
-        this.transformHierarchicalResponseWithCount(s, true),
-      ) ?? [],
+      subcategories:
+        cat.subcategories?.map((s: any) =>
+          this.transformHierarchicalResponseWithCount(s, true),
+        ) ?? [],
     };
     return isChild
       ? base
@@ -305,17 +357,18 @@ export class CategoryService {
       createdAt: cat.createdAt,
       updatedAt: cat.updatedAt,
       parentCategory: cat.parentCategory ?? undefined,
-      subcategories: cat.subcategories?.map((sc: any) => ({
-        id: sc.id,
-        name: sc.name,
-        description: sc.description ?? undefined,
-        parentCategoryId: sc.parentCategoryId ?? undefined,
-        userId: sc.userId,
-        createdAt: sc.createdAt,
-        updatedAt: sc.updatedAt,
-        parentCategory: undefined,
-        subcategories: [], // only one level
-      })) ?? [],
+      subcategories:
+        cat.subcategories?.map((sc: any) => ({
+          id: sc.id,
+          name: sc.name,
+          description: sc.description ?? undefined,
+          parentCategoryId: sc.parentCategoryId ?? undefined,
+          userId: sc.userId,
+          createdAt: sc.createdAt,
+          updatedAt: sc.updatedAt,
+          parentCategory: undefined,
+          subcategories: [], // only one level of subcategories here
+        })) ?? [],
     };
   }
 
