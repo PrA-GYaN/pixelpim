@@ -15,7 +15,6 @@ export class ProductResponseDto {
   subImages?: string[];
   status: string;
   categoryId?: number;
-  attributeId?: number;
   attributeGroupId?: number;
   familyId?: number;
   userId: number;
@@ -25,12 +24,6 @@ export class ProductResponseDto {
     id: number;
     name: string;
     description?: string;
-  };
-  attribute?: {
-    id: number;
-    name: string;
-    type: string;
-    defaultValue?: string;
   };
   attributeGroup?: {
     id: number;
@@ -45,16 +38,19 @@ export class ProductResponseDto {
       name: string;
       type: string;
       defaultValue?: string;
+      userFriendlyType?: string;
     }[];
     optionalAttributes?: {
       id: number;
       name: string;
       type: string;
       defaultValue?: string;
+      userFriendlyType?: string;
     }[];
   };
   variants?: ProductVariantSummaryDto[]; // All products that are variants of this product
   totalVariants?: number; // Count of variants
+  attributes?: any[]; // List of attribute IDs or details
 }
 
 export class CreateProductResponseDto {

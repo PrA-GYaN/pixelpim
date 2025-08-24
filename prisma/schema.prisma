@@ -16,6 +16,7 @@ model User {
   googleId        String?          @unique
   provider        String           @default("local")
   createdAt       DateTime         @default(now())
+
   attributes      Attribute[]      @relation("UserAttributes")
   attributeGroups AttributeGroup[] @relation("UserAttributeGroups")
   families        Family[]         @relation("UserFamilies")
@@ -45,10 +46,11 @@ model Attribute {
   userId           Int
   createdAt        DateTime                  @default(now())
   updatedAt        DateTime                  @updatedAt
+
   user             User                      @relation("UserAttributes", fields: [userId], references: [id], onDelete: Cascade)
   attributeGroups  AttributeGroupAttribute[]
   familyAttributes FamilyAttribute[]
-  products         Product[]                 @relation("ProductAttributes")
+  products         ProductAttribute[]        // Fixed relation from Product[] to ProductAttribute[]
 
   @@unique([name, userId])
 }
@@ -60,6 +62,7 @@ model AttributeGroup {
   userId      Int
   createdAt   DateTime                  @default(now())
   updatedAt   DateTime                  @updatedAt
+
   user        User                      @relation("UserAttributeGroups", fields: [userId], references: [id], onDelete: Cascade)
   attributes  AttributeGroupAttribute[]
   products    Product[]                 @relation("ProductAttributeGroups")
@@ -74,6 +77,7 @@ model AttributeGroupAttribute {
   required         Boolean        @default(false)
   defaultValue     String?
   createdAt        DateTime       @default(now())
+
   attributeGroup   AttributeGroup @relation(fields: [attributeGroupId], references: [id], onDelete: Cascade)
   attribute        Attribute      @relation(fields: [attributeId], references: [id], onDelete: Cascade)
 
@@ -86,6 +90,7 @@ model Family {
   userId           Int
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
+
   user             User              @relation("UserFamilies", fields: [userId], references: [id], onDelete: Cascade)
   familyAttributes FamilyAttribute[]
   products         Product[]         @relation("ProductFamilies")
@@ -100,8 +105,9 @@ model FamilyAttribute {
   isRequired      Boolean   @default(false)
   additionalValue String?
   createdAt       DateTime  @default(now())
-  attribute       Attribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+
   family          Family    @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  attribute       Attribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
 
   @@unique([familyId, attributeId])
 }
@@ -114,6 +120,7 @@ model Category {
   userId           Int
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
+
   parentCategory   Category?  @relation("CategoryParent", fields: [parentCategoryId], references: [id])
   subcategories    Category[] @relation("CategoryParent")
   user             User       @relation("UserCategories", fields: [userId], references: [id], onDelete: Cascade)
@@ -128,17 +135,17 @@ model Product {
   sku              String
   productLink      String?
   imageUrl         String?
-  subImages        String[]        @default([]) // Array of additional image URLs
-  status           String          @default("incomplete") // complete, incomplete
+  subImages        String[]        @default([])
+  status           String          @default("incomplete")
   categoryId       Int?
-  attributeId      Int?
   attributeGroupId Int?
   familyId         Int?
   userId           Int
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
+
   category         Category?       @relation("CategoryProducts", fields: [categoryId], references: [id])
-  attribute        Attribute?      @relation("ProductAttributes", fields: [attributeId], references: [id])
+  attributes       ProductAttribute[]
   attributeGroup   AttributeGroup? @relation("ProductAttributeGroups", fields: [attributeGroupId], references: [id])
   family           Family?         @relation("ProductFamilies", fields: [familyId], references: [id])
   user             User            @relation("UserProducts", fields: [userId], references: [id], onDelete: Cascade)
@@ -146,6 +153,9 @@ model Product {
   // Variant relationships (symmetric many-to-many)
   variantLinksA    ProductVariant[] @relation("ProductVariantA")
   variantLinksB    ProductVariant[] @relation("ProductVariantB")
+
+  // Assets attached to Product via join table
+  assets          ProductAsset[]
 
   @@unique([sku, userId])
   @@unique([name, userId])
@@ -163,14 +173,26 @@ model ProductVariant {
   @@map("product_variants")
 }
 
+model ProductAsset {
+  id        Int      @id @default(autoincrement())
+  productId Int
+  assetId   Int
+
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  asset     Asset    @relation("ProductAssetToAsset", fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, assetId])
+}
+
 model AssetGroup {
   id          Int      @id @default(autoincrement())
   groupName   String
   createdDate DateTime @default(now())
-  totalSize   BigInt   @default(0) // Size in bytes
+  totalSize   BigInt   @default(0)
   userId      Int
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
   user        User     @relation("UserAssetGroups", fields: [userId], references: [id], onDelete: Cascade)
   assets      Asset[]  @relation("AssetGroupAssets")
 
@@ -180,17 +202,32 @@ model AssetGroup {
 model Asset {
   id           Int         @id @default(autoincrement())
   name         String
-  fileName     String      // Original filename
-  filePath     String      // Server file path
-  mimeType     String      // File MIME type
+  fileName     String
+  filePath     String
+  mimeType     String
   uploadDate   DateTime    @default(now())
-  size         BigInt      // File size in bytes
+  size         BigInt
   userId       Int
   assetGroupId Int?
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
+
   user         User        @relation("UserAssets", fields: [userId], references: [id], onDelete: Cascade)
   assetGroup   AssetGroup? @relation("AssetGroupAssets", fields: [assetGroupId], references: [id], onDelete: SetNull)
+  productAssets ProductAsset[] @relation("ProductAssetToAsset")
 
   @@unique([name, userId])
+}
+
+model ProductAttribute {
+  id          Int       @id @default(autoincrement())
+  productId   Int
+  attributeId Int
+  value       String?
+  createdAt   DateTime  @default(now())
+
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  attribute   Attribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, attributeId])
 }

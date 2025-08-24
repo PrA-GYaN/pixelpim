@@ -12,7 +12,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { AssetGroupService } from './asset-group.service';
-import { CreateAssetGroupDto, UpdateAssetGroupDto } from './dto';
+import { CreateAssetGroupDto, UpdateAssetGroupDto, AttachAssetsToGroupDto } from './dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PaginatedResponse } from '../common';
 
@@ -74,5 +74,15 @@ export class AssetGroupController {
   async remove(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
     const userId = req.user.id;
     return this.assetGroupService.remove(id, userId);
+  }
+  
+  @Post(':id/attach-assets')
+  async attachAssetsToGroup(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() attachAssetsToGroupDto: AttachAssetsToGroupDto,
+    @Req() req: any,
+  ) {
+    const userId = req.user.id;
+    return this.assetGroupService.attachAssetsToGroup(id, attachAssetsToGroupDto.assetIds, userId);
   }
 }

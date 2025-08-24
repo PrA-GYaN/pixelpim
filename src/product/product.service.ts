@@ -23,12 +23,7 @@ export class ProductService {
         await this.validateCategory(createProductDto.categoryId, userId);
       }
 
-      // Validate attribute if provided
-      if (createProductDto.attributeId) {
-        await this.validateAttribute(createProductDto.attributeId, userId);
-      }
-
-      // Validate attribute group if provided
+  // Validate attribute group if provided
       if (createProductDto.attributeGroupId) {
         await this.validateAttributeGroup(createProductDto.attributeGroupId, userId);
       }
@@ -47,7 +42,6 @@ export class ProductService {
           subImages: createProductDto.subImages || [],
           status: createProductDto.status || 'incomplete',
           categoryId: createProductDto.categoryId,
-          attributeId: createProductDto.attributeId,
           attributeGroupId: createProductDto.attributeGroupId,
           familyId: createProductDto.familyId,
           userId,
@@ -58,14 +52,6 @@ export class ProductService {
               id: true,
               name: true,
               description: true,
-            },
-          },
-          attribute: {
-            select: {
-              id: true,
-              name: true,
-              type: true,
-              defaultValue: true,
             },
           },
           attributeGroup: {
@@ -79,18 +65,12 @@ export class ProductService {
             select: {
               id: true,
               name: true,
-              familyAttributes: {
-                include: {
-                  attribute: {
-                    select: {
-                      id: true,
-                      name: true,
-                      type: true,
-                      defaultValue: true,
-                    },
-                  },
-                },
-              },
+              familyAttributes: true,
+            },
+          },
+          attributes: {
+            select: {
+              attributeId: true,
             },
           },
         },
@@ -170,14 +150,6 @@ export class ProductService {
                 description: true,
               },
             },
-            attribute: {
-              select: {
-                id: true,
-                name: true,
-                type: true,
-                defaultValue: true,
-              },
-            },
             attributeGroup: {
               select: {
                 id: true,
@@ -203,14 +175,25 @@ export class ProductService {
                 },
               },
             },
+            attributes: {
+              select: {
+                attributeId: true,
+              },
+            },
           },
           orderBy: { createdAt: 'desc' },
         }),
         this.prisma.product.count({ where: whereCondition }),
       ]);
 
-      const productResponseDtos = products.map(product => this.transformProductForResponse(product));
-      
+      const productResponseDtos = products.map(product => {
+        const attributeIds = product.attributes?.map((attr: any) => attr.attributeId) || [];
+        const response = this.transformProductForResponse(product);
+        return {
+          ...response,
+          attributes: attributeIds,
+        };
+      });
       return PaginationUtils.createPaginatedResponse(productResponseDtos, total, page, limit);
     } catch (error) {
       this.logger.error(`Failed to fetch products for user ${userId}: ${error.message}`, error.stack);
@@ -235,14 +218,6 @@ export class ProductService {
               description: true,
             },
           },
-          attribute: {
-            select: {
-              id: true,
-              name: true,
-              type: true,
-              defaultValue: true,
-            },
-          },
           attributeGroup: {
             select: {
               id: true,
@@ -264,6 +239,18 @@ export class ProductService {
                       defaultValue: true,
                     },
                   },
+                },
+              },
+            },
+          },
+          attributes: {
+            include: {
+              attribute: {
+                select: {
+                  id: true,
+                  name: true,
+                  type: true,
+                  defaultValue: true,
                 },
               },
             },
@@ -303,14 +290,6 @@ export class ProductService {
               description: true,
             },
           },
-          attribute: {
-            select: {
-              id: true,
-              name: true,
-              type: true,
-              defaultValue: true,
-            },
-          },
           attributeGroup: {
             select: {
               id: true,
@@ -322,18 +301,12 @@ export class ProductService {
             select: {
               id: true,
               name: true,
-              familyAttributes: {
-                include: {
-                  attribute: {
-                    select: {
-                      id: true,
-                      name: true,
-                      type: true,
-                      defaultValue: true,
-                    },
-                  },
-                },
-              },
+              familyAttributes: true,
+            },
+          },
+          attributes: {
+            select: {
+              attributeId: true,
             },
           },
         },
@@ -366,12 +339,7 @@ export class ProductService {
         await this.validateCategory(updateProductDto.categoryId, userId);
       }
 
-      // Validate attribute if being updated
-      if (updateProductDto.attributeId !== undefined && updateProductDto.attributeId !== null) {
-        await this.validateAttribute(updateProductDto.attributeId, userId);
-      }
-
-      // Validate attribute group if being updated
+  // Validate attribute group if being updated
       if (updateProductDto.attributeGroupId !== undefined && updateProductDto.attributeGroupId !== null) {
         await this.validateAttributeGroup(updateProductDto.attributeGroupId, userId);
       }
@@ -412,11 +380,7 @@ export class ProductService {
         updateData.categoryId = updateProductDto.categoryId;
       }
 
-      if (updateProductDto.attributeId !== undefined) {
-        updateData.attributeId = updateProductDto.attributeId;
-      }
-
-      if (updateProductDto.attributeGroupId !== undefined) {
+  if (updateProductDto.attributeGroupId !== undefined) {
         updateData.attributeGroupId = updateProductDto.attributeGroupId;
       }
 
@@ -433,14 +397,6 @@ export class ProductService {
               id: true,
               name: true,
               description: true,
-            },
-          },
-          attribute: {
-            select: {
-              id: true,
-              name: true,
-              type: true,
-              defaultValue: true,
             },
           },
           attributeGroup: {
@@ -466,6 +422,11 @@ export class ProductService {
                   },
                 },
               },
+            },
+          },
+          attributes: {
+            select: {
+              attributeId: true,
             },
           },
         },
@@ -530,12 +491,9 @@ export class ProductService {
                 description: true,
               },
             },
-            attribute: {
+            attributes: {
               select: {
-                id: true,
-                name: true,
-                type: true,
-                defaultValue: true,
+                attributeId: true,
               },
             },
             attributeGroup: {
@@ -551,14 +509,6 @@ export class ProductService {
                 name: true,
                 familyAttributes: {
                   include: {
-                    attribute: {
-                      select: {
-                        id: true,
-                        name: true,
-                        type: true,
-                        defaultValue: true,
-                      },
-                    },
                   },
                 },
               },
@@ -608,12 +558,9 @@ export class ProductService {
                 description: true,
               },
             },
-            attribute: {
+            attributes: {
               select: {
-                id: true,
-                name: true,
-                type: true,
-                defaultValue: true,
+                attributeId: true,
               },
             },
             attributeGroup: {
@@ -686,12 +633,9 @@ export class ProductService {
                 description: true,
               },
             },
-            attribute: {
+            attributes: {
               select: {
-                id: true,
-                name: true,
-                type: true,
-                defaultValue: true,
+                attributeId: true,
               },
             },
             attributeGroup: {
@@ -764,12 +708,9 @@ export class ProductService {
                 description: true,
               },
             },
-            attribute: {
+            attributes: {
               select: {
-                id: true,
-                name: true,
-                type: true,
-                defaultValue: true,
+                attributeId: true,
               },
             },
             attributeGroup: {
@@ -831,16 +772,7 @@ export class ProductService {
   }
 
   private async validateAttribute(attributeId: number, userId: number): Promise<void> {
-    const attribute = await this.prisma.attribute.findFirst({
-      where: {
-        id: attributeId,
-        userId,
-      },
-    });
-
-    if (!attribute) {
-      throw new BadRequestException('Attribute not found or does not belong to you');
-    }
+  // No longer needed: attributes are managed via join table
   }
 
   private async validateAttributeGroup(attributeGroupId: number, userId: number): Promise<void> {
@@ -883,6 +815,23 @@ export class ProductService {
       variants.push(...product.variantLinksB.map((link: any) => link.productA));
     }
 
+    // For attributes, if populated, show details, else just pass through
+    let attributes: any = undefined;
+    if (product.attributes) {
+      // If attributes have 'attribute' field, populate details
+      if (product.attributes.length > 0 && product.attributes[0].attribute) {
+        attributes = product.attributes.map((attr: any) => ({
+          id: attr.attribute.id,
+          name: attr.attribute.name,
+          type: attr.attribute.type,
+          defaultValue: attr.attribute.defaultValue,
+          value: attr.value,
+        }));
+      } else {
+        // Only IDs
+        attributes = product.attributes.map((attr: any) => attr.attributeId);
+      }
+    }
     return {
       id: product.id,
       name: product.name,
@@ -892,7 +841,6 @@ export class ProductService {
       subImages: product.subImages || [],
       status: product.status,
       categoryId: product.categoryId,
-      attributeId: product.attributeId,
       attributeGroupId: product.attributeGroupId,
       familyId: product.familyId,
       userId: product.userId,
@@ -902,12 +850,6 @@ export class ProductService {
         id: product.category.id,
         name: product.category.name,
         description: product.category.description,
-      } : undefined,
-      attribute: product.attribute ? {
-        id: product.attribute.id,
-        name: product.attribute.name,
-        type: product.attribute.type,
-        defaultValue: product.attribute.defaultValue,
       } : undefined,
       attributeGroup: product.attributeGroup ? {
         id: product.attributeGroup.id,
@@ -942,6 +884,7 @@ export class ProductService {
         status: variant.status,
       })) : undefined,
       totalVariants: variants.length,
+      attributes,
     };
   }
 

@@ -177,4 +177,22 @@ export class AssetGroupService {
 
     return { message: 'Asset group deleted successfully' };
   }
+
+  async attachAssetsToGroup(groupId: number, assetIds: number[], userId: number) {
+    // Ensure group exists and belongs to user
+    await this.findOne(groupId, userId);
+
+    // Update assets to attach to group
+    const result = await this.prisma.asset.updateMany({
+      where: {
+        id: { in: assetIds },
+        userId,
+      },
+      data: {
+        assetGroupId: groupId,
+      },
+    });
+
+    return { message: `${result.count} assets attached to group ${groupId}` };
+  }
 }

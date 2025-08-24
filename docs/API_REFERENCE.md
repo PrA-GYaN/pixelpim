@@ -1290,7 +1290,6 @@ Delete an asset and remove it from cloud storage.
 **Authentication:** Required (JWT token)
 
 **Parameters:**
-- `id`: Asset ID (integer)
 
 **Success Response (200):**
 ```json
@@ -1300,8 +1299,39 @@ Delete an asset and remove it from cloud storage.
 ```
 
 **Error Responses:**
-- `404 Not Found` - Asset not found
-- `403 Forbidden` - You can only access your own assets
+
+---
+
+#### Attach Assets to Group
+Attach multiple assets to an asset group by passing an array of asset IDs.
+
+**Endpoint:** `POST /asset-groups/:id/attach-assets`
+
+**Authentication:** Required (JWT token)
+
+**Parameters:**
+- `id`: Asset Group ID (integer)
+
+**Request Body:**
+```json
+{
+  "assetIds": [1, 2, 3]
+}
+```
+
+**Validation Rules:**
+- `assetIds`: Array of asset IDs (integer), must not be empty
+
+**Success Response (200):**
+```json
+{
+  "message": "3 assets attached to group 1"
+}
+```
+
+**Error Responses:**
+- `404 Not Found` - Asset group not found
+- `403 Forbidden` - You can only access your own asset groups
 
 ---
 

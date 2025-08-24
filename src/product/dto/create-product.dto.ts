@@ -22,29 +22,25 @@ export class CreateProductDto {
   @IsUrl({}, { message: 'Image URL must be a valid URL' })
   imageUrl?: string;
 
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  @IsUrl({}, { each: true, message: 'Each sub image must be a valid URL' })
-  @Type(() => String)
-  subImages?: string[];
+    @IsOptional()
+    @IsArray()
+    @IsString({ each: true })
+    @IsUrl({}, { each: true, message: 'Each sub image must be a valid URL' })
+    @Type(() => String)
+    subImages: string[] = [];
 
   @IsOptional()
   @IsString()
   @IsIn(['complete', 'incomplete'], { 
     message: 'Status must be one of: complete, incomplete' 
   })
-  status?: string = 'incomplete';
+    status: string = 'incomplete';
 
   @IsOptional()
   @IsInt()
   @Transform(({ value }) => parseInt(value))
   categoryId?: number;
 
-  @IsOptional()
-  @IsInt()
-  @Transform(({ value }) => parseInt(value))
-  attributeId?: number;
 
   @IsOptional()
   @IsInt()
@@ -55,4 +51,8 @@ export class CreateProductDto {
   @IsInt()
   @Transform(({ value }) => parseInt(value))
   familyId?: number;
+
+    @IsInt()
+    @Transform(({ value }) => parseInt(value))
+    userId: number;
 }
