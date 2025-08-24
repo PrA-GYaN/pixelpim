@@ -43,6 +43,11 @@ export class CreateProductDto {
 
 
   @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  attributes?: number[];
+
+  @IsOptional()
   @IsInt()
   @Transform(({ value }) => parseInt(value))
   attributeGroupId?: number;

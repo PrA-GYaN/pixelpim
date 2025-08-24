@@ -14,6 +14,23 @@ import { PaginationUtils } from '../common';
 @Injectable()
 export class AssetService {
   constructor(private prisma: PrismaService) {}
+  // Utility to recursively convert BigInt values to strings
+  private static convertBigIntToString(obj: any): any {
+    if (typeof obj === 'bigint') {
+      return obj.toString();
+    }
+    if (Array.isArray(obj)) {
+      return obj.map(AssetService.convertBigIntToString);
+    }
+    if (obj && typeof obj === 'object') {
+      const newObj: any = {};
+      for (const key in obj) {
+        newObj[key] = AssetService.convertBigIntToString(obj[key]);
+      }
+      return newObj;
+    }
+    return obj;
+  }
 
   async create(
     createAssetDto: CreateAssetDto,
@@ -77,7 +94,7 @@ export class AssetService {
     }
 
     return {
-      ...asset,
+      ...AssetService.convertBigIntToString(asset),
       size: Number(asset.size),
       url: asset.filePath, // ✅ Return full URL
       formattedSize: CloudinaryUtil.formatFileSize(Number(asset.size)),
@@ -112,7 +129,7 @@ export class AssetService {
     ]);
 
     const transformedAssets = assets.map((asset) => ({
-      ...asset,
+      ...AssetService.convertBigIntToString(asset),
       size: Number(asset.size),
       url: asset.filePath, // ✅ Use filePath as URL
       formattedSize: CloudinaryUtil.formatFileSize(Number(asset.size)),
@@ -139,7 +156,7 @@ export class AssetService {
     }
 
     return {
-      ...asset,
+      ...AssetService.convertBigIntToString(asset),
       size: Number(asset.size),
       url: asset.filePath, // ✅ Use filePath as URL
       formattedSize: CloudinaryUtil.formatFileSize(Number(asset.size)),
