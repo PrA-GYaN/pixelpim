@@ -31,12 +31,12 @@ export interface PopulatedProductData {
       description?: string;
     }>;
   };
-  attribute?: {
+  attributes?: Array<{
     id: number;
     name: string;
     type: string;
     defaultValue?: string;
-  };
+  }>;
   attributeGroup?: {
     id: number;
     name: string;
@@ -164,7 +164,7 @@ export class ProductUtilService {
       }
 
       if (opts.includeAttribute) {
-        includeObject.attribute = true;
+  includeObject.attributes = true;
       }
 
       if (opts.includeAttributeGroup) {
@@ -240,7 +240,6 @@ export class ProductUtilService {
         imageUrl: product.imageUrl || undefined,
         status: product.status,
         categoryId: product.categoryId || undefined,
-        attributeId: product.attributeId || undefined,
         attributeGroupId: product.attributeGroupId || undefined,
         familyId: product.familyId || undefined,
         userId: product.userId,
@@ -280,13 +279,13 @@ export class ProductUtilService {
       }
 
       // Add attribute data if included
-      if (opts.includeAttribute && product.attribute) {
-        populatedProduct.attribute = {
-          id: product.attribute.id,
-          name: product.attribute.name,
-          type: product.attribute.type,
-          defaultValue: product.attribute.defaultValue || undefined,
-        };
+      if (opts.includeAttribute && product.attributes && Array.isArray(product.attributes)) {
+        populatedProduct.attributes = product.attributes.map((attr: any) => ({
+          id: attr.id,
+          name: attr.name,
+          type: attr.type,
+          defaultValue: attr.defaultValue || undefined,
+        }));
       }
 
       // Add attribute group data if included
