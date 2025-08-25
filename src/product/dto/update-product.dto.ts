@@ -49,6 +49,11 @@ export class UpdateProductDto extends PartialType(CreateProductDto) {
   attributes?: number[];
 
   @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  assets?: number[];
+
+  @IsOptional()
   @IsInt()
   @Transform(({ value }) => parseInt(value))
   attributeGroupId?: number;

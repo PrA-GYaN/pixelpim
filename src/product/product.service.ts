@@ -73,6 +73,11 @@ export class ProductService {
               attributeId: true,
             },
           },
+          assets: {
+            select: {
+              assetId: true,
+            },
+          },
         },
       });
 
@@ -255,6 +260,11 @@ export class ProductService {
               },
             },
           },
+          assets: {
+            include: {
+              asset: true,
+            },
+          },
         },
       });
 
@@ -388,52 +398,37 @@ export class ProductService {
         updateData.familyId = updateProductDto.familyId;
       }
 
-      const result = await this.prisma.product.update({
+      // Update product main fields
+      await this.prisma.product.update({
         where: { id },
         data: updateData,
-        include: {
-          category: {
-            select: {
-              id: true,
-              name: true,
-              description: true,
-            },
-          },
-          attributeGroup: {
-            select: {
-              id: true,
-              name: true,
-              description: true,
-            },
-          },
-          family: {
-            select: {
-              id: true,
-              name: true,
-              familyAttributes: {
-                include: {
-                  attribute: {
-                    select: {
-                      id: true,
-                      name: true,
-                      type: true,
-                      defaultValue: true,
-                    },
-                  },
-                },
-              },
-            },
-          },
-          attributes: {
-            select: {
-              attributeId: true,
-            },
-          },
-        },
       });
 
+      // Update attributes if provided
+      if (updateProductDto.attributes !== undefined) {
+        await this.prisma.productAttribute.deleteMany({ where: { productId: id } });
+        if (updateProductDto.attributes.length > 0) {
+          await this.prisma.productAttribute.createMany({
+            data: updateProductDto.attributes.map(attributeId => ({ productId: id, attributeId })),
+            skipDuplicates: true,
+          });
+        }
+      }
+      // Update assets if provided
+      if (updateProductDto.assets !== undefined) {
+        await this.prisma.productAsset.deleteMany({ where: { productId: id } });
+        if (updateProductDto.assets.length > 0) {
+          await this.prisma.productAsset.createMany({
+            data: updateProductDto.assets.map(assetId => ({ productId: id, assetId })),
+            skipDuplicates: true,
+          });
+        }
+      }
+
+      // Fetch and return the updated product with relations
+      const result = await this.findOne(id, userId);
       this.logger.log(`Successfully updated product with ID: ${id}`);
-      return this.transformProductForResponse(result);
+      return result;
     } catch (error) {
       if (error instanceof NotFoundException || error instanceof BadRequestException) {
         throw error;
@@ -815,10 +810,9 @@ export class ProductService {
       variants.push(...product.variantLinksB.map((link: any) => link.productA));
     }
 
-    // For attributes, if populated, show details, else just pass through
+    // Attributes details
     let attributes: any = undefined;
     if (product.attributes) {
-      // If attributes have 'attribute' field, populate details
       if (product.attributes.length > 0 && product.attributes[0].attribute) {
         attributes = product.attributes.map((attr: any) => ({
           id: attr.attribute.id,
@@ -828,10 +822,24 @@ export class ProductService {
           value: attr.value,
         }));
       } else {
-        // Only IDs
         attributes = product.attributes.map((attr: any) => attr.attributeId);
       }
     }
+
+    // Assets details
+    let assets: any = undefined;
+    if (product.assets) {
+      assets = product.assets.map((pa: any) => pa.asset ? {
+        id: pa.asset.id,
+        name: pa.asset.name,
+        fileName: pa.asset.fileName,
+        filePath: pa.asset.filePath,
+        mimeType: pa.asset.mimeType,
+        uploadDate: pa.asset.uploadDate,
+        size: pa.asset.size !== undefined && pa.asset.size !== null ? pa.asset.size.toString() : null,
+      } : pa.assetId);
+    }
+
     return {
       id: product.id,
       name: product.name,
@@ -887,6 +895,7 @@ export class ProductService {
       })) : undefined,
       totalVariants: variants.length,
       attributes,
+      assets,
     };
   }
 
