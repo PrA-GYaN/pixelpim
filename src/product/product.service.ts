@@ -333,7 +333,7 @@ export class ProductService {
       await this.findOne(id, userId);
 
       this.logger.log(`Updating product: ${id} for user: ${userId}`);
-
+      this.logger.debug(`Update data: ${JSON.stringify(updateProductDto)}`);
       // Validate category if being updated
       if (updateProductDto.categoryId !== undefined && updateProductDto.categoryId !== null) {
         await this.validateCategory(updateProductDto.categoryId, userId);
@@ -866,6 +866,7 @@ export class ProductService {
             name: fa.attribute.name,
             type: fa.attribute.type,
             defaultValue: fa.attribute.defaultValue,
+            userFriendlyType: fa.attribute.userFriendlyType,
           })) || [],
         optionalAttributes: product.family.familyAttributes
           ?.filter((fa: any) => !fa.isRequired)
@@ -874,6 +875,7 @@ export class ProductService {
             name: fa.attribute.name,
             type: fa.attribute.type,
             defaultValue: fa.attribute.defaultValue,
+            userFriendlyType: fa.attribute.userFriendlyType,
           })) || [],
       } : undefined,
       variants: variants.length > 0 ? variants.map(variant => ({

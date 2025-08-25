@@ -151,7 +151,7 @@ export class ProductController {
     @Param('id', ParseIntPipe) id: number,
     @GetUser() user: User,
   ): Promise<ProductResponseDto> {
-    this.logger.log(`User ${user.id} fetching product: ${id}`);
+    this.logger.log(`User ${user.id} fetching product:000000000000 ${id}`);
     
     return this.productService.findOne(id, user.id);
   }

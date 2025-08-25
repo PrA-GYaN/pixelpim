@@ -57,7 +57,4 @@ export class CreateProductDto {
   @Transform(({ value }) => parseInt(value))
   familyId?: number;
 
-    @IsInt()
-    @Transform(({ value }) => parseInt(value))
-    userId: number;
 }

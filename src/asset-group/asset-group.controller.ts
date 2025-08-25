@@ -67,7 +67,22 @@ export class AssetGroupController {
     @Req() req: any,
   ) {
     const userId = req.user.id;
-    return this.assetGroupService.update(id, updateAssetGroupDto, userId);
+    try {
+      return await this.assetGroupService.update(id, updateAssetGroupDto, userId);
+    } catch (error) {
+      if (error.status && error.message) {
+        // Known NestJS exception
+        return {
+          statusCode: error.status,
+          message: error.message,
+        };
+      }
+      // Unknown error
+      return {
+        statusCode: 500,
+        message: error.message || 'Internal server error',
+      };
+    }
   }
 
   @Delete(':id')
