@@ -5,6 +5,24 @@ import { PaginatedResponse, PaginationUtils } from '../common';
 
 @Injectable()
 export class AssetGroupService {
+  // Utility to recursively convert BigInt values to strings
+  private static convertBigIntToString(obj: any): any {
+    if (typeof obj === 'bigint') {
+      return obj.toString();
+    }
+    if (Array.isArray(obj)) {
+      return obj.map(AssetGroupService.convertBigIntToString);
+    }
+    if (obj && typeof obj === 'object') {
+      const newObj: any = {};
+      for (const key in obj) {
+        newObj[key] = AssetGroupService.convertBigIntToString(obj[key]);
+      }
+      return newObj;
+    }
+    return obj;
+  }
+
   constructor(private prisma: PrismaService) {}
 
   async create(createAssetGroupDto: CreateAssetGroupDto, userId: number) {
@@ -34,11 +52,8 @@ export class AssetGroupService {
       },
     });
 
-    // Convert BigInt to Number for JSON serialization
-    return {
-      ...assetGroup,
-      totalSize: Number(assetGroup.totalSize),
-    };
+  // Convert BigInt to String for JSON serialization
+  return AssetGroupService.convertBigIntToString(assetGroup);
   }
 
   async findAll(userId: number, page: number = 1, limit: number = 10) {
@@ -63,13 +78,9 @@ export class AssetGroupService {
       this.prisma.assetGroup.count({ where: whereCondition }),
     ]);
 
-    // Convert BigInt to Number for JSON serialization
-    const transformedAssetGroups = assetGroups.map(group => ({
-      ...group,
-      totalSize: Number(group.totalSize),
-    }));
-
-    return PaginationUtils.createPaginatedResponse(transformedAssetGroups, total, page, limit);
+  // Convert BigInt to String for JSON serialization
+  const transformedAssetGroups = assetGroups.map(AssetGroupService.convertBigIntToString);
+  return PaginationUtils.createPaginatedResponse(transformedAssetGroups, total, page, limit);
   }
 
   async findOne(id: number, userId: number) {
@@ -88,11 +99,8 @@ export class AssetGroupService {
       throw new NotFoundException('Asset group not found');
     }
 
-    // Convert BigInt to Number for JSON serialization
-    return {
-      ...assetGroup,
-      totalSize: Number(assetGroup.totalSize),
-    };
+  // Convert BigInt to String for JSON serialization
+  return AssetGroupService.convertBigIntToString(assetGroup);
   }
 
   async getAssetsInGroup(id: number, userId: number, page: number = 1, limit: number = 10) {
@@ -116,13 +124,9 @@ export class AssetGroupService {
       this.prisma.asset.count({ where: whereCondition }),
     ]);
 
-    // Convert BigInt to Number for JSON serialization
-    const transformedAssets = assets.map(asset => ({
-      ...asset,
-      size: Number(asset.size),
-    }));
-
-    return PaginationUtils.createPaginatedResponse(transformedAssets, total, page, limit);
+  // Convert BigInt to String for JSON serialization
+  const transformedAssets = assets.map(AssetGroupService.convertBigIntToString);
+  return PaginationUtils.createPaginatedResponse(transformedAssets, total, page, limit);
   }
 
   async update(id: number, updateAssetGroupDto: UpdateAssetGroupDto, userId: number) {
@@ -155,11 +159,8 @@ export class AssetGroupService {
       },
     });
 
-    // Convert BigInt to Number for JSON serialization
-    return {
-      ...updatedAssetGroup,
-      totalSize: Number(updatedAssetGroup.totalSize),
-    };
+  // Convert BigInt to String for JSON serialization
+  return AssetGroupService.convertBigIntToString(updatedAssetGroup);
   }
 
   async remove(id: number, userId: number) {

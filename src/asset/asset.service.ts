@@ -170,7 +170,7 @@ export class AssetService {
   ) {
     const asset = await this.findOne(id, userId);
     const oldAssetGroupId = asset.assetGroupId;
-
+    console.log('Updating asset:', id, 'with data:', updateAssetDto);
     if (
       updateAssetDto.assetGroupId &&
       updateAssetDto.assetGroupId !== oldAssetGroupId
@@ -204,7 +204,12 @@ export class AssetService {
       }
     }
 
-    return updatedAsset;
+    return {
+      ...AssetService.convertBigIntToString(updatedAsset),
+      size: Number(updatedAsset.size),
+      url: updatedAsset.filePath,
+      formattedSize: CloudinaryUtil.formatFileSize(Number(updatedAsset.size)),
+    };
   }
 
   async remove(id: number, userId: number) {
