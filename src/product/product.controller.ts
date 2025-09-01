@@ -22,6 +22,7 @@ import { ExportProductDto, ExportProductResponseDto } from './dto/export-product
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { User as GetUser } from '../auth/decorators/user.decorator';
 import { PaginatedResponse } from '../common';
+import { SortingDto } from '../common';
 import type { User } from '../../generated/prisma';
 
 @Controller('products')
@@ -53,6 +54,8 @@ export class ProductController {
     @Query('familyId') familyId?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('sortOrder') sortOrder?: string,
   ): Promise<PaginatedResponse<ProductResponseDto>> {
     this.logger.log(`User ${user.id} fetching products`);
     
@@ -62,6 +65,7 @@ export class ProductController {
     const familyIdInt = familyId ? parseInt(familyId) : undefined;
     const pageNum = page ? parseInt(page) : 1;
     const limitNum = limit ? parseInt(limit) : 10;
+    const sortOrderValidated = sortOrder === 'asc' ? 'asc' : 'desc';
     
     return this.productService.findAll(
       user.id, 
@@ -72,7 +76,9 @@ export class ProductController {
       attributeGroupIdInt, 
       familyIdInt,
       pageNum,
-      limitNum
+      limitNum,
+      sortBy,
+      sortOrderValidated
     );
   }
 
@@ -92,13 +98,16 @@ export class ProductController {
     @GetUser() user: User,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('sortOrder') sortOrder?: string,
   ): Promise<PaginatedResponse<ProductResponseDto>> {
     this.logger.log(`User ${user.id} fetching products for category: ${categoryId}`);
     
     const pageNum = page ? parseInt(page) : 1;
     const limitNum = limit ? parseInt(limit) : 10;
+    const sortOrderValidated = sortOrder === 'asc' ? 'asc' : 'desc';
     
-    return this.productService.getProductsByCategory(categoryId, user.id, pageNum, limitNum);
+    return this.productService.getProductsByCategory(categoryId, user.id, pageNum, limitNum, sortBy, sortOrderValidated);
   }
 
   @Get('attribute/:attributeId')
@@ -107,13 +116,16 @@ export class ProductController {
     @GetUser() user: User,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('sortOrder') sortOrder?: string,
   ): Promise<PaginatedResponse<ProductResponseDto>> {
     this.logger.log(`User ${user.id} fetching products for attribute: ${attributeId}`);
     
     const pageNum = page ? parseInt(page) : 1;
     const limitNum = limit ? parseInt(limit) : 10;
+    const sortOrderValidated = sortOrder === 'asc' ? 'asc' : 'desc';
     
-    return this.productService.getProductsByAttribute(attributeId, user.id, pageNum, limitNum);
+    return this.productService.getProductsByAttribute(attributeId, user.id, pageNum, limitNum, sortBy, sortOrderValidated);
   }
 
   @Get('attribute-group/:attributeGroupId')
@@ -122,13 +134,16 @@ export class ProductController {
     @GetUser() user: User,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('sortOrder') sortOrder?: string,
   ): Promise<PaginatedResponse<ProductResponseDto>> {
     this.logger.log(`User ${user.id} fetching products for attribute group: ${attributeGroupId}`);
     
     const pageNum = page ? parseInt(page) : 1;
     const limitNum = limit ? parseInt(limit) : 10;
+    const sortOrderValidated = sortOrder === 'asc' ? 'asc' : 'desc';
     
-    return this.productService.getProductsByAttributeGroup(attributeGroupId, user.id, pageNum, limitNum);
+    return this.productService.getProductsByAttributeGroup(attributeGroupId, user.id, pageNum, limitNum, sortBy, sortOrderValidated);
   }
 
   @Get('family/:familyId')
@@ -137,13 +152,16 @@ export class ProductController {
     @GetUser() user: User,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('sortOrder') sortOrder?: string,
   ): Promise<PaginatedResponse<ProductResponseDto>> {
     this.logger.log(`User ${user.id} fetching products for family: ${familyId}`);
     
     const pageNum = page ? parseInt(page) : 1;
     const limitNum = limit ? parseInt(limit) : 10;
+    const sortOrderValidated = sortOrder === 'asc' ? 'asc' : 'desc';
     
-    return this.productService.getProductsByFamily(familyId, user.id, pageNum, limitNum);
+    return this.productService.getProductsByFamily(familyId, user.id, pageNum, limitNum, sortBy, sortOrderValidated);
   }
 
   @Get(':id')

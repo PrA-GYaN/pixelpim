@@ -52,6 +52,11 @@ export class ProductResponseDto {
   totalVariants?: number; // Count of variants
   attributes?: any[]; // List of attribute IDs or details
   assets?: any[]; // List of asset IDs or details
+
+  /**
+   * Message about removed attributes during create/update
+   */
+  removedAttributesMessage?: string;
 }
 
 export class CreateProductResponseDto {

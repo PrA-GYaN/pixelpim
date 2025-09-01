@@ -81,45 +81,25 @@ Authorization: Bearer {{access_token}}
 # REMOVE VARIANT RELATIONSHIPS
 ###################################################
 
+
 ### Remove Specific Variant Relationship (Test Case 1)
-DELETE {{baseUrl}}/products/variants
-Content-Type: application/json
+DELETE {{baseUrl}}/products/variants/1/2
 Authorization: Bearer {{access_token}}
 
-{
-  "productId": 1,
-  "variantProductId": 2
-}
 
 ### Remove Another Variant Relationship (Test Case 2)
-DELETE {{baseUrl}}/products/variants
-Content-Type: application/json
+DELETE {{baseUrl}}/products/variants/2/3
 Authorization: Bearer {{access_token}}
 
-{
-  "productId": 2,
-  "variantProductId": 3
-}
 
 ### Remove Variant Relationship (with variables)
-DELETE {{baseUrl}}/products/variants
-Content-Type: application/json
+DELETE {{baseUrl}}/products/variants/{{productId}}/{{variantProductId1}}
 Authorization: Bearer {{access_token}}
 
-{
-  "productId": {{productId}},
-  "variantProductId": {{variantProductId1}}
-}
 
 ### Test removing non-existent relationship (should return 404)
-DELETE {{baseUrl}}/products/variants
-Content-Type: application/json
+DELETE {{baseUrl}}/products/variants/999/998
 Authorization: Bearer {{access_token}}
-
-{
-  "productId": 999,
-  "variantProductId": 998
-}
 
 
 ###################################################
@@ -130,15 +110,10 @@ Authorization: Bearer {{access_token}}
 GET {{baseUrl}}/products/1/variants
 Authorization: Bearer {{access_token}}
 
-### Step 2: Delete a specific variant relationship
-DELETE {{baseUrl}}/products/variants
-Content-Type: application/json
-Authorization: Bearer {{access_token}}
 
-{
-  "productId": 1,
-  "variantProductId": 2
-}
+### Step 2: Delete a specific variant relationship
+DELETE {{baseUrl}}/products/variants/1/2
+Authorization: Bearer {{access_token}}
 
 ### Step 3: Verify the relationship was removed
 GET {{baseUrl}}/products/1/variants
@@ -148,15 +123,10 @@ Authorization: Bearer {{access_token}}
 GET {{baseUrl}}/products/2/variants
 Authorization: Bearer {{access_token}}
 
-### Step 5: Try to delete the same relationship again (should return 404)
-DELETE {{baseUrl}}/products/variants
-Content-Type: application/json
-Authorization: Bearer {{access_token}}
 
-{
-  "productId": 1,
-  "variantProductId": 2
-}
+### Step 5: Try to delete the same relationship again (should return 404)
+DELETE {{baseUrl}}/products/variants/1/2
+Authorization: Bearer {{access_token}}
 
 ###################################################
 # COMPREHENSIVE DELETE TESTING - NEW BEHAVIOR
@@ -184,17 +154,12 @@ Authorization: Bearer {{access_token}}
 GET {{baseUrl}}/products/3/variants
 Authorization: Bearer {{access_token}}
 
+
 ### Step 3: Remove product 3 from the variant group by deleting 1↔3
 # NEW BEHAVIOR: This will remove BOTH 1↔3 AND 2↔3 relationships
 # Only 1↔2 will remain
-DELETE {{baseUrl}}/products/variants
-Content-Type: application/json
+DELETE {{baseUrl}}/products/variants/1/3
 Authorization: Bearer {{access_token}}
-
-{
-  "productId": 1,
-  "variantProductId": 3
-}
 
 ### Step 4: Verify the new state
 # Product 1 should now only have variant [2]
@@ -213,108 +178,59 @@ Authorization: Bearer {{access_token}}
 # COMPREHENSIVE DELETE TESTING - ORIGINAL BEHAVIOR  
 ###################################################
 
+
 ### Test 1: Successful deletion (should return 200)
-DELETE {{baseUrl}}/products/variants
-Content-Type: application/json
+DELETE {{baseUrl}}/products/variants/1/2
 Authorization: Bearer {{access_token}}
 
-{
-  "productId": 1,
-  "variantProductId": 2
-}
 
 ### Test 2: Same product IDs (should return 400)
-DELETE {{baseUrl}}/products/variants
-Content-Type: application/json
+DELETE {{baseUrl}}/products/variants/1/1
 Authorization: Bearer {{access_token}}
 
-{
-  "productId": 1,
-  "variantProductId": 1
-}
 
 ### Test 3: Non-existent products (should return 400)
-DELETE {{baseUrl}}/products/variants
-Content-Type: application/json
+DELETE {{baseUrl}}/products/variants/999/998
 Authorization: Bearer {{access_token}}
 
-{
-  "productId": 999,
-  "variantProductId": 998
-}
 
 ### Test 4: Non-existent relationship (should return 404)
-DELETE {{baseUrl}}/products/variants
-Content-Type: application/json
+DELETE {{baseUrl}}/products/variants/1/5
 Authorization: Bearer {{access_token}}
 
-{
-  "productId": 1,
-  "variantProductId": 5
-}
 
 ### Test 5: Invalid data types (should return 400)
-DELETE {{baseUrl}}/products/variants
-Content-Type: application/json
+DELETE {{baseUrl}}/products/variants/invalid/also_invalid
 Authorization: Bearer {{access_token}}
 
-{
-  "productId": "invalid",
-  "variantProductId": "also_invalid"
-}
 
 ### Test 6: Negative numbers (should return 400)
-DELETE {{baseUrl}}/products/variants
-Content-Type: application/json
+DELETE {{baseUrl}}/products/variants/-1/2
 Authorization: Bearer {{access_token}}
 
-{
-  "productId": -1,
-  "variantProductId": 2
-}
 
 ### Test 7: Zero values (should return 400)
-DELETE {{baseUrl}}/products/variants
-Content-Type: application/json
+DELETE {{baseUrl}}/products/variants/0/2
 Authorization: Bearer {{access_token}}
-
-{
-  "productId": 0,
-  "variantProductId": 2
-}
 
 ###################################################
 # DEBUG AND TROUBLESHOOTING
 ###################################################
 
+
 ### Debug: Test DELETE with proper JSON formatting
-DELETE {{baseUrl}}/products/variants
-Content-Type: application/json
+DELETE {{baseUrl}}/products/variants/1/2
 Authorization: Bearer {{access_token}}
 
-{
-  "productId": 1,
-  "variantProductId": 2
-}
 
 ### Debug: Test what happens with string values (should fail)
-DELETE {{baseUrl}}/products/variants
-Content-Type: application/json
+DELETE {{baseUrl}}/products/variants/1/2
 Authorization: Bearer {{access_token}}
 
-{
-  "productId": "1",
-  "variantProductId": "2"
-}
 
 ### Debug: Test with missing Content-Type (should fail)
-DELETE {{baseUrl}}/products/variants
+DELETE {{baseUrl}}/products/variants/1/2
 Authorization: Bearer {{access_token}}
-
-{
-  "productId": 1,
-  "variantProductId": 2
-}
 
 ###################################################
 # API DOCUMENTATION

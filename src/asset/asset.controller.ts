@@ -8,6 +8,7 @@ import {
   Delete,
   UseGuards,
   Req,
+  Res,
   UseInterceptors,
   UploadedFile,
   ParseIntPipe,
@@ -18,6 +19,8 @@ import { AssetService } from './asset.service';
 import { CreateAssetDto, UpdateAssetDto } from './dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PaginatedResponse } from '../common';
+import { FileUploadUtil } from '../utils/file-upload.util';
+import type { Response } from 'express';
 
 @Controller('assets')
 @UseGuards(JwtAuthGuard)
@@ -39,6 +42,11 @@ export class AssetController {
   ) {
     const userId = req.user.id;
     return this.assetService.create(createAssetDto, file, userId);
+  }
+
+  @Post('zip')
+  async downloadZip(@Body('files') files: string[], @Res() res: Response) {
+    await FileUploadUtil.downloadFilesAsZip(files, res, 'my-assets.zip');
   }
 
   @Get()

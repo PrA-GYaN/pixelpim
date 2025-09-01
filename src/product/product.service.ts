@@ -7,6 +7,7 @@ import { CreateProductVariantDto, RemoveProductVariantDto, ProductVariantRespons
 import { ExportProductDto, ExportProductResponseDto, ProductAttribute, ExportFormat } from './dto/export-product.dto';
 import { PaginatedResponse, PaginationUtils } from '../common';
 import type { Product } from '../../generated/prisma';
+import { getUserFriendlyType } from '../types/user-attribute-type.enum';
 
 @Injectable()
 export class ProductService {
@@ -23,7 +24,7 @@ export class ProductService {
         await this.validateCategory(createProductDto.categoryId, userId);
       }
 
-  // Validate attribute group if provided
+      // Validate attribute group if provided
       if (createProductDto.attributeGroupId) {
         await this.validateAttributeGroup(createProductDto.attributeGroupId, userId);
       }
@@ -33,14 +34,29 @@ export class ProductService {
         await this.validateFamily(createProductDto.familyId, userId);
       }
 
-      const result = await this.prisma.product.create({
+      // Filter out attributes that are already in the family
+      let filteredAttributes = createProductDto.attributes;
+      let removedAttributeNames: string[] = [];
+      if (createProductDto.familyId && createProductDto.attributes && createProductDto.attributes.length > 0) {
+        const familyAttributeIds = await this.getFamilyAttributeIds(createProductDto.familyId);
+        const { filteredAttributes: newFilteredAttributes, removedAttributes } = this.filterDuplicateAttributes(createProductDto.attributes, familyAttributeIds);
+
+        if (removedAttributes.length > 0) {
+          removedAttributeNames = await this.getAttributeNames(removedAttributes);
+          this.logger.warn(`Removed duplicate attributes from product creation: ${removedAttributeNames.join(', ')} (already present in family)`);
+        }
+
+        filteredAttributes = newFilteredAttributes;
+      }
+
+      // Create product without status first
+      const product = await this.prisma.product.create({
         data: {
           name: createProductDto.name,
           sku: createProductDto.sku,
           productLink: createProductDto.productLink,
           imageUrl: createProductDto.imageUrl,
           subImages: createProductDto.subImages || [],
-          status: createProductDto.status || 'incomplete',
           categoryId: createProductDto.categoryId,
           attributeGroupId: createProductDto.attributeGroupId,
           familyId: createProductDto.familyId,
@@ -65,7 +81,11 @@ export class ProductService {
             select: {
               id: true,
               name: true,
-              familyAttributes: true,
+              familyAttributes: {
+                include: {
+                  attribute: true,
+                },
+              },
             },
           },
           attributes: {
@@ -81,8 +101,28 @@ export class ProductService {
         },
       });
 
+      // Add filtered attributes to the product
+      if (filteredAttributes && filteredAttributes.length > 0) {
+        await this.prisma.productAttribute.createMany({
+          data: filteredAttributes.map(attributeId => ({ productId: product.id, attributeId })),
+          skipDuplicates: true,
+        });
+      }
+
+      // Calculate status
+      const status = await this.calculateProductStatus(product.id);
+      await this.prisma.product.update({ where: { id: product.id }, data: { status } });
+      this.logger.log(`Product ${product.id} created with initial status: ${status}`);
+
+      // Fetch updated product with status
+      const result = await this.findOne(product.id, userId);
       this.logger.log(`Successfully created product with ID: ${result.id}`);
-      return this.transformProductForResponse(result);
+      return {
+        ...result,
+        removedAttributesMessage: removedAttributeNames.length > 0
+          ? `Removed duplicate attributes: ${removedAttributeNames.join(', ')} (already present in family)`
+          : undefined,
+      };
     } catch (error) {
       this.handleDatabaseError(error, 'create');
     }
@@ -97,7 +137,9 @@ export class ProductService {
     attributeGroupId?: number, 
     familyId?: number,
     page: number = 1,
-    limit: number = 10
+    limit: number = 10,
+    sortBy?: string,
+    sortOrder: 'asc' | 'desc' = 'desc'
   ): Promise<PaginatedResponse<ProductResponseDto>> {
     try {
       this.logger.log(`Fetching products for user: ${userId}`);
@@ -143,6 +185,9 @@ export class ProductService {
 
       const paginationOptions = PaginationUtils.createPrismaOptions(page, limit);
 
+      // Build orderBy object based on sortBy parameter
+      const orderBy = this.buildOrderBy(sortBy, sortOrder);
+
       const [products, total] = await Promise.all([
         this.prisma.product.findMany({
           where: whereCondition,
@@ -185,20 +230,46 @@ export class ProductService {
                 attributeId: true,
               },
             },
+            variantLinksA: {
+              include: {
+                productB: {
+                  select: {
+                    id: true,
+                    name: true,
+                    sku: true,
+                    imageUrl: true,
+                    status: true,
+                  },
+                },
+              },
+            },
+            variantLinksB: {
+              include: {
+                productA: {
+                  select: {
+                    id: true,
+                    name: true,
+                    sku: true,
+                    imageUrl: true,
+                    status: true,
+                  },
+                },
+              },
+            },
           },
-          orderBy: { createdAt: 'desc' },
+          orderBy,
         }),
         this.prisma.product.count({ where: whereCondition }),
       ]);
 
-      const productResponseDtos = products.map(product => {
+      const productResponseDtos = await Promise.all(products.map(async product => {
         const attributeIds = product.attributes?.map((attr: any) => attr.attributeId) || [];
-        const response = this.transformProductForResponse(product);
+        const response = await this.transformProductForResponse(product);
         return {
           ...response,
           attributes: attributeIds,
         };
-      });
+      }));
       return PaginationUtils.createPaginatedResponse(productResponseDtos, total, page, limit);
     } catch (error) {
       this.logger.error(`Failed to fetch products for user ${userId}: ${error.message}`, error.stack);
@@ -260,6 +331,32 @@ export class ProductService {
               },
             },
           },
+          variantLinksA: {
+            include: {
+              productB: {
+                select: {
+                  id: true,
+                  name: true,
+                  sku: true,
+                  imageUrl: true,
+                  status: true,
+                },
+              },
+            },
+          },
+          variantLinksB: {
+            include: {
+              productA: {
+                select: {
+                  id: true,
+                  name: true,
+                  sku: true,
+                  imageUrl: true,
+                  status: true,
+                },
+              },
+            },
+          },
           assets: {
             include: {
               asset: true,
@@ -271,8 +368,8 @@ export class ProductService {
       if (!product) {
         throw new NotFoundException(`Product with ID ${id} not found or access denied`);
       }
-
-      return this.transformProductForResponse(product);
+      this.logger.log(`Product with ID ${id} found:`, product);
+      return await this.transformProductForResponse(product);
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
@@ -319,6 +416,32 @@ export class ProductService {
               attributeId: true,
             },
           },
+          variantLinksA: {
+            include: {
+              productB: {
+                select: {
+                  id: true,
+                  name: true,
+                  sku: true,
+                  imageUrl: true,
+                  status: true,
+                },
+              },
+            },
+          },
+          variantLinksB: {
+            include: {
+              productA: {
+                select: {
+                  id: true,
+                  name: true,
+                  sku: true,
+                  imageUrl: true,
+                  status: true,
+                },
+              },
+            },
+          },
         },
       });
 
@@ -326,7 +449,9 @@ export class ProductService {
         throw new NotFoundException(`Product with SKU ${sku} not found or access denied`);
       }
 
-      return this.transformProductForResponse(product);
+      this.logger.log(`Product with SKU ${sku} found: ID ${product}`);
+
+      return await this.transformProductForResponse(product);
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
@@ -382,9 +507,7 @@ export class ProductService {
         updateData.subImages = updateProductDto.subImages;
       }
 
-      if (updateProductDto.status !== undefined) {
-        updateData.status = updateProductDto.status;
-      }
+  // Status will be set automatically below
 
       if (updateProductDto.categoryId !== undefined) {
         updateData.categoryId = updateProductDto.categoryId;
@@ -404,12 +527,40 @@ export class ProductService {
         data: updateData,
       });
 
+      // After updating attributes/assets, recalculate status
+
       // Update attributes if provided
+      let removedAttributeNames: string[] = [];
       if (updateProductDto.attributes !== undefined) {
+        // Filter out attributes that are already in the family
+        let filteredAttributes = updateProductDto.attributes;
+        let familyIdToCheck = updateProductDto.familyId;
+
+        // If familyId is not being updated, get it from the existing product
+        if (familyIdToCheck === undefined) {
+          const existingProduct = await this.prisma.product.findUnique({
+            where: { id },
+            select: { familyId: true },
+          });
+          familyIdToCheck = existingProduct?.familyId ?? undefined;
+        }
+
+        if (familyIdToCheck && updateProductDto.attributes.length > 0) {
+          const familyAttributeIds = await this.getFamilyAttributeIds(familyIdToCheck);
+          const { filteredAttributes: newFilteredAttributes, removedAttributes } = this.filterDuplicateAttributes(updateProductDto.attributes, familyAttributeIds);
+
+          if (removedAttributes.length > 0) {
+            removedAttributeNames = await this.getAttributeNames(removedAttributes);
+            this.logger.warn(`Removed duplicate attributes from product update: ${removedAttributeNames.join(', ')} (already present in family)`);
+          }
+
+          filteredAttributes = newFilteredAttributes;
+        }
+
         await this.prisma.productAttribute.deleteMany({ where: { productId: id } });
-        if (updateProductDto.attributes.length > 0) {
+        if (filteredAttributes.length > 0) {
           await this.prisma.productAttribute.createMany({
-            data: updateProductDto.attributes.map(attributeId => ({ productId: id, attributeId })),
+            data: filteredAttributes.map(attributeId => ({ productId: id, attributeId })),
             skipDuplicates: true,
           });
         }
@@ -425,16 +576,92 @@ export class ProductService {
         }
       }
 
+  // Recalculate status
+  const newStatus = await this.calculateProductStatus(id);
+  await this.prisma.product.update({ where: { id }, data: { status: newStatus } });
+  this.logger.log(`Product ${id} status updated to: ${newStatus}`);
+
       // Fetch and return the updated product with relations
       const result = await this.findOne(id, userId);
       this.logger.log(`Successfully updated product with ID: ${id}`);
-      return result;
-    } catch (error) {
+      return {
+        ...result,
+        removedAttributesMessage: removedAttributeNames.length > 0
+          ? `Removed duplicate attributes: ${removedAttributeNames.join(', ')} (already present in family)`
+          : undefined,
+      };
+  } catch (error) {
       if (error instanceof NotFoundException || error instanceof BadRequestException) {
         throw error;
       }
-      this.handleDatabaseError(error, 'update');
+      this.logger.error(`Failed to update product ${id}: ${error.message}`, error.stack);
+      throw new BadRequestException('Failed to update product');
     }
+  }
+
+  private async calculateProductStatus(productId: number): Promise<string> {
+    this.logger.log(`[calculateProductStatus] Called for productId: ${productId}`);
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+      include: {
+        family: {
+          include: {
+            familyAttributes: {
+              where: { isRequired: true },
+              include: {
+                attribute: {
+                  select: { id: true, name: true, defaultValue: true }
+                }
+              }
+            }
+          }
+        },
+        attributes: {
+          include: { attribute: true }
+        }
+      }
+    });
+
+    if (!product) {
+      this.logger.error(`[calculateProductStatus] Product not found for productId: ${productId}`);
+      throw new NotFoundException(`Product with ID ${productId} not found`);
+    }
+
+    const hasFamily = !!product.family;
+    const productAttributes = product.attributes || [];
+    const hasAttributeIds = productAttributes.length > 0;
+
+    let status = 'complete';
+    let reason = '';
+
+    if (hasFamily) {
+      // Check all required family attributes for default values
+      const requiredAttributes = product.family?.familyAttributes || [];
+      const allRequiredHaveDefault = requiredAttributes.every((fa: any) => fa.attribute?.defaultValue !== null && fa.attribute?.defaultValue !== '');
+      if (!allRequiredHaveDefault) {
+        status = 'incomplete';
+        reason = 'Family exists but not all required attributes have default values.';
+      } else {
+        reason = 'Family exists and all required attributes have default values.';
+      }
+    } else if (hasAttributeIds) {
+      // Check all product attributes for default values
+      this.logger.log('[calculateProductStatus] Product attribute default values:', productAttributes.map((attr: any) => attr.attribute?.defaultValue));
+      const allAttributesHaveDefault = productAttributes.every((attr: any) => attr.attribute?.defaultValue !== null && attr.attribute?.defaultValue !== '');
+      if (!allAttributesHaveDefault) {
+        status = 'incomplete';
+        reason = 'Product has attribute IDs but not all have default values.';
+      } else {
+        reason = 'Product has attribute IDs and all have default values.';
+      }
+    } else {
+      // No family and no attribute ids, status is complete
+      status = 'complete';
+      reason = 'Product has neither family nor attribute IDs.';
+    }
+
+    this.logger.log(`[calculateProductStatus] Saved status '${status}' for productId ${productId}. Reason: ${reason}`);
+    return status;
   }
 
   async remove(id: number, userId: number): Promise<{ message: string }> {
@@ -460,7 +687,7 @@ export class ProductService {
     }
   }
 
-  async getProductsByCategory(categoryId: number, userId: number, page: number = 1, limit: number = 10): Promise<PaginatedResponse<ProductResponseDto>> {
+  async getProductsByCategory(categoryId: number, userId: number, page: number = 1, limit: number = 10, sortBy?: string, sortOrder: 'asc' | 'desc' = 'desc'): Promise<PaginatedResponse<ProductResponseDto>> {
     try {
       // Verify category ownership
       await this.validateCategory(categoryId, userId);
@@ -473,6 +700,9 @@ export class ProductService {
       };
 
       const paginationOptions = PaginationUtils.createPrismaOptions(page, limit);
+
+      // Build orderBy object based on sortBy parameter
+      const orderBy = this.buildOrderBy(sortBy, sortOrder);
 
       const [products, total] = await Promise.all([
         this.prisma.product.findMany({
@@ -508,13 +738,39 @@ export class ProductService {
                 },
               },
             },
+            variantLinksA: {
+              include: {
+                productB: {
+                  select: {
+                    id: true,
+                    name: true,
+                    sku: true,
+                    imageUrl: true,
+                    status: true,
+                  },
+                },
+              },
+            },
+            variantLinksB: {
+              include: {
+                productA: {
+                  select: {
+                    id: true,
+                    name: true,
+                    sku: true,
+                    imageUrl: true,
+                    status: true,
+                  },
+                },
+              },
+            },
           },
-          orderBy: { createdAt: 'desc' },
+          orderBy,
         }),
         this.prisma.product.count({ where: whereCondition }),
       ]);
 
-      const productResponseDtos = products.map(product => this.transformProductForResponse(product));
+      const productResponseDtos = await Promise.all(products.map(product => this.transformProductForResponse(product)));
       
       return PaginationUtils.createPaginatedResponse(productResponseDtos, total, page, limit);
     } catch (error) {
@@ -527,7 +783,7 @@ export class ProductService {
     }
   }
 
-  async getProductsByAttribute(attributeId: number, userId: number, page: number = 1, limit: number = 10): Promise<PaginatedResponse<ProductResponseDto>> {
+  async getProductsByAttribute(attributeId: number, userId: number, page: number = 1, limit: number = 10, sortBy?: string, sortOrder: 'asc' | 'desc' = 'desc'): Promise<PaginatedResponse<ProductResponseDto>> {
     try {
       // Verify attribute ownership
       await this.validateAttribute(attributeId, userId);
@@ -583,13 +839,39 @@ export class ProductService {
                 },
               },
             },
+            variantLinksA: {
+              include: {
+                productB: {
+                  select: {
+                    id: true,
+                    name: true,
+                    sku: true,
+                    imageUrl: true,
+                    status: true,
+                  },
+                },
+              },
+            },
+            variantLinksB: {
+              include: {
+                productA: {
+                  select: {
+                    id: true,
+                    name: true,
+                    sku: true,
+                    imageUrl: true,
+                    status: true,
+                  },
+                },
+              },
+            },
           },
-          orderBy: { createdAt: 'desc' },
+          orderBy: this.buildOrderBy(sortBy, sortOrder),
         }),
         this.prisma.product.count({ where: whereCondition }),
       ]);
 
-      const productResponseDtos = products.map(product => this.transformProductForResponse(product));
+      const productResponseDtos = await Promise.all(products.map(product => this.transformProductForResponse(product)));
       
       return PaginationUtils.createPaginatedResponse(productResponseDtos, total, page, limit);
     } catch (error) {
@@ -602,7 +884,7 @@ export class ProductService {
     }
   }
 
-  async getProductsByAttributeGroup(attributeGroupId: number, userId: number, page: number = 1, limit: number = 10): Promise<PaginatedResponse<ProductResponseDto>> {
+  async getProductsByAttributeGroup(attributeGroupId: number, userId: number, page: number = 1, limit: number = 10, sortBy?: string, sortOrder: 'asc' | 'desc' = 'desc'): Promise<PaginatedResponse<ProductResponseDto>> {
     try {
       // Verify attribute group ownership
       await this.validateAttributeGroup(attributeGroupId, userId);
@@ -658,13 +940,39 @@ export class ProductService {
                 },
               },
             },
+            variantLinksA: {
+              include: {
+                productB: {
+                  select: {
+                    id: true,
+                    name: true,
+                    sku: true,
+                    imageUrl: true,
+                    status: true,
+                  },
+                },
+              },
+            },
+            variantLinksB: {
+              include: {
+                productA: {
+                  select: {
+                    id: true,
+                    name: true,
+                    sku: true,
+                    imageUrl: true,
+                    status: true,
+                  },
+                },
+              },
+            },
           },
-          orderBy: { createdAt: 'desc' },
+          orderBy: this.buildOrderBy(sortBy, sortOrder),
         }),
         this.prisma.product.count({ where: whereCondition }),
       ]);
 
-      const productResponseDtos = products.map(product => this.transformProductForResponse(product));
+      const productResponseDtos = await Promise.all(products.map(product => this.transformProductForResponse(product)));
       
       return PaginationUtils.createPaginatedResponse(productResponseDtos, total, page, limit);
     } catch (error) {
@@ -677,7 +985,7 @@ export class ProductService {
     }
   }
 
-  async getProductsByFamily(familyId: number, userId: number, page: number = 1, limit: number = 10): Promise<PaginatedResponse<ProductResponseDto>> {
+  async getProductsByFamily(familyId: number, userId: number, page: number = 1, limit: number = 10, sortBy?: string, sortOrder: 'asc' | 'desc' = 'desc'): Promise<PaginatedResponse<ProductResponseDto>> {
     try {
       // Verify family ownership
       await this.validateFamily(familyId, userId);
@@ -733,13 +1041,39 @@ export class ProductService {
                 },
               },
             },
+            variantLinksA: {
+              include: {
+                productB: {
+                  select: {
+                    id: true,
+                    name: true,
+                    sku: true,
+                    imageUrl: true,
+                    status: true,
+                  },
+                },
+              },
+            },
+            variantLinksB: {
+              include: {
+                productA: {
+                  select: {
+                    id: true,
+                    name: true,
+                    sku: true,
+                    imageUrl: true,
+                    status: true,
+                  },
+                },
+              },
+            },
           },
-          orderBy: { createdAt: 'desc' },
+          orderBy: this.buildOrderBy(sortBy, sortOrder),
         }),
         this.prisma.product.count({ where: whereCondition }),
       ]);
 
-      const productResponseDtos = products.map(product => this.transformProductForResponse(product));
+      const productResponseDtos = await Promise.all(products.map(product => this.transformProductForResponse(product)));
       
       return PaginationUtils.createPaginatedResponse(productResponseDtos, total, page, limit);
     } catch (error) {
@@ -752,7 +1086,6 @@ export class ProductService {
     }
   }
 
-  // Helper methods
   private async validateCategory(categoryId: number, userId: number): Promise<void> {
     const category = await this.prisma.category.findFirst({
       where: {
@@ -796,7 +1129,7 @@ export class ProductService {
     }
   }
 
-  private transformProductForResponse(product: any): ProductResponseDto {
+  private async transformProductForResponse(product: any): Promise<ProductResponseDto> {
     // Extract variants from the product data
     const variants: any[] = [];
     
@@ -818,8 +1151,8 @@ export class ProductService {
           id: attr.attribute.id,
           name: attr.attribute.name,
           type: attr.attribute.type,
+            userFriendlyType: attr.attribute.userFriendlyType ?? getUserFriendlyType(attr.attribute.type),
           defaultValue: attr.attribute.defaultValue,
-          value: attr.value,
         }));
       } else {
         attributes = product.attributes.map((attr: any) => attr.attributeId);
@@ -874,7 +1207,7 @@ export class ProductService {
             name: fa.attribute.name,
             type: fa.attribute.type,
             defaultValue: fa.attribute.defaultValue,
-            userFriendlyType: fa.attribute.userFriendlyType,
+              userFriendlyType: fa.attribute.userFriendlyType ?? getUserFriendlyType(fa.attribute.type),
           })) || [],
         optionalAttributes: product.family.familyAttributes
           ?.filter((fa: any) => !fa.isRequired)
@@ -883,7 +1216,7 @@ export class ProductService {
             name: fa.attribute.name,
             type: fa.attribute.type,
             defaultValue: fa.attribute.defaultValue,
-            userFriendlyType: fa.attribute.userFriendlyType,
+              userFriendlyType: fa.attribute.userFriendlyType ?? getUserFriendlyType(fa.attribute.type),
           })) || [],
       } : undefined,
       variants: variants.length > 0 ? variants.map(variant => ({
@@ -1443,5 +1776,92 @@ export class ProductService {
     });
 
     return exportRecord;
+  }
+
+  /**
+   * Get all attribute IDs from a family (both required and optional)
+   */
+  private async getFamilyAttributeIds(familyId: number): Promise<number[]> {
+    const familyAttributes = await this.prisma.familyAttribute.findMany({
+      where: { familyId },
+      select: { attributeId: true },
+    });
+
+    return familyAttributes.map(fa => fa.attributeId);
+  }
+
+  /**
+   * Filter out attributes that are already present in the family
+   */
+  private filterDuplicateAttributes(attributes: number[], familyAttributeIds: number[]): { filteredAttributes: number[], removedAttributes: number[] } {
+    const filteredAttributes: number[] = [];
+    const removedAttributes: number[] = [];
+
+    attributes.forEach(attributeId => {
+      if (familyAttributeIds.includes(attributeId)) {
+        removedAttributes.push(attributeId);
+      } else {
+        filteredAttributes.push(attributeId);
+      }
+    });
+
+    return { filteredAttributes, removedAttributes };
+  }
+
+  /**
+   * Get attribute names for logging purposes
+   */
+  private async getAttributeNames(attributeIds: number[]): Promise<string[]> {
+    if (attributeIds.length === 0) return [];
+
+    const attributes = await this.prisma.attribute.findMany({
+      where: { id: { in: attributeIds } },
+      select: { id: true, name: true },
+    });
+
+    return attributes.map(attr => attr.name);
+  }
+
+  /**
+   * Build orderBy object based on sortBy parameter
+   */
+  private buildOrderBy(sortBy?: string, sortOrder: 'asc' | 'desc' = 'desc'): any {
+    if (!sortBy) {
+      return { createdAt: 'desc' };
+    }
+
+    const validSortFields = [
+      'id', 'name', 'sku', 'productLink', 'imageUrl', 'status', 
+      'categoryId', 'attributeGroupId', 'familyId', 'userId', 
+      'createdAt', 'updatedAt'
+    ];
+    
+    if (validSortFields.includes(sortBy)) {
+      return { [sortBy]: sortOrder };
+    }
+    
+    // Handle related field sorting
+    switch (sortBy) {
+      case 'categoryName':
+        return {
+          category: {
+            name: sortOrder
+          }
+        };
+      case 'attributeGroupName':
+        return {
+          attributeGroup: {
+            name: sortOrder
+          }
+        };
+      case 'familyName':
+        return {
+          family: {
+            name: sortOrder
+          }
+        };
+      default:
+        return { createdAt: 'desc' };
+    }
   }
 }

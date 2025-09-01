@@ -2,7 +2,9 @@ import { BadRequestException } from '@nestjs/common';
 import { diskStorage } from 'multer';
 import { extname, join } from 'path';
 import { promises as fs } from 'fs';
-import { Request } from 'express';
+import { Request, Response } from 'express';
+import archiver from 'archiver';
+import axios from 'axios';
 
 export interface FileUploadResult {
   filename: string;
@@ -234,4 +236,45 @@ export class FileUploadUtil {
       ],
     };
   }
+
+  /**
+   * Download multiple files as a ZIP archive
+   */
+  static async downloadFilesAsZip(
+    files: string[],
+    res: Response,
+    filename: string = 'assets.zip',
+  ): Promise<void> {
+    try {
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
+
+      const archive = archiver('zip', { zlib: { level: 9 } });
+      archive.pipe(res);
+
+      for (const url of files) {
+        try {
+          const response = await axios.get(url, { responseType: 'arraybuffer' });
+          const fileName = url.split('/').pop() || 'file';
+          archive.append(response.data, { name: fileName });
+        } catch (err) {
+          console.error(`Failed to fetch ${url}`, err);
+          // Continue with other files
+        }
+      }
+
+      await archive.finalize();
+    } catch (error) {
+      console.error('Error creating ZIP archive:', error);
+      // If headers are already sent, we can't change them
+      if (!res.headersSent) {
+        res.setHeader('Content-Type', 'application/json');
+        res.status(500).json({ error: 'Failed to create ZIP archive' });
+      } else {
+        // If headers are sent, just end the response
+        res.end();
+      }
+    }
+  }
+
 }

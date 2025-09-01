@@ -2235,6 +2235,39 @@ Delete a product.
 - `404 Not Found` - Product not found
 - `403 Forbidden` - You can only access your own products
 
+---
+
+#### Remove Product Variant
+Remove a variant relationship between two products.
+
+**Endpoint:** `DELETE /products/variants/:productId/:variantProductId`
+
+**Authentication:** Required (JWT token)
+
+**Parameters:**
+- `productId`: Product ID (integer)
+- `variantProductId`: Variant Product ID (integer)
+
+**Example:**
+```bash
+curl -X DELETE https://pixelpim.onrender.com/products/variants/433/432 \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+```
+
+**Success Response (200):**
+```json
+{
+  "message": "Product variant relationship removed successfully"
+}
+```
+
+**Error Responses:**
+- `404 Not Found` - Product or variant not found
+- `400 Bad Request` - Invalid productId or variantProductId
+- `403 Forbidden` - You can only modify your own products
+
+---
+
 ## Testing with cURL
 
 ### Send OTP
