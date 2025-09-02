@@ -59,7 +59,7 @@ export class CategoryController {
     const pageNum = page ? parseInt(page) : 1;
     const limitNum = limit ? parseInt(limit) : 10;
     
-    return this.categoryService.findAll(user.id);
+    return this.categoryService.findAll(user.id, pageNum, limitNum);
   }
 
   @Get('tree')
