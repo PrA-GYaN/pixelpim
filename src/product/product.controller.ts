@@ -17,7 +17,7 @@ import { ProductService } from './product.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ProductResponseDto } from './dto/product-response.dto';
-import { CreateProductVariantDto, RemoveProductVariantDto } from './dto/product-variant.dto';
+import { CreateProductVariantDto, RemoveProductVariantDto, GetProductVariantsDto, ProductVariantResponseDto } from './dto/product-variant.dto';
 import { ExportProductDto, ExportProductResponseDto } from './dto/export-product.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { User as GetUser } from '../auth/decorators/user.decorator';
@@ -198,6 +198,16 @@ export class ProductController {
 
   // Product Variant Management Endpoints
 
+  @Get('variants')
+  async getAllProductVariants(
+    @GetUser() user: User,
+    @Query() queryDto: GetProductVariantsDto,
+  ): Promise<PaginatedResponse<ProductVariantResponseDto>> {
+    this.logger.log(`User ${user.id} getting all product variants with pagination: page=${queryDto.page}, limit=${queryDto.limit}, sortBy=${queryDto.sortBy}, sortOrder=${queryDto.sortOrder}, search=${queryDto.search}, status=${queryDto.status}`);
+    
+    return this.productService.getAllProductVariants(user.id, queryDto);
+  }
+
   @Post('variants')
   @HttpCode(HttpStatus.CREATED)
   async createVariant(
@@ -227,10 +237,11 @@ export class ProductController {
   async getProductVariants(
     @Param('id', ParseIntPipe) productId: number,
     @GetUser() user: User,
-  ) {
-    this.logger.log(`User ${user.id} getting variants for product: ${productId}`);
+    @Query() queryDto: GetProductVariantsDto,
+  ): Promise<PaginatedResponse<ProductVariantResponseDto>> {
+    this.logger.log(`User ${user.id} getting variants for product: ${productId} with pagination: page=${queryDto.page}, limit=${queryDto.limit}, sortBy=${queryDto.sortBy}, sortOrder=${queryDto.sortOrder}, search=${queryDto.search}, status=${queryDto.status}`);
     
-    return this.productService.getProductVariants(productId, user.id);
+    return this.productService.getProductVariants(productId, user.id, queryDto);
   }
 
   // Product Export Endpoint

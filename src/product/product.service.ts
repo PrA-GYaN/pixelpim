@@ -3,7 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ProductResponseDto } from './dto/product-response.dto';
-import { CreateProductVariantDto, RemoveProductVariantDto, ProductVariantResponseDto } from './dto/product-variant.dto';
+import { CreateProductVariantDto, RemoveProductVariantDto, ProductVariantResponseDto, GetProductVariantsDto } from './dto/product-variant.dto';
 import { ExportProductDto, ExportProductResponseDto, ProductAttribute, ExportFormat } from './dto/export-product.dto';
 import { PaginatedResponse, PaginationUtils } from '../common';
 import type { Product } from '../../generated/prisma';
@@ -1443,25 +1443,100 @@ export class ProductService {
     }
   }
 
-  async getProductVariants(productId: number, userId: number): Promise<ProductVariantResponseDto[]> {
+  async getAllProductVariants(
+    userId: number, 
+    queryDto: GetProductVariantsDto
+  ): Promise<PaginatedResponse<ProductVariantResponseDto>> {
     try {
-      // Verify the product exists and belongs to the user
-      const product = await this.prisma.product.findFirst({
-        where: { id: productId, userId },
-      });
+      const { page = 1, limit = 10, sortBy = 'name', sortOrder = 'asc', search, status } = queryDto;
+      const skip = (page - 1) * limit;
 
-      if (!product) {
-        throw new BadRequestException('Product not found or does not belong to you');
+      // Build where clause for filtering
+      const whereClause: any = {
+        OR: [
+          { productA: { userId } },
+          { productB: { userId } },
+        ],
+      };
+
+      // Add search filtering
+      if (search) {
+        whereClause.OR = [
+          {
+            productA: {
+              userId,
+              OR: [
+                { name: { contains: search, mode: 'insensitive' } },
+                { sku: { contains: search, mode: 'insensitive' } },
+              ],
+            },
+          },
+          {
+            productB: {
+              userId,
+              OR: [
+                { name: { contains: search, mode: 'insensitive' } },
+                { sku: { contains: search, mode: 'insensitive' } },
+              ],
+            },
+          },
+        ];
       }
 
-      // Get all variants where this product is either productA or productB
+      // Add status filtering
+      if (status) {
+        const statusCondition = { status };
+        if (search) {
+          // If both search and status filters are applied
+          whereClause.OR = [
+            {
+              productA: {
+                userId,
+                ...statusCondition,
+                OR: [
+                  { name: { contains: search, mode: 'insensitive' } },
+                  { sku: { contains: search, mode: 'insensitive' } },
+                ],
+              },
+            },
+            {
+              productB: {
+                userId,
+                ...statusCondition,
+                OR: [
+                  { name: { contains: search, mode: 'insensitive' } },
+                  { sku: { contains: search, mode: 'insensitive' } },
+                ],
+              },
+            },
+          ];
+        } else {
+          // Only status filter
+          whereClause.OR = [
+            {
+              productA: {
+                userId,
+                ...statusCondition,
+              },
+            },
+            {
+              productB: {
+                userId,
+                ...statusCondition,
+              },
+            },
+          ];
+        }
+      }
+
+      // Get total count for user's products variants
+      const total = await this.prisma.productVariant.count({
+        where: whereClause,
+      });
+
+      // Get paginated variants for user's products
       const variants = await this.prisma.productVariant.findMany({
-        where: {
-          OR: [
-            { productAId: productId },
-            { productBId: productId },
-          ],
-        },
+        where: whereClause,
         include: {
           productA: {
             select: {
@@ -1482,10 +1557,24 @@ export class ProductService {
             },
           },
         },
+        skip,
+        take: limit,
+        orderBy: [
+          {
+            productA: {
+              [sortBy]: sortOrder,
+            },
+          },
+          {
+            productB: {
+              [sortBy]: sortOrder,
+            },
+          },
+        ],
       });
 
       // Transform the response to handle null/undefined differences
-      return variants.map(variant => ({
+      const transformedVariants = variants.map(variant => ({
         ...variant,
         productA: {
           ...variant.productA,
@@ -1496,6 +1585,152 @@ export class ProductService {
           imageUrl: variant.productB.imageUrl ?? undefined,
         },
       })) as ProductVariantResponseDto[];
+
+      const totalPages = Math.ceil(total / limit);
+      
+      return {
+        data: transformedVariants,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages,
+          hasNext: page < totalPages,
+          hasPrev: page > 1,
+        },
+      };
+    } catch (error) {
+      this.logger.error(`Failed to get all product variants: ${error.message}`, error.stack);
+      throw new BadRequestException('Failed to get all product variants');
+    }
+  }
+
+  async getProductVariants(
+    productId: number, 
+    userId: number, 
+    queryDto: GetProductVariantsDto
+  ): Promise<PaginatedResponse<ProductVariantResponseDto>> {
+    try {
+      // Verify the product exists and belongs to the user
+      const product = await this.prisma.product.findFirst({
+        where: { id: productId, userId },
+      });
+
+      if (!product) {
+        throw new BadRequestException('Product not found or does not belong to you');
+      }
+
+      const { page = 1, limit = 10, sortBy = 'name', sortOrder = 'asc', search, status } = queryDto;
+      const skip = (page - 1) * limit;
+
+      // Build base where clause for variants of this specific product
+      let whereClause: any = {
+        OR: [
+          { productAId: productId },
+          { productBId: productId },
+        ],
+      };
+
+      // Add search and status filtering if provided
+      if (search || status) {
+        const productFilters: any = {};
+        
+        if (search) {
+          productFilters.OR = [
+            { name: { contains: search, mode: 'insensitive' } },
+            { sku: { contains: search, mode: 'insensitive' } },
+          ];
+        }
+        
+        if (status) {
+          productFilters.status = status;
+        }
+
+        // Apply filters to both productA and productB
+        whereClause = {
+          OR: [
+            {
+              productAId: productId,
+              productB: productFilters,
+            },
+            {
+              productBId: productId,
+              productA: productFilters,
+            },
+          ],
+        };
+      }
+
+      // Get total count
+      const total = await this.prisma.productVariant.count({
+        where: whereClause,
+      });
+
+      // Get paginated variants where this product is either productA or productB
+      const variants = await this.prisma.productVariant.findMany({
+        where: whereClause,
+        include: {
+          productA: {
+            select: {
+              id: true,
+              name: true,
+              sku: true,
+              imageUrl: true,
+              status: true,
+            },
+          },
+          productB: {
+            select: {
+              id: true,
+              name: true,
+              sku: true,
+              imageUrl: true,
+              status: true,
+            },
+          },
+        },
+        skip,
+        take: limit,
+        orderBy: [
+          {
+            productA: {
+              [sortBy]: sortOrder,
+            },
+          },
+          {
+            productB: {
+              [sortBy]: sortOrder,
+            },
+          },
+        ],
+      });
+
+      // Transform the response to handle null/undefined differences
+      const transformedVariants = variants.map(variant => ({
+        ...variant,
+        productA: {
+          ...variant.productA,
+          imageUrl: variant.productA.imageUrl ?? undefined,
+        },
+        productB: {
+          ...variant.productB,
+          imageUrl: variant.productB.imageUrl ?? undefined,
+        },
+      })) as ProductVariantResponseDto[];
+
+      const totalPages = Math.ceil(total / limit);
+      
+      return {
+        data: transformedVariants,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages,
+          hasNext: page < totalPages,
+          hasPrev: page > 1,
+        },
+      };
     } catch (error) {
       if (error instanceof BadRequestException) {
         throw error;

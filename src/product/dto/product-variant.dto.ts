@@ -1,5 +1,28 @@
-import { IsInt, IsNotEmpty, IsArray, IsPositive } from 'class-validator';
+import { IsInt, IsNotEmpty, IsArray, IsPositive, IsOptional, IsString, IsIn } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
+import { PaginationDto } from '../../common/dto/pagination.dto';
+import { SortingDto } from '../../common/dto/sorting.dto';
+
+export class GetProductVariantsDto extends PaginationDto {
+  @IsOptional()
+  @IsString({ message: 'sortBy must be a string' })
+  @IsIn(['name', 'sku'], { message: 'sortBy must be either "name" or "sku"' })
+  sortBy?: 'name' | 'sku' = 'name';
+
+  @IsOptional()
+  @IsString({ message: 'sortOrder must be a string' })
+  @IsIn(['asc', 'desc'], { message: 'sortOrder must be either "asc" or "desc"' })
+  sortOrder?: 'asc' | 'desc' = 'asc';
+
+  @IsOptional()
+  @IsString({ message: 'search must be a string' })
+  search?: string;
+
+  @IsOptional()
+  @IsString({ message: 'status must be a string' })
+  @IsIn(['complete', 'incomplete'], { message: 'status must be either "complete" or "incomplete"' })
+  status?: 'complete' | 'incomplete';
+}
 
 export class CreateProductVariantDto {
   @IsInt()

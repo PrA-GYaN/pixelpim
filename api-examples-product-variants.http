@@ -641,3 +641,212 @@ DELETE {{baseUrl}}/products/variants
   "error": "Unauthorized"
 }
 ```
+
+###################################################
+# PAGINATION AND SORTING FOR PRODUCT VARIANTS
+###################################################
+
+### Get All Product Variants with Pagination (Default: page=1, limit=10, sortBy=name, sortOrder=asc)
+GET {{baseUrl}}/products/variants
+Authorization: Bearer {{access_token}}
+
+### Get All Product Variants - Page 2 with Custom Limit
+GET {{baseUrl}}/products/variants?page=2&limit=5
+Authorization: Bearer {{access_token}}
+
+### Get All Product Variants - Sort by Name (Ascending)
+GET {{baseUrl}}/products/variants?sortBy=name&sortOrder=asc
+Authorization: Bearer {{access_token}}
+
+### Get All Product Variants - Sort by Name (Descending)
+GET {{baseUrl}}/products/variants?sortBy=name&sortOrder=desc
+Authorization: Bearer {{access_token}}
+
+### Get All Product Variants - Sort by SKU (Ascending)
+GET {{baseUrl}}/products/variants?sortBy=sku&sortOrder=asc
+Authorization: Bearer {{access_token}}
+
+### Get All Product Variants - Sort by SKU (Descending)
+GET {{baseUrl}}/products/variants?sortBy=sku&sortOrder=desc
+Authorization: Bearer {{access_token}}
+
+### Get All Product Variants - Combined Pagination and Sorting
+GET {{baseUrl}}/products/variants?page=1&limit=10&sortBy=name&sortOrder=asc
+Authorization: Bearer {{access_token}}
+
+### Get All Product Variants - Search by Name or SKU
+GET {{baseUrl}}/products/variants?search=iPhone
+Authorization: Bearer {{access_token}}
+
+### Get All Product Variants - Filter by Status (Complete)
+GET {{baseUrl}}/products/variants?status=complete
+Authorization: Bearer {{access_token}}
+
+### Get All Product Variants - Filter by Status (Incomplete)
+GET {{baseUrl}}/products/variants?status=incomplete
+Authorization: Bearer {{access_token}}
+
+### Get All Product Variants - Search and Filter Combined
+GET {{baseUrl}}/products/variants?search=Pro&status=complete
+Authorization: Bearer {{access_token}}
+
+### Get All Product Variants - Full Query with Search, Status, Pagination, and Sorting
+GET {{baseUrl}}/products/variants?search=iPhone&status=complete&page=1&limit=5&sortBy=sku&sortOrder=desc
+Authorization: Bearer {{access_token}}
+
+### Get Specific Product Variants with Pagination (Default: page=1, limit=10, sortBy=name, sortOrder=asc)
+GET {{baseUrl}}/products/{{productId}}/variants
+Authorization: Bearer {{access_token}}
+
+### Get Specific Product Variants - Page 2 with Custom Limit
+GET {{baseUrl}}/products/{{productId}}/variants?page=2&limit=5
+Authorization: Bearer {{access_token}}
+
+### Get Specific Product Variants - Sort by Name (Ascending)
+GET {{baseUrl}}/products/{{productId}}/variants?sortBy=name&sortOrder=asc
+Authorization: Bearer {{access_token}}
+
+### Get Specific Product Variants - Sort by Name (Descending)
+GET {{baseUrl}}/products/{{productId}}/variants?sortBy=name&sortOrder=desc
+Authorization: Bearer {{access_token}}
+
+### Get Specific Product Variants - Sort by SKU (Ascending)
+GET {{baseUrl}}/products/{{productId}}/variants?sortBy=sku&sortOrder=asc
+Authorization: Bearer {{access_token}}
+
+### Get Specific Product Variants - Sort by SKU (Descending)
+GET {{baseUrl}}/products/{{productId}}/variants?sortBy=sku&sortOrder=desc
+Authorization: Bearer {{access_token}}
+
+### Get Specific Product Variants - Combined Pagination and Sorting
+GET {{baseUrl}}/products/{{productId}}/variants?page=1&limit=10&sortBy=name&sortOrder=asc
+Authorization: Bearer {{access_token}}
+
+### Get Specific Product Variants - Search by Name or SKU
+GET {{baseUrl}}/products/{{productId}}/variants?search=Pro
+Authorization: Bearer {{access_token}}
+
+### Get Specific Product Variants - Filter by Status (Complete)
+GET {{baseUrl}}/products/{{productId}}/variants?status=complete
+Authorization: Bearer {{access_token}}
+
+### Get Specific Product Variants - Filter by Status (Incomplete)
+GET {{baseUrl}}/products/{{productId}}/variants?status=incomplete
+Authorization: Bearer {{access_token}}
+
+### Get Specific Product Variants - Search and Filter Combined
+GET {{baseUrl}}/products/{{productId}}/variants?search=Max&status=complete
+Authorization: Bearer {{access_token}}
+
+### Get Specific Product Variants - Full Query with Search, Status, Pagination, and Sorting
+GET {{baseUrl}}/products/{{productId}}/variants?search=iPhone&status=complete&page=1&limit=5&sortBy=sku&sortOrder=desc
+Authorization: Bearer {{access_token}}
+
+###################################################
+# PAGINATION RESPONSE FORMAT
+###################################################
+
+# Expected Response Format for Paginated Results:
+# {
+#   "data": [
+#     {
+#       "id": 1,
+#       "productAId": 1,
+#       "productBId": 2,
+#       "productA": {
+#         "id": 1,
+#         "name": "Product A",
+#         "sku": "SKU-A",
+#         "imageUrl": "url",
+#         "status": "complete"
+#       },
+#       "productB": {
+#         "id": 2,
+#         "name": "Product B",
+#         "sku": "SKU-B",
+#         "imageUrl": "url",
+#         "status": "incomplete"
+#       }
+#     }
+#   ],
+#   "pagination": {
+#     "page": 1,
+#     "limit": 10,
+#     "total": 25,
+#     "totalPages": 3,
+#     "hasNext": true,
+#     "hasPrev": false
+#   }
+# }
+#
+# Search and Filter Behavior:
+# - Search parameter matches product names and SKUs (case-insensitive)
+# - Status filter matches exact status values: "complete" or "incomplete"
+# - When both search and status are provided, both conditions must be met
+# - Filtering applies to the variant products (productA and productB)
+# - Results are then sorted according to sortBy and sortOrder parameters
+
+###################################################
+# QUERY PARAMETERS DOCUMENTATION
+###################################################
+
+# Available Query Parameters for Variant Endpoints:
+#
+# 1. page (optional, default: 1)
+#    - Type: integer
+#    - Description: Page number for pagination
+#    - Minimum: 1
+#
+# 2. limit (optional, default: 10)
+#    - Type: integer
+#    - Description: Number of items per page
+#    - Minimum: 1
+#    - Maximum: 100
+#
+# 3. sortBy (optional, default: "name")
+#    - Type: string
+#    - Description: Field to sort by
+#    - Allowed values: "name", "sku"
+#
+# 4. sortOrder (optional, default: "asc")
+#    - Type: string
+#    - Description: Sort order
+#    - Allowed values: "asc", "desc"
+#
+# 5. search (optional)
+#    - Type: string
+#    - Description: Search term to filter by product name or SKU
+#    - Case-insensitive partial matching
+#
+# 6. status (optional)
+#    - Type: string
+#    - Description: Filter products by status
+#    - Allowed values: "complete", "incomplete"
+
+###################################################
+# SEARCH AND FILTER EXAMPLES AND USE CASES
+###################################################
+
+# Example Use Cases:
+#
+# 1. Find all variant relationships involving iPhone products:
+#    GET /products/variants?search=iPhone
+#
+# 2. Get only variants with complete products:
+#    GET /products/variants?status=complete
+#
+# 3. Find iPhone variants that are complete:
+#    GET /products/variants?search=iPhone&status=complete
+#
+# 4. Search for variants by SKU pattern:
+#    GET /products/variants?search=IPH-15
+#
+# 5. Get incomplete products for a specific product:
+#    GET /products/1/variants?status=incomplete
+#
+# 6. Search variants of a specific product by name:
+#    GET /products/1/variants?search=Pro
+#
+# 7. Complex query - find iPhone Pro variants that are complete, 
+#    sorted by SKU in descending order, page 2:
+#    GET /products/variants?search=iPhone Pro&status=complete&sortBy=sku&sortOrder=desc&page=2&limit=5
