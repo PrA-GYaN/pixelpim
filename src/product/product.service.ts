@@ -132,10 +132,10 @@ export class ProductService {
     userId: number, 
     search?: string,
     status?: string, 
-    categoryId?: number, 
+    categoryId?: number | null, 
     attributeId?: number, 
-    attributeGroupId?: number, 
-    familyId?: number,
+    attributeGroupId?: number | null, 
+    familyId?: number | null,
     page: number = 1,
     limit: number = 10,
     sortBy?: string,
@@ -167,7 +167,7 @@ export class ProductService {
         whereCondition.status = status;
       }
 
-      if (categoryId) {
+      if (categoryId !== undefined) {
         whereCondition.categoryId = categoryId;
       }
 
@@ -175,11 +175,11 @@ export class ProductService {
         whereCondition.attributeId = attributeId;
       }
 
-      if (attributeGroupId) {
+      if (attributeGroupId !== undefined) {
         whereCondition.attributeGroupId = attributeGroupId;
       }
 
-      if (familyId) {
+      if (familyId !== undefined) {
         whereCondition.familyId = familyId;
       }
 

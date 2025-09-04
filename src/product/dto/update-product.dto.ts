@@ -40,8 +40,8 @@ export class UpdateProductDto extends PartialType(CreateProductDto) {
 
   @IsOptional()
   @IsInt()
-  @Transform(({ value }) => parseInt(value))
-  categoryId?: number;
+  @Transform(({ value }) => value === null || value === undefined ? value : parseInt(value))
+  categoryId?: number | null;
 
   @IsOptional()
   @IsArray()
@@ -55,11 +55,11 @@ export class UpdateProductDto extends PartialType(CreateProductDto) {
 
   @IsOptional()
   @IsInt()
-  @Transform(({ value }) => parseInt(value))
-  attributeGroupId?: number;
+  @Transform(({ value }) => value === null || value === undefined ? value : parseInt(value))
+  attributeGroupId?: number | null;
 
   @IsOptional()
   @IsInt()
-  @Transform(({ value }) => parseInt(value))
-  familyId?: number;
+  @Transform(({ value }) => value === null || value === undefined ? value : parseInt(value))
+  familyId?: number | null;
 }

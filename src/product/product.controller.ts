@@ -59,10 +59,10 @@ export class ProductController {
   ): Promise<PaginatedResponse<ProductResponseDto>> {
     this.logger.log(`User ${user.id} fetching products`);
     
-    const categoryIdInt = categoryId ? parseInt(categoryId) : undefined;
+    const categoryIdInt = categoryId === 'null' ? null : categoryId ? parseInt(categoryId) : undefined;
     const attributeIdInt = attributeId ? parseInt(attributeId) : undefined;
-    const attributeGroupIdInt = attributeGroupId ? parseInt(attributeGroupId) : undefined;
-    const familyIdInt = familyId ? parseInt(familyId) : undefined;
+    const attributeGroupIdInt = attributeGroupId === 'null' ? null : attributeGroupId ? parseInt(attributeGroupId) : undefined;
+    const familyIdInt = familyId === 'null' ? null : familyId ? parseInt(familyId) : undefined;
     const pageNum = page ? parseInt(page) : 1;
     const limitNum = limit ? parseInt(limit) : 10;
     const sortOrderValidated = sortOrder === 'asc' ? 'asc' : 'desc';
