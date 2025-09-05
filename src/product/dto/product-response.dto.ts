@@ -1,3 +1,5 @@
+import { Transform } from 'class-transformer';
+
 export class ProductVariantSummaryDto {
   id: number;
   name: string;
@@ -18,7 +20,9 @@ export class ProductResponseDto {
   attributeGroupId?: number;
   familyId?: number;
   userId: number;
+  @Transform(({ value }) => value ? new Date(value).toISOString().split('T')[0] : value)
   createdAt: Date;
+  @Transform(({ value }) => value ? new Date(value).toISOString().split('T')[0] : value)
   updatedAt: Date;
   category?: {
     id: number;

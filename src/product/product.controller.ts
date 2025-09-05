@@ -12,6 +12,8 @@ import {
   HttpCode,
   HttpStatus,
   Logger,
+  UseInterceptors,
+  ClassSerializerInterceptor,
 } from '@nestjs/common';
 import { ProductService } from './product.service';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -27,6 +29,7 @@ import type { User } from '../../generated/prisma';
 
 @Controller('products')
 @UseGuards(JwtAuthGuard)
+@UseInterceptors(ClassSerializerInterceptor)
 export class ProductController {
   private readonly logger = new Logger(ProductController.name);
 
