@@ -84,6 +84,8 @@ export class ProductVariantResponseDto {
     sku: string;
     imageUrl?: string;
     status: string;
+    createdAt: string;
+    updatedAt: string;
   };
   productB?: {
     id: number;
@@ -91,5 +93,7 @@ export class ProductVariantResponseDto {
     sku: string;
     imageUrl?: string;
     status: string;
+    createdAt: string;
+    updatedAt: string;
   };
 }

@@ -270,6 +270,7 @@ export class ProductService {
           attributes: attributeIds,
         };
       }));
+      console.log('Product Response DTOs:', productResponseDtos);
       return PaginationUtils.createPaginatedResponse(productResponseDtos, total, page, limit);
     } catch (error) {
       this.logger.error(`Failed to fetch products for user ${userId}: ${error.message}`, error.stack);
@@ -1173,6 +1174,11 @@ export class ProductService {
       } : pa.assetId);
     }
 
+    // Format dates to YYYY-MM-DD format
+    const formatDate = (date: Date) => {
+      return date.toISOString().split('T')[0];
+    };
+
     return {
       id: product.id,
       name: product.name,
@@ -1185,8 +1191,8 @@ export class ProductService {
       attributeGroupId: product.attributeGroupId,
       familyId: product.familyId,
       userId: product.userId,
-      createdAt: product.createdAt,
-      updatedAt: product.updatedAt,
+      createdAt: formatDate(product.createdAt),
+      updatedAt: formatDate(product.updatedAt),
       category: product.category ? {
         id: product.category.id,
         name: product.category.name,
@@ -1265,7 +1271,7 @@ export class ProductService {
 
   // Product Variant Management Methods
 
-  async createVariant(createVariantDto: CreateProductVariantDto, userId: number): Promise<{ message: string; created: number }> {
+  async createVariant(createVariantDto: CreateProductVariantDto, userId: number): Promise<{ message: string; created: number; variants: ProductVariantResponseDto[] }> {
     try {
       const { productId, variantProductIds } = createVariantDto;
 
@@ -1311,8 +1317,59 @@ export class ProductService {
         skipDuplicates: true,
       });
 
+      // Fetch the created variants with product details
+      const createdVariants = await this.prisma.productVariant.findMany({
+        where: {
+          OR: variantData.map(v => ({
+            productAId: v.productAId,
+            productBId: v.productBId,
+          })),
+        },
+        include: {
+          productA: {
+            select: {
+              id: true,
+              name: true,
+              sku: true,
+              imageUrl: true,
+              status: true,
+              createdAt: true,
+              updatedAt: true,
+            },
+          },
+          productB: {
+            select: {
+              id: true,
+              name: true,
+              sku: true,
+              imageUrl: true,
+              status: true,
+              createdAt: true,
+              updatedAt: true,
+            },
+          },
+        },
+      });
+
+      // Transform the variants
+      const transformedVariants = createdVariants.map(variant => ({
+        ...variant,
+        productA: {
+          ...variant.productA,
+          imageUrl: variant.productA.imageUrl ?? undefined,
+          createdAt: variant.productA.createdAt.toISOString().split('T')[0],
+          updatedAt: variant.productA.updatedAt.toISOString().split('T')[0],
+        },
+        productB: {
+          ...variant.productB,
+          imageUrl: variant.productB.imageUrl ?? undefined,
+          createdAt: variant.productB.createdAt.toISOString().split('T')[0],
+          updatedAt: variant.productB.updatedAt.toISOString().split('T')[0],
+        },
+      })) as ProductVariantResponseDto[];
+
       this.logger.log(`Created ${result.count} variant relationships for product ${productId} and its variant group`);
-      return { message: `Successfully added ${result.count} variant relationships to create a fully connected variant group`, created: result.count };
+      return { message: `Successfully added ${result.count} variant relationships to create a fully connected variant group`, created: result.count, variants: transformedVariants };
     } catch (error) {
       if (error instanceof BadRequestException) {
         throw error;
@@ -1545,6 +1602,8 @@ export class ProductService {
               sku: true,
               imageUrl: true,
               status: true,
+              createdAt: true,
+              updatedAt: true,
             },
           },
           productB: {
@@ -1554,6 +1613,8 @@ export class ProductService {
               sku: true,
               imageUrl: true,
               status: true,
+              createdAt: true,
+              updatedAt: true,
             },
           },
         },
@@ -1579,10 +1640,14 @@ export class ProductService {
         productA: {
           ...variant.productA,
           imageUrl: variant.productA.imageUrl ?? undefined,
+          createdAt: variant.productA.createdAt.toISOString().split('T')[0],
+          updatedAt: variant.productA.updatedAt.toISOString().split('T')[0],
         },
         productB: {
           ...variant.productB,
           imageUrl: variant.productB.imageUrl ?? undefined,
+          createdAt: variant.productB.createdAt.toISOString().split('T')[0],
+          updatedAt: variant.productB.updatedAt.toISOString().split('T')[0],
         },
       })) as ProductVariantResponseDto[];
 
@@ -1677,6 +1742,8 @@ export class ProductService {
               sku: true,
               imageUrl: true,
               status: true,
+              createdAt: true,
+              updatedAt: true,
             },
           },
           productB: {
@@ -1686,6 +1753,8 @@ export class ProductService {
               sku: true,
               imageUrl: true,
               status: true,
+              createdAt: true,
+              updatedAt: true,
             },
           },
         },
@@ -1711,10 +1780,14 @@ export class ProductService {
         productA: {
           ...variant.productA,
           imageUrl: variant.productA.imageUrl ?? undefined,
+          createdAt: variant.productA.createdAt.toISOString().split('T')[0],
+          updatedAt: variant.productA.updatedAt.toISOString().split('T')[0],
         },
         productB: {
           ...variant.productB,
           imageUrl: variant.productB.imageUrl ?? undefined,
+          createdAt: variant.productB.createdAt.toISOString().split('T')[0],
+          updatedAt: variant.productB.updatedAt.toISOString().split('T')[0],
         },
       })) as ProductVariantResponseDto[];
 

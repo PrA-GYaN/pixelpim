@@ -10,6 +10,9 @@ export class AssetGroupService {
     if (typeof obj === 'bigint') {
       return obj.toString();
     }
+    if (obj instanceof Date) {
+      return obj.toISOString().split('T')[0];
+    }
     if (Array.isArray(obj)) {
       return obj.map(AssetGroupService.convertBigIntToString);
     }
@@ -43,7 +46,13 @@ export class AssetGroupService {
         groupName: createAssetGroupDto.groupName,
         userId,
       },
-      include: {
+      select: {
+        id: true,
+        groupName: true,
+        createdDate: true,
+        createdAt: true,
+        updatedAt: true,
+        userId: true,
         _count: {
           select: {
             assets: true,
@@ -64,7 +73,13 @@ export class AssetGroupService {
       this.prisma.assetGroup.findMany({
         where: whereCondition,
         ...paginationOptions,
-        include: {
+        select: {
+          id: true,
+          groupName: true,
+          createdDate: true,
+          createdAt: true,
+          updatedAt: true,
+          userId: true,
           _count: {
             select: {
               assets: true,
@@ -86,7 +101,13 @@ export class AssetGroupService {
   async findOne(id: number, userId: number) {
     const assetGroup = await this.prisma.assetGroup.findFirst({
       where: { id, userId },
-      include: {
+      select: {
+        id: true,
+        groupName: true,
+        createdDate: true,
+        createdAt: true,
+        updatedAt: true,
+        userId: true,
         _count: {
           select: {
             assets: true,
@@ -117,6 +138,19 @@ export class AssetGroupService {
       this.prisma.asset.findMany({
         where: whereCondition,
         ...paginationOptions,
+        select: {
+          id: true,
+          name: true,
+          fileName: true,
+          filePath: true,
+          mimeType: true,
+          uploadDate: true,
+          size: true,
+          userId: true,
+          assetGroupId: true,
+          createdAt: true,
+          updatedAt: true,
+        },
         orderBy: {
           createdAt: 'desc',
         },
@@ -150,7 +184,13 @@ export class AssetGroupService {
     const updatedAssetGroup = await this.prisma.assetGroup.update({
       where: { id },
       data: updateAssetGroupDto,
-      include: {
+      select: {
+        id: true,
+        groupName: true,
+        createdDate: true,
+        createdAt: true,
+        updatedAt: true,
+        userId: true,
         _count: {
           select: {
             assets: true,

@@ -20,10 +20,8 @@ export class ProductResponseDto {
   attributeGroupId?: number;
   familyId?: number;
   userId: number;
-  @Transform(({ value }) => value ? new Date(value).toISOString().split('T')[0] : value)
-  createdAt: Date;
-  @Transform(({ value }) => value ? new Date(value).toISOString().split('T')[0] : value)
-  updatedAt: Date;
+  createdAt: string;
+  updatedAt: string;
   category?: {
     id: number;
     name: string;
