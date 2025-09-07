@@ -1,5 +1,14 @@
-import { IsString, IsNotEmpty, IsOptional, IsUrl, IsInt, IsIn, IsArray } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsUrl, IsInt, IsIn, IsArray, ValidateNested } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
+
+export class ProductAttributeValueDto {
+  @IsInt()
+  attributeId: number;
+
+  @IsOptional()
+  @IsString()
+  value?: string;
+}
 
 export class CreateProductDto {
   @IsString()
@@ -41,11 +50,16 @@ export class CreateProductDto {
   @Transform(({ value }) => value === null || value === undefined ? value : parseInt(value))
   categoryId?: number | null;
 
-
   @IsOptional()
   @IsArray()
   @IsInt({ each: true })
   attributes?: number[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ProductAttributeValueDto)
+  attributesWithValues?: ProductAttributeValueDto[];
 
   @IsOptional()
   @IsArray()

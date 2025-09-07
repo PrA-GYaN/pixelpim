@@ -18,6 +18,7 @@ import {
 import { ProductService } from './product.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
+import { UpdateProductAttributesDto } from './dto/update-product-attribute.dto';
 import { ProductResponseDto } from './dto/product-response.dto';
 import { CreateProductVariantDto, RemoveProductVariantDto, GetProductVariantsDto, ProductVariantResponseDto } from './dto/product-variant.dto';
 import { ExportProductDto, ExportProductResponseDto } from './dto/export-product.dto';
@@ -258,5 +259,32 @@ export class ProductController {
     this.logger.log(`User ${user.id} exporting ${exportDto.productIds.length} products with attributes: ${exportDto.attributes.join(', ')}`);
     
     return this.productService.exportProducts(exportDto, user.id);
+  }
+
+  // Product Attribute Value Management Endpoints
+
+  @Patch(':id/attributes')
+  async updateProductAttributeValues(
+    @Param('id', ParseIntPipe) productId: number,
+    @Body() updateAttributesDto: UpdateProductAttributesDto,
+    @GetUser() user: User,
+  ): Promise<ProductResponseDto> {
+    this.logger.log(`User ${user.id} updating attribute values for product: ${productId}`);
+    
+    return this.productService.updateProductAttributeValues(
+      productId,
+      updateAttributesDto.attributes,
+      user.id
+    );
+  }
+
+  @Get(':id/attributes')
+  async getProductAttributeValues(
+    @Param('id', ParseIntPipe) productId: number,
+    @GetUser() user: User,
+  ) {
+    this.logger.log(`User ${user.id} getting attribute values for product: ${productId}`);
+    
+    return this.productService.getProductAttributeValues(productId, user.id);
   }
 }

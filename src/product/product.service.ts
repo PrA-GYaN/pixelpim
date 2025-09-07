@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, ConflictException, BadRequestException, 
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
+import { UpdateProductAttributesDto } from './dto/update-product-attribute.dto';
 import { ProductResponseDto } from './dto/product-response.dto';
 import { CreateProductVariantDto, RemoveProductVariantDto, ProductVariantResponseDto, GetProductVariantsDto } from './dto/product-variant.dto';
 import { ExportProductDto, ExportProductResponseDto, ProductAttribute, ExportFormat } from './dto/export-product.dto';
@@ -107,6 +108,51 @@ export class ProductService {
           data: filteredAttributes.map(attributeId => ({ productId: product.id, attributeId })),
           skipDuplicates: true,
         });
+      }
+
+      // Add attributes with values if provided
+      if (createProductDto.attributesWithValues && createProductDto.attributesWithValues.length > 0) {
+        // Validate that all attributes belong to the user
+        const attributeIds = createProductDto.attributesWithValues.map(av => av.attributeId);
+        const existingAttributes = await this.prisma.attribute.findMany({
+          where: {
+            id: { in: attributeIds },
+            userId,
+          },
+        });
+
+        if (existingAttributes.length !== attributeIds.length) {
+          throw new BadRequestException('One or more attributes do not exist or do not belong to you');
+        }
+
+        // Filter out attributes that are already in the family
+        let filteredAttributesWithValues = createProductDto.attributesWithValues;
+        if (createProductDto.familyId) {
+          const familyAttributeIds = await this.getFamilyAttributeIds(createProductDto.familyId);
+          filteredAttributesWithValues = createProductDto.attributesWithValues.filter(
+            av => !familyAttributeIds.includes(av.attributeId)
+          );
+        }
+
+        // Create ProductAttribute entries with values using upsert
+        for (const { attributeId, value } of filteredAttributesWithValues) {
+          await this.prisma.productAttribute.upsert({
+            where: {
+              productId_attributeId: {
+                productId: product.id,
+                attributeId,
+              },
+            },
+            update: {
+              value: value || null,
+            },
+            create: {
+              productId: product.id,
+              attributeId,
+              value: value || null,
+            },
+          });
+        }
       }
 
       // Calculate status
@@ -321,7 +367,8 @@ export class ProductService {
             },
           },
           attributes: {
-            include: {
+            select: {
+              value: true,
               attribute: {
                 select: {
                   id: true,
@@ -566,6 +613,87 @@ export class ProductService {
           });
         }
       }
+
+      // Update attributes with values if provided
+      if (updateProductDto.attributesWithValues !== undefined) {
+        // Validate that all attributes belong to the user
+        const attributeIds = updateProductDto.attributesWithValues.map(av => av.attributeId);
+        if (attributeIds.length > 0) {
+          const existingAttributes = await this.prisma.attribute.findMany({
+            where: {
+              id: { in: attributeIds },
+              userId,
+            },
+          });
+
+          if (existingAttributes.length !== attributeIds.length) {
+            throw new BadRequestException('One or more attributes do not exist or do not belong to you');
+          }
+
+          // Filter out attributes that are already in the family (if family is being updated)
+          let filteredAttributesWithValues = updateProductDto.attributesWithValues;
+          let familyIdToCheck = updateProductDto.familyId;
+          
+          // If familyId is not being updated, get it from the existing product
+          if (familyIdToCheck === undefined) {
+            const existingProduct = await this.prisma.product.findUnique({
+              where: { id },
+              select: { familyId: true },
+            });
+            familyIdToCheck = existingProduct?.familyId ?? undefined;
+          }
+
+          if (familyIdToCheck) {
+            const familyAttributeIds = await this.getFamilyAttributeIds(familyIdToCheck);
+            filteredAttributesWithValues = updateProductDto.attributesWithValues.filter(
+              av => !familyAttributeIds.includes(av.attributeId)
+            );
+          }
+
+          // First, delete existing ProductAttribute entries that aren't in the new list
+          const currentProductAttributes = await this.prisma.productAttribute.findMany({
+            where: { productId: id },
+            select: { attributeId: true },
+          });
+          
+          const newAttributeIds = filteredAttributesWithValues.map(av => av.attributeId);
+          const attributesToDelete = currentProductAttributes
+            .filter(pa => !newAttributeIds.includes(pa.attributeId))
+            .map(pa => pa.attributeId);
+
+          if (attributesToDelete.length > 0) {
+            await this.prisma.productAttribute.deleteMany({
+              where: {
+                productId: id,
+                attributeId: { in: attributesToDelete },
+              },
+            });
+          }
+
+          // Create or update ProductAttribute entries with values using upsert
+          for (const { attributeId, value } of filteredAttributesWithValues) {
+            await this.prisma.productAttribute.upsert({
+              where: {
+                productId_attributeId: {
+                  productId: id,
+                  attributeId,
+                },
+              },
+              update: {
+                value: value || null,
+              },
+              create: {
+                productId: id,
+                attributeId,
+                value: value || null,
+              },
+            });
+          }
+        } else {
+          // If empty array provided, delete all ProductAttribute entries
+          await this.prisma.productAttribute.deleteMany({ where: { productId: id } });
+        }
+      }
       // Update assets if provided
       if (updateProductDto.assets !== undefined) {
         await this.prisma.productAsset.deleteMany({ where: { productId: id } });
@@ -618,7 +746,12 @@ export class ProductService {
           }
         },
         attributes: {
-          include: { attribute: true }
+          select: {
+            value: true,
+            attribute: {
+              select: { id: true, name: true, defaultValue: true }
+            }
+          }
         }
       }
     });
@@ -636,24 +769,42 @@ export class ProductService {
     let reason = '';
 
     if (hasFamily) {
-      // Check all required family attributes for default values
+      // Check all required family attributes - they need to have either custom values or default values
       const requiredAttributes = product.family?.familyAttributes || [];
-      const allRequiredHaveDefault = requiredAttributes.every((fa: any) => fa.attribute?.defaultValue !== null && fa.attribute?.defaultValue !== '');
-      if (!allRequiredHaveDefault) {
+      
+      // For family attributes, we need to check if there are ProductAttribute entries with values
+      const requiredAttributeIds = requiredAttributes.map((fa: any) => fa.attribute.id);
+      const familyAttributeValues = productAttributes.filter((pa: any) => 
+        requiredAttributeIds.includes(pa.attribute.id)
+      );
+      
+      // Check if all required family attributes have values (either custom or default)
+      const allRequiredHaveValues = requiredAttributes.every((fa: any) => {
+        const productAttr = familyAttributeValues.find((pa: any) => pa.attribute.id === fa.attribute.id);
+        const hasCustomValue = productAttr?.value !== null && productAttr?.value !== '';
+        const hasDefaultValue = fa.attribute?.defaultValue !== null && fa.attribute?.defaultValue !== '';
+        return hasCustomValue || hasDefaultValue;
+      });
+      
+      if (!allRequiredHaveValues) {
         status = 'incomplete';
-        reason = 'Family exists but not all required attributes have default values.';
+        reason = 'Family exists but not all required attributes have values.';
       } else {
-        reason = 'Family exists and all required attributes have default values.';
+        reason = 'Family exists and all required attributes have values.';
       }
     } else if (hasAttributeIds) {
-      // Check all product attributes for default values
-      this.logger.log('[calculateProductStatus] Product attribute default values:', productAttributes.map((attr: any) => attr.attribute?.defaultValue));
-      const allAttributesHaveDefault = productAttributes.every((attr: any) => attr.attribute?.defaultValue !== null && attr.attribute?.defaultValue !== '');
-      if (!allAttributesHaveDefault) {
+      // Check all product attributes - they need to have either custom values or default values
+      const allAttributesHaveValues = productAttributes.every((attr: any) => {
+        const hasCustomValue = attr.value !== null && attr.value !== '';
+        const hasDefaultValue = attr.attribute?.defaultValue !== null && attr.attribute?.defaultValue !== '';
+        return hasCustomValue || hasDefaultValue;
+      });
+      
+      if (!allAttributesHaveValues) {
         status = 'incomplete';
-        reason = 'Product has attribute IDs but not all have default values.';
+        reason = 'Product has attributes but not all have values.';
       } else {
-        reason = 'Product has attribute IDs and all have default values.';
+        reason = 'Product has attributes and all have values.';
       }
     } else {
       // No family and no attribute ids, status is complete
@@ -1152,8 +1303,9 @@ export class ProductService {
           id: attr.attribute.id,
           name: attr.attribute.name,
           type: attr.attribute.type,
-            userFriendlyType: attr.attribute.userFriendlyType ?? getUserFriendlyType(attr.attribute.type),
+          userFriendlyType: attr.attribute.userFriendlyType ?? getUserFriendlyType(attr.attribute.type),
           defaultValue: attr.attribute.defaultValue,
+          value: attr.value, // Include the actual value from ProductAttribute
         }));
       } else {
         attributes = product.attributes.map((attr: any) => attr.attributeId);
@@ -2170,6 +2322,125 @@ export class ProductService {
         };
       default:
         return { createdAt: 'desc' };
+    }
+  }
+
+  /**
+   * Update attribute values for a specific product
+   */
+  async updateProductAttributeValues(
+    productId: number,
+    attributeValues: { attributeId: number; value?: string }[],
+    userId: number
+  ): Promise<ProductResponseDto> {
+    try {
+      this.logger.log(`Updating attribute values for product: ${productId} by user: ${userId}`);
+
+      // Verify product ownership
+      const product = await this.prisma.product.findFirst({
+        where: { id: productId, userId },
+      });
+
+      if (!product) {
+        throw new NotFoundException(`Product with ID ${productId} not found`);
+      }
+
+      // Verify all attributes belong to the user
+      const attributeIds = attributeValues.map(av => av.attributeId);
+      const existingAttributes = await this.prisma.attribute.findMany({
+        where: {
+          id: { in: attributeIds },
+          userId,
+        },
+      });
+
+      if (existingAttributes.length !== attributeIds.length) {
+        throw new BadRequestException('One or more attributes do not exist or do not belong to you');
+      }
+
+      // Update each attribute value using upsert
+      for (const { attributeId, value } of attributeValues) {
+        await this.prisma.productAttribute.upsert({
+          where: {
+            productId_attributeId: {
+              productId,
+              attributeId,
+            },
+          },
+          update: {
+            value: value || null,
+          },
+          create: {
+            productId,
+            attributeId,
+            value: value || null,
+          },
+        });
+      }
+
+      // Recalculate product status after updating attribute values
+      const status = await this.calculateProductStatus(productId);
+      await this.prisma.product.update({ 
+        where: { id: productId }, 
+        data: { status } 
+      });
+
+      // Return updated product
+      return this.findOne(productId, userId);
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+        throw error;
+      }
+      this.handleDatabaseError(error, 'updateProductAttributeValues');
+    }
+  }
+
+  /**
+   * Get product attribute values
+   */
+  async getProductAttributeValues(
+    productId: number,
+    userId: number
+  ): Promise<{ attributeId: number; attributeName: string; attributeType: string; value: string | null; defaultValue: string | null }[]> {
+    try {
+      this.logger.log(`Getting attribute values for product: ${productId} by user: ${userId}`);
+
+      // Verify product ownership
+      const product = await this.prisma.product.findFirst({
+        where: { id: productId, userId },
+      });
+
+      if (!product) {
+        throw new NotFoundException(`Product with ID ${productId} not found`);
+      }
+
+      // Get all product attributes with their values
+      const productAttributes = await this.prisma.productAttribute.findMany({
+        where: { productId },
+        include: {
+          attribute: {
+            select: {
+              id: true,
+              name: true,
+              type: true,
+              defaultValue: true,
+            },
+          },
+        },
+      });
+
+      return productAttributes.map(pa => ({
+        attributeId: pa.attributeId,
+        attributeName: pa.attribute.name,
+        attributeType: pa.attribute.type,
+        value: pa.value,
+        defaultValue: pa.attribute.defaultValue,
+      }));
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      this.handleDatabaseError(error, 'getProductAttributeValues');
     }
   }
 }
