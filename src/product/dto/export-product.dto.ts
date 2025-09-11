@@ -1,4 +1,5 @@
-import { IsArray, IsInt, IsOptional, IsString, IsEnum, ArrayMinSize } from 'class-validator';
+import { IsArray, IsInt, IsOptional, IsString, IsEnum, ArrayMinSize, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export enum ExportFormat {
   CSV = 'csv',
@@ -31,6 +32,20 @@ export enum ProductAttribute {
   USER_ID = 'userId',
   CREATED_AT = 'createdAt',
   UPDATED_AT = 'updatedAt',
+  // New attribute for custom attribute values
+  CUSTOM_ATTRIBUTES = 'customAttributes',
+}
+
+export class AttributeSelectionDto {
+  @IsInt()
+  attributeId: number;
+
+  @IsString()
+  attributeName: string;
+
+  @IsOptional()
+  @IsString()
+  columnName?: string; // Custom column name for export
 }
 
 export class ExportProductDto {
@@ -43,6 +58,12 @@ export class ExportProductDto {
   @IsEnum(ProductAttribute, { each: true })
   @ArrayMinSize(1, { message: 'At least one attribute must be selected' })
   attributes: ProductAttribute[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AttributeSelectionDto)
+  selectedAttributes?: AttributeSelectionDto[]; // For custom attribute value exports
 
   @IsOptional()
   @IsEnum(ExportFormat)
@@ -59,5 +80,6 @@ export class ExportProductResponseDto {
   filename: string;
   totalRecords: number;
   selectedAttributes: ProductAttribute[];
+  customAttributes?: AttributeSelectionDto[]; // Include custom attributes in response
   exportedAt: Date;
 }

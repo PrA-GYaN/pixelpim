@@ -1,0 +1,271 @@
+### Family Attribute Values API Examples
+### These examples demonstrate how to work with family attribute values in products
+### 
+### IMPORTANT: Use "attributeId" (not "familyAttributeId") in familyAttributesWithValues array
+### The system internally maps attributeId to the corresponding familyAttributeId
+### 
+### Key Points:
+### - familyAttributesWithValues: Use for attributes that belong to the product's family
+### - attributesWithValues: Use for regular product attributes (not from family)
+### - Both arrays use "attributeId" property, never "familyAttributeId"
+### - The product must have a familyId assigned to use familyAttributesWithValues
+
+### Variables (replace with actual values)
+@baseUrl = http://localhost:3000
+@jwt_token = your_jwt_token_here
+
+### === Creating Products with Family Attribute Values ===
+
+### 1. Create product with family attribute values only
+POST {{baseUrl}}/products
+Authorization: Bearer {{jwt_token}}
+Content-Type: application/json
+
+{
+  "name": "T-Shirt with Family Attributes",
+  "sku": "TSHIRT-FAM-001",
+  "familyId": 1,
+  "categoryId": 1,
+  "status": "incomplete",
+  "familyAttributesWithValues": [
+    {
+      "attributeId": 1,
+      "value": "Red"
+    },
+    {
+      "attributeId": 2,
+      "value": "Cotton"
+    },
+    {
+      "attributeId": 3,
+      "value": "Large"
+    }
+  ]
+}
+
+### 2. Create product with both regular and family attributes
+POST {{baseUrl}}/products
+Authorization: Bearer {{jwt_token}}
+Content-Type: application/json
+
+{
+  "name": "Premium Jeans",
+  "sku": "JEANS-PREMIUM-001",
+  "familyId": 1,
+  "categoryId": 2,
+  "status": "complete",
+  "productLink": "https://example.com/jeans",
+  "imageUrl": "https://example.com/jeans.jpg",
+  "attributesWithValues": [
+    {
+      "attributeId": 10,
+      "value": "Premium Brand"
+    },
+    {
+      "attributeId": 11,
+      "value": "Limited Edition"
+    }
+  ],
+  "familyAttributesWithValues": [
+    {
+      "attributeId": 1,
+      "value": "Dark Blue"
+    },
+    {
+      "attributeId": 2,
+      "value": "Denim"
+    },
+    {
+      "attributeId": 3,
+      "value": "32W x 34L"
+    }
+  ]
+}
+
+### === Updating Products with Family Attribute Values ===
+
+### 3. Update existing product to add family attribute values
+PATCH {{baseUrl}}/products/1
+Authorization: Bearer {{jwt_token}}
+Content-Type: application/json
+
+{
+  "familyId": 1,
+  "familyAttributesWithValues": [
+    {
+      "attributeId": 1,
+      "value": "Blue"
+    },
+    {
+      "attributeId": 2,
+      "value": "Polyester"
+    }
+  ]
+}
+
+### 4. Update product family attribute values only
+PATCH {{baseUrl}}/products/2
+Authorization: Bearer {{jwt_token}}
+Content-Type: application/json
+
+{
+  "familyAttributesWithValues": [
+    {
+      "attributeId": 1,
+      "value": "Updated Color - Green"
+    },
+    {
+      "attributeId": 3,
+      "value": "Updated Size - XL"
+    }
+  ]
+}
+
+### 5. Update product with mixed regular and family attributes
+PATCH {{baseUrl}}/products/3
+Authorization: Bearer {{jwt_token}}
+Content-Type: application/json
+
+{
+  "name": "Updated Product Name",
+  "status": "complete",
+  "attributesWithValues": [
+    {
+      "attributeId": 10,
+      "value": "Updated Brand Value"
+    }
+  ],
+  "familyAttributesWithValues": [
+    {
+      "attributeId": 1,
+      "value": "Updated Family Color"
+    },
+    {
+      "attributeId": 2,
+      "value": "Updated Family Material"
+    },
+    {
+      "attributeId": 3,
+      "value": "Updated Family Size"
+    }
+  ]
+}
+
+### === Retrieving Products with Family Attribute Values ===
+
+### 6. Get product by ID (includes family attribute values)
+GET {{baseUrl}}/products/1
+Authorization: Bearer {{jwt_token}}
+
+### 7. Get all products with family attribute values included
+GET {{baseUrl}}/products
+Authorization: Bearer {{jwt_token}}
+
+### 8. Get products by family (shows all products in family with their attribute values)
+GET {{baseUrl}}/products?familyId=1
+Authorization: Bearer {{jwt_token}}
+
+### 9. Get products with filtering (family attribute values are included in response)
+GET {{baseUrl}}/products?status=complete&familyId=1
+Authorization: Bearer {{jwt_token}}
+
+### === Advanced Examples ===
+
+### 10. Create product with extensive family attribute values
+POST {{baseUrl}}/products
+Authorization: Bearer {{jwt_token}}
+Content-Type: application/json
+
+{
+  "name": "Comprehensive Clothing Item",
+  "sku": "CLOTH-COMP-001",
+  "familyId": 1,
+  "categoryId": 1,
+  "status": "complete",
+  "productLink": "https://example.com/comprehensive",
+  "imageUrl": "https://example.com/comprehensive.jpg",
+  "description": "A product with all possible family attributes",
+  "familyAttributesWithValues": [
+    {
+      "attributeId": 1,
+      "value": "Multi-Color"
+    },
+    {
+      "attributeId": 2,
+      "value": "Cotton-Polyester Blend"
+    },
+    {
+      "attributeId": 3,
+      "value": "Medium"
+    },
+    {
+      "attributeId": 4,
+      "value": "Casual"
+    },
+    {
+      "attributeId": 5,
+      "value": "Unisex"
+    }
+  ]
+}
+
+### 11. Update product to remove some family attribute values (set to empty array)
+PATCH {{baseUrl}}/products/4
+Authorization: Bearer {{jwt_token}}
+Content-Type: application/json
+
+{
+  "familyAttributesWithValues": []
+}
+
+### 12. Update product to change family and set new family attribute values
+PATCH {{baseUrl}}/products/5
+Authorization: Bearer {{jwt_token}}
+Content-Type: application/json
+
+{
+  "familyId": 2,
+  "familyAttributesWithValues": [
+    {
+      "attributeId": 6,
+      "value": "New Family Attribute Value"
+    },
+    {
+      "attributeId": 7,
+      "value": "Another New Value"
+    }
+  ]
+}
+
+### === Error Testing Examples ===
+
+### 13. Try to create product with invalid family attribute ID (should fail)
+POST {{baseUrl}}/products
+Authorization: Bearer {{jwt_token}}
+Content-Type: application/json
+
+{
+  "name": "Invalid Family Attribute Test",
+  "sku": "INVALID-FAM-001",
+  "familyId": 1,
+  "familyAttributesWithValues": [
+    {
+      "attributeId": 99999,
+      "value": "This should fail"
+    }
+  ]
+}
+
+### 14. Try to update with family attribute not belonging to product's family (should fail)
+PATCH {{baseUrl}}/products/1
+Authorization: Bearer {{jwt_token}}
+Content-Type: application/json
+
+{
+  "familyAttributesWithValues": [
+    {
+      "attributeId": 99999,
+      "value": "This should also fail"
+    }
+  ]
+}

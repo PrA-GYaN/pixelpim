@@ -50,7 +50,7 @@ model Attribute {
   user             User                      @relation("UserAttributes", fields: [userId], references: [id], onDelete: Cascade)
   attributeGroups  AttributeGroupAttribute[]
   familyAttributes FamilyAttribute[]
-  products         ProductAttribute[]        // Fixed relation from Product[] to ProductAttribute[]
+  products         ProductAttribute[]
 
   @@unique([name, userId])
 }
@@ -108,6 +108,7 @@ model FamilyAttribute {
 
   family          Family    @relation(fields: [familyId], references: [id], onDelete: Cascade)
   attribute       Attribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+  products        ProductAttribute[]
 
   @@unique([familyId, attributeId])
 }
@@ -220,14 +221,16 @@ model Asset {
 }
 
 model ProductAttribute {
-  id          Int       @id @default(autoincrement())
-  productId   Int
-  attributeId Int
-  value       String?
-  createdAt   DateTime  @default(now())
+  id               Int       @id @default(autoincrement())
+  productId        Int
+  attributeId      Int
+  familyAttributeId Int?
+  value            String?
+  createdAt        DateTime  @default(now())
 
-  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
-  attribute   Attribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+  product          Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  attribute        Attribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+  familyAttribute  FamilyAttribute? @relation(fields: [familyAttributeId], references: [id], onDelete: Cascade)
 
   @@unique([productId, attributeId])
 }

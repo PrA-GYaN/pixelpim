@@ -63,6 +63,12 @@ export class CreateProductDto {
 
   @IsOptional()
   @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ProductAttributeValueDto)
+  familyAttributesWithValues?: ProductAttributeValueDto[];
+
+  @IsOptional()
+  @IsArray()
   @IsInt({ each: true })
   assets?: number[];
 

@@ -250,6 +250,15 @@ export class ProductController {
 
   // Product Export Endpoint
 
+  @Get('export/attributes')
+  async getAttributesForExport(
+    @GetUser() user: User,
+  ) {
+    this.logger.log(`User ${user.id} fetching attributes for export selection`);
+    
+    return this.productService.getAttributesForExport(user.id);
+  }
+
   @Post('export')
   @HttpCode(HttpStatus.OK)
   async exportProducts(

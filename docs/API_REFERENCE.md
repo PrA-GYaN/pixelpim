@@ -1971,9 +1971,24 @@ Create a new product.
   "imageUrl": "https://example.com/images/iphone15pro.jpg",
   "status": "complete",
   "categoryId": 3,
-  "attributeId": 1,
   "attributeGroupId": 1,
-  "familyId": 1
+  "familyId": 1,
+  "familyAttributesWithValues": [
+    {
+      "attributeId": 10,
+      "value": "Apple"
+    },
+    {
+      "attributeId": 11,
+      "value": "Pro Max"
+    }
+  ],
+  "attributesWithValues": [
+    {
+      "attributeId": 1,
+      "value": "Premium"
+    }
+  ]
 }
 ```
 
@@ -1984,9 +1999,10 @@ Create a new product.
 - `imageUrl`: Optional valid URL
 - `status`: Optional string ("complete" or "incomplete", default: "incomplete")
 - `categoryId`: Optional integer (must belong to user)
-- `attributeId`: Optional integer (must belong to user)
 - `attributeGroupId`: Optional integer (must belong to user)
 - `familyId`: Optional integer (must belong to user)
+- `familyAttributesWithValues`: Optional array of family attribute values (requires familyId)
+- `attributesWithValues`: Optional array of regular attribute values
 
 **Success Response (201):**
 ```json
@@ -2618,7 +2634,14 @@ curl -X POST http://localhost:3000/products \
     "imageUrl":"https://example.com/images/iphone15pro.jpg",
     "status":"complete",
     "categoryId":3,
-    "familyId":1
+    "familyId":1,
+    "familyAttributesWithValues":[
+      {"attributeId":10,"value":"Apple"},
+      {"attributeId":11,"value":"Pro Max"}
+    ],
+    "attributesWithValues":[
+      {"attributeId":1,"value":"Premium"}
+    ]
   }'
 ```
 

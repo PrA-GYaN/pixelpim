@@ -5,7 +5,7 @@ import { UpdateProductDto } from './dto/update-product.dto';
 import { UpdateProductAttributesDto } from './dto/update-product-attribute.dto';
 import { ProductResponseDto } from './dto/product-response.dto';
 import { CreateProductVariantDto, RemoveProductVariantDto, ProductVariantResponseDto, GetProductVariantsDto } from './dto/product-variant.dto';
-import { ExportProductDto, ExportProductResponseDto, ProductAttribute, ExportFormat } from './dto/export-product.dto';
+import { ExportProductDto, ExportProductResponseDto, ProductAttribute, ExportFormat, AttributeSelectionDto } from './dto/export-product.dto';
 import { PaginatedResponse, PaginationUtils } from '../common';
 import type { Product } from '../../generated/prisma';
 import { getUserFriendlyType } from '../types/user-attribute-type.enum';
@@ -155,6 +155,54 @@ export class ProductService {
         }
       }
 
+      // Handle family attributes with values if provided
+      if (createProductDto.familyAttributesWithValues && createProductDto.familyAttributesWithValues.length > 0) {
+        if (!createProductDto.familyId) {
+          throw new BadRequestException('Cannot set family attribute values without a family assigned');
+        }
+
+        // Get family attributes to validate and get familyAttributeId mapping
+        const familyAttributes = await this.prisma.familyAttribute.findMany({
+          where: { familyId: createProductDto.familyId },
+          include: { attribute: true },
+        });
+
+        const familyAttributeMap = new Map(
+          familyAttributes.map(fa => [fa.attribute.id, fa.id])
+        );
+
+        // Validate that all provided attributes belong to the family
+        for (const { attributeId } of createProductDto.familyAttributesWithValues) {
+          if (!familyAttributeMap.has(attributeId)) {
+            throw new BadRequestException(`Attribute ${attributeId} is not part of the selected family`);
+          }
+        }
+
+        // Create ProductAttribute entries for family attributes with values
+        for (const { attributeId, value } of createProductDto.familyAttributesWithValues) {
+          const familyAttributeId = familyAttributeMap.get(attributeId);
+          
+          await this.prisma.productAttribute.upsert({
+            where: {
+              productId_attributeId: {
+                productId: product.id,
+                attributeId,
+              },
+            },
+            update: {
+              value: value || null,
+              familyAttributeId,
+            },
+            create: {
+              productId: product.id,
+              attributeId,
+              familyAttributeId,
+              value: value || null,
+            },
+          });
+        }
+      }
+
       // Calculate status
       const status = await this.calculateProductStatus(product.id);
       await this.prisma.product.update({ where: { id: product.id }, data: { status } });
@@ -273,7 +321,16 @@ export class ProductService {
             },
             attributes: {
               select: {
-                attributeId: true,
+                value: true,
+                familyAttributeId: true,
+                attribute: {
+                  select: {
+                    id: true,
+                    name: true,
+                    type: true,
+                    defaultValue: true,
+                  },
+                },
               },
             },
             variantLinksA: {
@@ -309,12 +366,8 @@ export class ProductService {
       ]);
 
       const productResponseDtos = await Promise.all(products.map(async product => {
-        const attributeIds = product.attributes?.map((attr: any) => attr.attributeId) || [];
         const response = await this.transformProductForResponse(product);
-        return {
-          ...response,
-          attributes: attributeIds,
-        };
+        return response;
       }));
       console.log('Product Response DTOs:', productResponseDtos);
       return PaginationUtils.createPaginatedResponse(productResponseDtos, total, page, limit);
@@ -369,6 +422,7 @@ export class ProductService {
           attributes: {
             select: {
               value: true,
+              familyAttributeId: true,
               attribute: {
                 select: {
                   id: true,
@@ -461,7 +515,16 @@ export class ProductService {
           },
           attributes: {
             select: {
-              attributeId: true,
+              value: true,
+              familyAttributeId: true,
+              attribute: {
+                select: {
+                  id: true,
+                  name: true,
+                  type: true,
+                  defaultValue: true,
+                },
+              },
             },
           },
           variantLinksA: {
@@ -694,6 +757,100 @@ export class ProductService {
           await this.prisma.productAttribute.deleteMany({ where: { productId: id } });
         }
       }
+
+      // Handle family attributes with values if provided
+      if (updateProductDto.familyAttributesWithValues !== undefined) {
+        let familyIdToCheck = updateProductDto.familyId;
+        
+        // If familyId is not being updated, get it from the existing product
+        if (familyIdToCheck === undefined) {
+          const existingProduct = await this.prisma.product.findUnique({
+            where: { id },
+            select: { familyId: true },
+          });
+          familyIdToCheck = existingProduct?.familyId ?? undefined;
+        }
+
+        if (updateProductDto.familyAttributesWithValues.length > 0) {
+          if (!familyIdToCheck) {
+            throw new BadRequestException('Cannot set family attribute values without a family assigned');
+          }
+
+          // Get family attributes to validate and get familyAttributeId mapping
+          const familyAttributes = await this.prisma.familyAttribute.findMany({
+            where: { familyId: familyIdToCheck },
+            include: { attribute: true },
+          });
+
+          const familyAttributeMap = new Map(
+            familyAttributes.map(fa => [fa.attribute.id, fa.id])
+          );
+
+          // Validate that all provided attributes belong to the family
+          for (const { attributeId } of updateProductDto.familyAttributesWithValues) {
+            if (!familyAttributeMap.has(attributeId)) {
+              throw new BadRequestException(`Attribute ${attributeId} is not part of the product's family`);
+            }
+          }
+
+          // First, delete existing family ProductAttribute entries that aren't in the new list
+          const currentFamilyAttributes = await this.prisma.productAttribute.findMany({
+            where: { 
+              productId: id,
+              familyAttributeId: { not: null }
+            },
+            select: { attributeId: true, familyAttributeId: true },
+          });
+          
+          const newFamilyAttributeIds = updateProductDto.familyAttributesWithValues.map(av => av.attributeId);
+          const familyAttributesToDelete = currentFamilyAttributes
+            .filter(pa => !newFamilyAttributeIds.includes(pa.attributeId))
+            .map(pa => pa.attributeId);
+
+          if (familyAttributesToDelete.length > 0) {
+            await this.prisma.productAttribute.deleteMany({
+              where: {
+                productId: id,
+                attributeId: { in: familyAttributesToDelete },
+                familyAttributeId: { not: null }
+              },
+            });
+          }
+
+          // Create or update ProductAttribute entries for family attributes with values
+          for (const { attributeId, value } of updateProductDto.familyAttributesWithValues) {
+            const familyAttributeId = familyAttributeMap.get(attributeId);
+            
+            await this.prisma.productAttribute.upsert({
+              where: {
+                productId_attributeId: {
+                  productId: id,
+                  attributeId,
+                },
+              },
+              update: {
+                value: value || null,
+                familyAttributeId,
+              },
+              create: {
+                productId: id,
+                attributeId,
+                familyAttributeId,
+                value: value || null,
+              },
+            });
+          }
+        } else {
+          // If empty array provided, delete all family ProductAttribute entries
+          await this.prisma.productAttribute.deleteMany({ 
+            where: { 
+              productId: id,
+              familyAttributeId: { not: null }
+            } 
+          });
+        }
+      }
+
       // Update assets if provided
       if (updateProductDto.assets !== undefined) {
         await this.prisma.productAsset.deleteMany({ where: { productId: id } });
@@ -870,7 +1027,16 @@ export class ProductService {
             },
             attributes: {
               select: {
-                attributeId: true,
+                value: true,
+                familyAttributeId: true,
+                attribute: {
+                  select: {
+                    id: true,
+                    name: true,
+                    type: true,
+                    defaultValue: true,
+                  },
+                },
               },
             },
             attributeGroup: {
@@ -963,7 +1129,16 @@ export class ProductService {
             },
             attributes: {
               select: {
-                attributeId: true,
+                value: true,
+                familyAttributeId: true,
+                attribute: {
+                  select: {
+                    id: true,
+                    name: true,
+                    type: true,
+                    defaultValue: true,
+                  },
+                },
               },
             },
             attributeGroup: {
@@ -1064,7 +1239,16 @@ export class ProductService {
             },
             attributes: {
               select: {
-                attributeId: true,
+                value: true,
+                familyAttributeId: true,
+                attribute: {
+                  select: {
+                    id: true,
+                    name: true,
+                    type: true,
+                    defaultValue: true,
+                  },
+                },
               },
             },
             attributeGroup: {
@@ -1165,7 +1349,16 @@ export class ProductService {
             },
             attributes: {
               select: {
-                attributeId: true,
+                value: true,
+                familyAttributeId: true,
+                attribute: {
+                  select: {
+                    id: true,
+                    name: true,
+                    type: true,
+                    defaultValue: true,
+                  },
+                },
               },
             },
             attributeGroup: {
@@ -1331,6 +1524,21 @@ export class ProductService {
       return date.toISOString().split('T')[0];
     };
 
+    // Helper function to get attribute value from product attributes
+    const getAttributeValue = (attributeId: number, familyAttributeId?: number) => {
+      // First, try to find by familyAttributeId if provided
+      if (familyAttributeId) {
+        const familyProductAttribute = product.attributes?.find((pa: any) => pa.familyAttributeId === familyAttributeId);
+        if (familyProductAttribute) {
+          return familyProductAttribute.value;
+        }
+      }
+      
+      // Fall back to finding by attributeId
+      const productAttribute = product.attributes?.find((pa: any) => pa.attributeId === attributeId);
+      return productAttribute?.value || null;
+    };
+
     return {
       id: product.id,
       name: product.name,
@@ -1365,7 +1573,8 @@ export class ProductService {
             name: fa.attribute.name,
             type: fa.attribute.type,
             defaultValue: fa.attribute.defaultValue,
-              userFriendlyType: fa.attribute.userFriendlyType ?? getUserFriendlyType(fa.attribute.type),
+            userFriendlyType: fa.attribute.userFriendlyType ?? getUserFriendlyType(fa.attribute.type),
+            value: getAttributeValue(fa.attribute.id, fa.id), // Pass familyAttributeId as well
           })) || [],
         optionalAttributes: product.family.familyAttributes
           ?.filter((fa: any) => !fa.isRequired)
@@ -1374,7 +1583,8 @@ export class ProductService {
             name: fa.attribute.name,
             type: fa.attribute.type,
             defaultValue: fa.attribute.defaultValue,
-              userFriendlyType: fa.attribute.userFriendlyType ?? getUserFriendlyType(fa.attribute.type),
+            userFriendlyType: fa.attribute.userFriendlyType ?? getUserFriendlyType(fa.attribute.type),
+            value: getAttributeValue(fa.attribute.id, fa.id), // Pass familyAttributeId as well
           })) || [],
       } : undefined,
       variants: variants.length > 0 ? variants.map(variant => ({
@@ -1966,6 +2176,35 @@ export class ProductService {
   }
 
   /**
+   * Get all user's attributes for export selection
+   */
+  async getAttributesForExport(userId: number): Promise<any[]> {
+    try {
+      this.logger.log(`Fetching attributes for export for user: ${userId}`);
+
+      const attributes = await this.prisma.attribute.findMany({
+        where: {
+          userId,
+        },
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          defaultValue: true,
+        },
+        orderBy: {
+          name: 'asc',
+        },
+      });
+
+      return attributes;
+    } catch (error) {
+      this.logger.error(`Failed to fetch attributes for export: ${error.message}`, error.stack);
+      throw new BadRequestException('Failed to fetch attributes for export');
+    }
+  }
+
+  /**
    * Export products with user-selected attributes
    * @param exportDto - Export configuration with product IDs and selected attributes
    * @param userId - The ID of the user
@@ -1976,7 +2215,7 @@ export class ProductService {
       this.logger.log(`Exporting ${exportDto.productIds.length} products for user: ${userId}`);
 
       // Determine what data to include based on selected attributes
-      const includeRelations = this.determineIncludeRelations(exportDto.attributes);
+      const includeRelations = this.determineIncludeRelations(exportDto.attributes, exportDto.selectedAttributes);
 
       // Fetch products with required relations
       const products = await this.prisma.product.findMany({
@@ -2003,7 +2242,12 @@ export class ProductService {
 
       // Transform products to export format based on selected attributes
       const exportData = products.map(product => {
-        const transformedProduct = this.transformProductForExport(product, exportDto.attributes, variantData.get(product.id) || []);
+        const transformedProduct = this.transformProductForExport(
+          product, 
+          exportDto.attributes, 
+          variantData.get(product.id) || [],
+          exportDto.selectedAttributes
+        );
         return transformedProduct;
       });
 
@@ -2017,6 +2261,7 @@ export class ProductService {
         filename,
         totalRecords: exportData.length,
         selectedAttributes: exportDto.attributes,
+        customAttributes: exportDto.selectedAttributes,
         exportedAt: new Date(),
       };
     } catch (error) {
@@ -2032,7 +2277,7 @@ export class ProductService {
   /**
    * Determine which relations to include based on selected attributes
    */
-  private determineIncludeRelations(attributes: ProductAttribute[]): any {
+  private determineIncludeRelations(attributes: ProductAttribute[], selectedAttributes?: AttributeSelectionDto[]): any {
     const includeRelations: any = {};
 
     // Check if we need category data
@@ -2046,17 +2291,9 @@ export class ProductService {
       };
     }
 
-    // Check if we need attribute data
-    if (attributes.some(attr => ['attributeName', 'attributeType', 'attributeDefaultValue'].includes(attr))) {
-      includeRelations.attribute = {
-        select: {
-          id: true,
-          name: true,
-          type: true,
-          defaultValue: true,
-        },
-      };
-    }
+    // Note: Product doesn't have a direct 'attribute' relation.
+    // Attributes are accessed through the 'attributes' relation (ProductAttribute model).
+    // This section is removed as it was causing the Prisma error.
 
     // Check if we need attribute group data
     if (attributes.some(attr => ['attributeGroupName', 'attributeGroupDescription'].includes(attr))) {
@@ -2085,6 +2322,26 @@ export class ProductService {
                   defaultValue: true,
                 },
               },
+            },
+          },
+        },
+      };
+    }
+
+    // Always include product attributes if we have custom attributes, customAttributes flag, or any attribute-related fields
+    if ((selectedAttributes && selectedAttributes.length > 0) || 
+        attributes.includes(ProductAttribute.CUSTOM_ATTRIBUTES) ||
+        attributes.some(attr => ['attributeName', 'attributeType', 'attributeDefaultValue'].includes(attr))) {
+      includeRelations.attributes = {
+        select: {
+          value: true,
+          familyAttributeId: true,
+          attribute: {
+            select: {
+              id: true,
+              name: true,
+              type: true,
+              defaultValue: true,
             },
           },
         },
@@ -2151,10 +2408,15 @@ export class ProductService {
   /**
    * Transform product data for export based on selected attributes
    */
-  private transformProductForExport(product: any, selectedAttributes: ProductAttribute[], variants: any[]): any {
+  private transformProductForExport(
+    product: any, 
+    selectedAttributes: ProductAttribute[], 
+    variants: any[], 
+    customAttributes?: AttributeSelectionDto[]
+  ): any {
     const exportRecord: any = {};
 
-    selectedAttributes.forEach(attr => {
+    (selectedAttributes || []).forEach(attr => {
       switch (attr) {
         case ProductAttribute.ID:
           exportRecord.id = product.id;
@@ -2227,6 +2489,23 @@ export class ProductService {
           break;
         case ProductAttribute.UPDATED_AT:
           exportRecord.updatedAt = product.updatedAt.toISOString();
+          break;
+        case ProductAttribute.CUSTOM_ATTRIBUTES:
+          // Handle custom attributes - add individual attribute values
+          if ((customAttributes && customAttributes.length > 0) && product.attributes) {
+            (customAttributes || []).forEach(customAttr => {
+              const productAttribute = product.attributes.find((pa: any) => 
+                pa.attribute.id === customAttr.attributeId
+              );
+              const columnName = customAttr.columnName || customAttr.attributeName;
+              const value = productAttribute?.value || productAttribute?.attribute?.defaultValue || '';
+              const attributeType = productAttribute?.attribute?.type || '';
+              
+              // Format the value with type information
+              const formattedValue = attributeType ? `${value}(${attributeType})` : value;
+              exportRecord[columnName] = formattedValue;
+            });
+          }
           break;
         default:
           // Handle any unknown attributes gracefully
@@ -2441,6 +2720,169 @@ export class ProductService {
         throw error;
       }
       this.handleDatabaseError(error, 'getProductAttributeValues');
+    }
+  }
+
+  /**
+   * Update family attribute values for a specific product
+   * Family attributes are attributes that belong to a product's family and need
+   * to be stored with a reference to the familyAttributeId
+   */
+  async updateProductFamilyAttributeValues(
+    productId: number,
+    familyAttributeValues: { attributeId: number; value?: string }[],
+    userId: number
+  ): Promise<ProductResponseDto> {
+    try {
+      this.logger.log(`Updating family attribute values for product: ${productId} by user: ${userId}`);
+
+      // Verify product ownership and get product with family info
+      const product = await this.prisma.product.findFirst({
+        where: { id: productId, userId },
+        include: {
+          family: {
+            include: {
+              familyAttributes: {
+                include: {
+                  attribute: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      if (!product) {
+        throw new NotFoundException(`Product with ID ${productId} not found`);
+      }
+
+      if (!product.family) {
+        throw new BadRequestException('Product does not have a family assigned');
+      }
+
+      // Validate that all provided attributes belong to the product's family
+      const familyAttributeMap = new Map(
+        product.family.familyAttributes.map(fa => [fa.attribute.id, fa.id])
+      );
+
+      for (const { attributeId } of familyAttributeValues) {
+        if (!familyAttributeMap.has(attributeId)) {
+          throw new BadRequestException(`Attribute ${attributeId} is not part of the product's family`);
+        }
+      }
+
+      // Update each family attribute value using upsert
+      for (const { attributeId, value } of familyAttributeValues) {
+        const familyAttributeId = familyAttributeMap.get(attributeId);
+        
+        await this.prisma.productAttribute.upsert({
+          where: {
+            productId_attributeId: {
+              productId,
+              attributeId,
+            },
+          },
+          update: {
+            value: value || null,
+            familyAttributeId,
+          },
+          create: {
+            productId,
+            attributeId,
+            familyAttributeId,
+            value: value || null,
+          },
+        });
+      }
+
+      // Recalculate product status after updating family attribute values
+      const status = await this.calculateProductStatus(productId);
+      await this.prisma.product.update({ 
+        where: { id: productId }, 
+        data: { status } 
+      });
+
+      // Return updated product
+      return this.findOne(productId, userId);
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+        throw error;
+      }
+      this.handleDatabaseError(error, 'updateProductFamilyAttributeValues');
+    }
+  }
+
+  /**
+   * Get family attribute values for a specific product
+   * Returns only the attributes that belong to the product's family
+   */
+  async getProductFamilyAttributeValues(
+    productId: number,
+    userId: number
+  ): Promise<{ 
+    familyAttributeId: number; 
+    attributeId: number; 
+    attributeName: string; 
+    attributeType: string; 
+    isRequired: boolean;
+    value: string | null; 
+    defaultValue: string | null;
+  }[]> {
+    try {
+      this.logger.log(`Getting family attribute values for product: ${productId} by user: ${userId}`);
+
+      // Verify product ownership and get product with family info
+      const product = await this.prisma.product.findFirst({
+        where: { id: productId, userId },
+        include: {
+          family: {
+            include: {
+              familyAttributes: {
+                include: {
+                  attribute: true,
+                },
+              },
+            },
+          },
+          attributes: {
+            where: {
+              familyAttributeId: { not: null },
+            },
+            include: {
+              attribute: true,
+            },
+          },
+        },
+      });
+
+      if (!product) {
+        throw new NotFoundException(`Product with ID ${productId} not found`);
+      }
+
+      if (!product.family) {
+        throw new BadRequestException('Product does not have a family assigned');
+      }
+
+      // Create a map of family attribute values
+      const productAttributeValues = new Map(
+        product.attributes.map(pa => [pa.familyAttributeId, pa.value])
+      );
+
+      // Return family attributes with their current values
+      return product.family.familyAttributes.map(fa => ({
+        familyAttributeId: fa.id,
+        attributeId: fa.attribute.id,
+        attributeName: fa.attribute.name,
+        attributeType: fa.attribute.type,
+        isRequired: fa.isRequired,
+        value: productAttributeValues.get(fa.id) || null,
+        defaultValue: fa.attribute.defaultValue,
+      }));
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+        throw error;
+      }
+      this.handleDatabaseError(error, 'getProductFamilyAttributeValues');
     }
   }
 }

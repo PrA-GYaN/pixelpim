@@ -179,3 +179,104 @@ Authorization: {{authToken}}
   "familyId": 2,
   "status": "incomplete"
 }
+
+### === Family Attribute Values Examples ===
+
+### Create product with family attribute values
+POST {{baseUrl}}/products
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "name": "Product with Family Attributes",
+  "sku": "FAMILY-PROD-001",
+  "familyId": 1,
+  "categoryId": 1,
+  "status": "complete",
+  "attributesWithValues": [
+    {
+      "attributeId": 1,
+      "value": "Custom Color"
+    }
+  ],
+  "familyAttributesWithValues": [
+    {
+      "familyAttributeId": 1,
+      "value": "Family Color Value"
+    },
+    {
+      "familyAttributeId": 2,
+      "value": "Family Material Value"
+    }
+  ]
+}
+
+### Update product with family attribute values
+PATCH {{baseUrl}}/products/1
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "name": "Updated Product Name",
+  "attributesWithValues": [
+    {
+      "attributeId": 1,
+      "value": "Updated Color"
+    }
+  ],
+  "familyAttributesWithValues": [
+    {
+      "familyAttributeId": 1,
+      "value": "Updated Family Color"
+    },
+    {
+      "familyAttributeId": 3,
+      "value": "New Family Size"
+    }
+  ]
+}
+
+### Create product with only family attributes (no regular attributes)
+POST {{baseUrl}}/products
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "name": "Family Only Product",
+  "sku": "FAMILY-ONLY-001",
+  "familyId": 1,
+  "status": "incomplete",
+  "familyAttributesWithValues": [
+    {
+      "familyAttributeId": 1,
+      "value": "Red"
+    },
+    {
+      "familyAttributeId": 2,
+      "value": "Cotton"
+    },
+    {
+      "familyAttributeId": 3,
+      "value": "Large"
+    }
+  ]
+}
+
+### Update product to add family attribute values to existing product
+PATCH {{baseUrl}}/products/2
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "familyId": 1,
+  "familyAttributesWithValues": [
+    {
+      "familyAttributeId": 1,
+      "value": "Blue"
+    },
+    {
+      "familyAttributeId": 2,
+      "value": "Polyester"
+    }
+  ]
+}

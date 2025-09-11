@@ -92,3 +92,85 @@ Content-Type: application/json
     }
   ]
 }
+
+### === Family Attribute Values Examples ===
+
+### Create product with family attribute values
+POST http://localhost:3000/products
+Authorization: Bearer {{jwt_token}}
+Content-Type: application/json
+
+{
+  "name": "Product with Family Attributes",
+  "sku": "FAMILY-PROD-002",
+  "familyId": 1,
+  "categoryId": 1,
+  "familyAttributesWithValues": [
+    {
+      "familyAttributeId": 1,
+      "value": "Family Color Value"
+    },
+    {
+      "familyAttributeId": 2,
+      "value": "Family Material Value"
+    },
+    {
+      "familyAttributeId": 3,
+      "value": "Family Size Value"
+    }
+  ]
+}
+
+### Update product with both regular and family attribute values
+PATCH http://localhost:3000/products/1
+Authorization: Bearer {{jwt_token}}
+Content-Type: application/json
+
+{
+  "name": "Updated Product with Mixed Attributes",
+  "attributesWithValues": [
+    {
+      "attributeId": 1,
+      "value": "Updated Regular Color"
+    },
+    {
+      "attributeId": 2,
+      "value": "Updated Regular Size"
+    }
+  ],
+  "familyAttributesWithValues": [
+    {
+      "familyAttributeId": 1,
+      "value": "Updated Family Color"
+    },
+    {
+      "familyAttributeId": 2,
+      "value": "Updated Family Material"
+    }
+  ]
+}
+
+### Get product with family attribute values (shows both regular and family attributes)
+GET http://localhost:3000/products/1
+Authorization: Bearer {{jwt_token}}
+
+### Create product with only family attributes (no regular attributes)
+POST http://localhost:3000/products
+Authorization: Bearer {{jwt_token}}
+Content-Type: application/json
+
+{
+  "name": "Family Attributes Only Product",
+  "sku": "FAMILY-ONLY-002",
+  "familyId": 1,
+  "familyAttributesWithValues": [
+    {
+      "familyAttributeId": 1,
+      "value": "Blue"
+    },
+    {
+      "familyAttributeId": 2,
+      "value": "Cotton"
+    }
+  ]
+}
