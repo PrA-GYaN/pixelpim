@@ -24,6 +24,7 @@ model User {
   products        Product[]        @relation("UserProducts")
   assets          Asset[]          @relation("UserAssets")
   assetGroups     AssetGroup[]     @relation("UserAssetGroups")
+  notifications   Notification[]   @relation("UserNotifications")
 }
 
 model Otp {
@@ -233,4 +234,21 @@ model ProductAttribute {
   familyAttribute  FamilyAttribute? @relation(fields: [familyAttributeId], references: [id], onDelete: Cascade)
 
   @@unique([productId, attributeId])
+}
+
+model Notification {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  entityType  String   // 'product', 'attribute', 'category', 'family', 'asset', 'assetGroup', 'productVariant'
+  entityId    Int?     // ID of the entity that was acted upon
+  action      String   // 'created', 'updated', 'deleted'
+  entityName  String?  // Name of the entity for better readability
+  message     String   // Human readable message like "Product 'iPhone 13' was created"
+  metadata    Json?    // Additional data like old/new values, affected count, etc.
+  createdAt   DateTime @default(now())
+
+  user        User     @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([entityType, action])
 }

@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationService } from '../notification/notification.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { UpdateProductAttributesDto } from './dto/update-product-attribute.dto';
@@ -14,7 +15,10 @@ import { getUserFriendlyType } from '../types/user-attribute-type.enum';
 export class ProductService {
   private readonly logger = new Logger(ProductService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationService: NotificationService,
+  ) {}
 
   async create(createProductDto: CreateProductDto, userId: number): Promise<ProductResponseDto> {
     try {
@@ -211,6 +215,10 @@ export class ProductService {
       // Fetch updated product with status
       const result = await this.findOne(product.id, userId);
       this.logger.log(`Successfully created product with ID: ${result.id}`);
+      
+      // Log notification
+      await this.notificationService.logProductCreation(userId, result.name, result.id);
+      
       return {
         ...result,
         removedAttributesMessage: removedAttributeNames.length > 0
@@ -870,6 +878,10 @@ export class ProductService {
       // Fetch and return the updated product with relations
       const result = await this.findOne(id, userId);
       this.logger.log(`Successfully updated product with ID: ${id}`);
+      
+      // Log notification
+      await this.notificationService.logProductUpdate(userId, result.name, result.id);
+      
       return {
         ...result,
         removedAttributesMessage: removedAttributeNames.length > 0
@@ -975,8 +987,8 @@ export class ProductService {
 
   async remove(id: number, userId: number): Promise<{ message: string }> {
     try {
-      // Verify ownership first
-      await this.findOne(id, userId);
+      // Verify ownership first and get the product name for notification
+      const product = await this.findOne(id, userId);
 
       this.logger.log(`Deleting product: ${id} for user: ${userId}`);
 
@@ -985,6 +997,10 @@ export class ProductService {
       });
 
       this.logger.log(`Successfully deleted product with ID: ${id}`);
+      
+      // Log notification
+      await this.notificationService.logProductDeletion(userId, product.name);
+      
       return { message: 'Product successfully deleted' };
     } catch (error) {
       if (error instanceof NotFoundException || error instanceof BadRequestException) {

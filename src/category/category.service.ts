@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, ConflictException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationService } from '../notification/notification.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import { CategoryResponseDto, CategoryTreeResponseDto } from './dto/category-response.dto';
@@ -10,7 +11,10 @@ import type { Category } from '../../generated/prisma';
 export class CategoryService {
   private readonly logger = new Logger(CategoryService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationService: NotificationService,
+  ) {}
 
   async create(createCategoryDto: CreateCategoryDto, userId: number): Promise<CategoryResponseDto> {
     try {

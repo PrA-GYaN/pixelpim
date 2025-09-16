@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, ConflictException, ForbiddenException, BadRequestException, Logger, Inject, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationService } from '../notification/notification.service';
 import { CreateAttributeDto } from './dto/create-attribute.dto';
 import { UpdateAttributeDto } from './dto/update-attribute.dto';
 import { AttributeResponseDto } from './dto/attribute-response.dto';
@@ -17,6 +18,7 @@ export class AttributeService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly validator: AttributeValueValidator,
+    private readonly notificationService: NotificationService,
     @Optional() @Inject('CACHE_MANAGER') private cacheManager?: any
   ) {}
 
@@ -43,6 +45,9 @@ export class AttributeService {
       
       // Clear cache for this user
       await this.invalidateUserCache(userId);
+      
+      // Log notification
+      await this.notificationService.logAttributeCreation(userId, result.name, result.id);
       
       return this.transformAttributeForResponse(result);
     } catch (error) {
@@ -378,6 +383,9 @@ export class AttributeService {
       await this.invalidateUserCache(userId);
       await this.invalidateAttributeCache(id, userId);
       
+      // Log notification
+      await this.notificationService.logAttributeUpdate(userId, result.name, result.id);
+      
       return this.transformAttributeForResponse(result);
     } catch (error) {
       if (error instanceof NotFoundException) {
@@ -389,8 +397,8 @@ export class AttributeService {
 
   async remove(id: number, userId: number): Promise<{ message: string }> {
     try {
-      // Verify ownership first
-      await this.findOne(id, userId);
+      // Verify ownership first and get the attribute name for notification
+      const attribute = await this.findOne(id, userId);
       
       this.logger.log(`Deleting attribute: ${id} for user: ${userId}`);
 
@@ -403,6 +411,9 @@ export class AttributeService {
       // Clear caches
       await this.invalidateUserCache(userId);
       await this.invalidateAttributeCache(id, userId);
+
+      // Log notification
+      await this.notificationService.logAttributeDeletion(userId, attribute.name);
 
       return { message: `Attribute successfully deleted` };
     } catch (error) {

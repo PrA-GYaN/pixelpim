@@ -11,6 +11,8 @@ import { CategoryModule } from './category/category.module';
 import { ProductModule } from './product/product.module';
 import { AssetModule } from './asset/asset.module';
 import { AssetGroupModule } from './asset-group/asset-group.module';
+import { NotificationModule } from './notification/notification.module';
+import { SupportModule } from './support/support.module';
 
 @Module({
   imports: [
@@ -26,7 +28,9 @@ import { AssetGroupModule } from './asset-group/asset-group.module';
     CategoryModule, 
     ProductModule,
     AssetModule,
-    AssetGroupModule
+    AssetGroupModule,
+    NotificationModule,
+    SupportModule
   ],
   controllers: [AppController],
   providers: [AppService],
