@@ -13,6 +13,7 @@ export class AttributeValueValidator {
     // String-like types
     this.validators.set(AttributeType.STRING, this.validateString);
     this.validators.set(AttributeType.TEXT, this.validateString);
+    this.validators.set(AttributeType.HTML, this.validateHtml);
     this.validators.set(AttributeType.EMAIL, this.validateEmail);
     this.validators.set(AttributeType.URL, this.validateUrl);
     this.validators.set(AttributeType.PHONE, this.validatePhone);
@@ -81,6 +82,15 @@ export class AttributeValueValidator {
   // Validators
   private readonly validateString = (value: any): string => {
     return String(value).trim();
+  };
+
+  private readonly validateHtml = (value: any): string => {
+    const htmlStr = String(value).trim();
+    // Basic HTML validation - check for script tags and potentially dangerous content
+    if (htmlStr.includes('<script') || htmlStr.includes('javascript:')) {
+      throw new BadRequestException('HTML content contains potentially dangerous elements');
+    }
+    return htmlStr;
   };
 
   private readonly validateEmail = (value: any): string => {

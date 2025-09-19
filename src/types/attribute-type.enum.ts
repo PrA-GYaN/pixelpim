@@ -2,6 +2,7 @@ export enum AttributeType {
   // String-like types
   STRING = 'STRING',
   TEXT = 'TEXT',
+  HTML = 'HTML',
   EMAIL = 'EMAIL',
   URL = 'URL',
   PHONE = 'PHONE',

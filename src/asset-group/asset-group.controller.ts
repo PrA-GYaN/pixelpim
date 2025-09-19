@@ -32,12 +32,37 @@ export class AssetGroupController {
     @Req() req: any,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('search') search?: string,
+    @Query('minAssets') minAssets?: string,
+    @Query('maxAssets') maxAssets?: string,
+    @Query('minSize') minSize?: string,
+    @Query('maxSize') maxSize?: string,
+    @Query('createdAfter') createdAfter?: string,
+    @Query('createdBefore') createdBefore?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('sortOrder') sortOrder?: 'asc' | 'desc',
+    @Query('dateFilter') dateFilter?: 'latest' | 'oldest',
+    @Query('hasAssets') hasAssets?: string,
   ) {
     const userId = req.user.id;
     const pageNum = page ? parseInt(page) : 1;
     const limitNum = limit ? parseInt(limit) : 10;
     
-    return this.assetGroupService.findAll(userId, pageNum, limitNum);
+    const filters = {
+      search,
+      minAssets: minAssets ? parseInt(minAssets) : undefined,
+      maxAssets: maxAssets ? parseInt(maxAssets) : undefined,
+      minSize: minSize ? parseInt(minSize) : undefined,
+      maxSize: maxSize ? parseInt(maxSize) : undefined,
+      createdAfter,
+      createdBefore,
+      sortBy,
+      sortOrder,
+      dateFilter,
+      hasAssets: hasAssets === 'true' ? true : hasAssets === 'false' ? false : undefined,
+    };
+    
+    return this.assetGroupService.findAll(userId, pageNum, limitNum, filters);
   }
 
   @Get(':id')
@@ -52,12 +77,27 @@ export class AssetGroupController {
     @Req() req: any,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('search') search?: string,
+    @Query('mimeType') mimeType?: string,
+    @Query('minSize') minSize?: string,
+    @Query('maxSize') maxSize?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('sortOrder') sortOrder?: 'asc' | 'desc',
   ) {
     const userId = req.user.id;
     const pageNum = page ? parseInt(page) : 1;
     const limitNum = limit ? parseInt(limit) : 10;
     
-    return this.assetGroupService.getAssetsInGroup(id, userId, pageNum, limitNum);
+    const filters = {
+      search,
+      mimeType,
+      minSize: minSize ? parseInt(minSize) : undefined,
+      maxSize: maxSize ? parseInt(maxSize) : undefined,
+      sortBy,
+      sortOrder,
+    };
+    
+    return this.assetGroupService.getAssetsInGroup(id, userId, pageNum, limitNum, filters);
   }
 
   @Patch(':id')

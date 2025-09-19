@@ -33,7 +33,7 @@ export class UpdateAttributeDto {
     if (value === null || value === undefined) return value;
     
     // For string types, trim whitespace
-    if (obj.type && [AttributeType.STRING, AttributeType.TEXT, AttributeType.EMAIL, AttributeType.URL].includes(obj.type)) {
+    if (obj.type && [AttributeType.STRING, AttributeType.TEXT, AttributeType.HTML, AttributeType.EMAIL, AttributeType.URL].includes(obj.type)) {
       return typeof value === 'string' ? value.trim() : value;
     }
     

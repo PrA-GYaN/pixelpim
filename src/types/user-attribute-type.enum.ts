@@ -16,10 +16,10 @@ export enum UserAttributeType {
 export const USER_TO_STORAGE_TYPE_MAP = {
   [UserAttributeType.SHORT_TEXT]: 'STRING',
   [UserAttributeType.PARAGRAPH]: 'TEXT',
-  [UserAttributeType.HTML]: 'TEXT',
+  [UserAttributeType.HTML]: 'HTML',
   [UserAttributeType.INTEGER]: 'INTEGER',
   [UserAttributeType.DECIMAL]: 'NUMBER',
-  [UserAttributeType.DROPDOWN]: 'ARRAY',
+  [UserAttributeType.DROPDOWN]: 'ENUM',
   [UserAttributeType.MULTISELECT]: 'ARRAY',
   [UserAttributeType.DATE]: 'DATE',
   [UserAttributeType.URL]: 'URL',
@@ -47,17 +47,6 @@ export function getAvailableUserTypes(): UserAttributeType[] {
 }
 
 export function getUserFriendlyType(type: string): string {
-  // If type is TEXT, check if value contains HTML tags
-  if (type === 'TEXT') {
-    // This function now expects a second argument: value
-    // To keep backward compatibility, we use arguments[1] for value
-    const value = arguments[1];
-    if (typeof value === 'string' && /<[^>]+>/.test(value)) {
-      return UserAttributeType.HTML;
-    } else {
-      return UserAttributeType.PARAGRAPH;
-    }
-  }
   // Check if the type is a valid storage type
   const userType = storageTypeToUserType(type as keyof typeof STORAGE_TO_USER_TYPE_MAP);
   if (userType) {

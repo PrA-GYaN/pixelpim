@@ -65,10 +65,40 @@ export class AssetGroupService {
   return AssetGroupService.convertBigIntToString(assetGroup);
   }
 
-  async findAll(userId: number, page: number = 1, limit: number = 10) {
-    const whereCondition = { userId };
+  async findAll(userId: number, page: number = 1, limit: number = 10, filters: any = {}) {
+    const whereCondition: any = { userId };
+
+    // Search filter (group name)
+    if (filters.search) {
+      whereCondition.groupName = { contains: filters.search, mode: 'insensitive' };
+    }
+
+    // Date range filters
+    if (filters.createdAfter || filters.createdBefore) {
+      whereCondition.createdAt = {};
+      if (filters.createdAfter) {
+        whereCondition.createdAt.gte = new Date(filters.createdAfter);
+      }
+      if (filters.createdBefore) {
+        whereCondition.createdAt.lte = new Date(filters.createdBefore);
+      }
+    }
+
+    // Sorting logic
+    let orderBy: any = { createdAt: 'desc' };
+    
+    if (filters.dateFilter) {
+      orderBy = { createdAt: filters.dateFilter === 'latest' ? 'desc' : 'asc' };
+    } else if (filters.sortBy) {
+      const validSortFields = ['groupName', 'createdAt', 'updatedAt'];
+      if (validSortFields.includes(filters.sortBy)) {
+        orderBy = { [filters.sortBy]: filters.sortOrder || 'asc' };
+      }
+    }
+
     const paginationOptions = PaginationUtils.createPrismaOptions(page, limit);
 
+    // First get all asset groups with asset counts
     const [assetGroups, total] = await Promise.all([
       this.prisma.assetGroup.findMany({
         where: whereCondition,
@@ -80,22 +110,66 @@ export class AssetGroupService {
           createdAt: true,
           updatedAt: true,
           userId: true,
+          totalSize: true,
           _count: {
             select: {
               assets: true,
             },
           },
         },
-        orderBy: {
-          createdAt: 'desc',
-        },
+        orderBy,
       }),
       this.prisma.assetGroup.count({ where: whereCondition }),
     ]);
 
-  // Convert BigInt to String for JSON serialization
-  const transformedAssetGroups = assetGroups.map(AssetGroupService.convertBigIntToString);
-  return PaginationUtils.createPaginatedResponse(transformedAssetGroups, total, page, limit);
+    // Apply post-query filters for asset count and size
+    let filteredAssetGroups = assetGroups;
+
+    // Filter by asset count
+    if (filters.minAssets !== undefined || filters.maxAssets !== undefined) {
+      filteredAssetGroups = filteredAssetGroups.filter(group => {
+        const assetCount = group._count.assets;
+        if (filters.minAssets !== undefined && assetCount < filters.minAssets) {
+          return false;
+        }
+        if (filters.maxAssets !== undefined && assetCount > filters.maxAssets) {
+          return false;
+        }
+        return true;
+      });
+    }
+
+    // Filter by total size
+    if (filters.minSize !== undefined || filters.maxSize !== undefined) {
+      filteredAssetGroups = filteredAssetGroups.filter(group => {
+        const totalSize = Number(group.totalSize || 0);
+        if (filters.minSize !== undefined && totalSize < filters.minSize) {
+          return false;
+        }
+        if (filters.maxSize !== undefined && totalSize > filters.maxSize) {
+          return false;
+        }
+        return true;
+      });
+    }
+
+    // Filter by has assets
+    if (filters.hasAssets !== undefined) {
+      filteredAssetGroups = filteredAssetGroups.filter(group => {
+        const hasAssets = group._count.assets > 0;
+        return filters.hasAssets ? hasAssets : !hasAssets;
+      });
+    }
+
+    // Convert BigInt to String for JSON serialization
+    const transformedAssetGroups = filteredAssetGroups.map(AssetGroupService.convertBigIntToString);
+    
+    // Update total count if we applied post-query filters
+    const finalTotal = (filters.minAssets !== undefined || filters.maxAssets !== undefined || 
+                       filters.minSize !== undefined || filters.maxSize !== undefined ||
+                       filters.hasAssets !== undefined) ? transformedAssetGroups.length : total;
+    
+    return PaginationUtils.createPaginatedResponse(transformedAssetGroups, finalTotal, page, limit);
   }
 
   async findOne(id: number, userId: number) {
@@ -124,13 +198,47 @@ export class AssetGroupService {
   return AssetGroupService.convertBigIntToString(assetGroup);
   }
 
-  async getAssetsInGroup(id: number, userId: number, page: number = 1, limit: number = 10) {
+  async getAssetsInGroup(id: number, userId: number, page: number = 1, limit: number = 10, filters: any = {}) {
     const assetGroup = await this.findOne(id, userId);
 
-    const whereCondition = {
+    const whereCondition: any = {
       assetGroupId: id,
       userId,
     };
+
+    // Search filter (name or fileName)
+    if (filters.search) {
+      whereCondition.OR = [
+        { name: { contains: filters.search, mode: 'insensitive' } },
+        { fileName: { contains: filters.search, mode: 'insensitive' } },
+      ];
+    }
+
+    // MIME type filter
+    if (filters.mimeType) {
+      whereCondition.mimeType = { contains: filters.mimeType, mode: 'insensitive' };
+    }
+
+    // Size filters
+    if (filters.minSize !== undefined || filters.maxSize !== undefined) {
+      whereCondition.size = {};
+      if (filters.minSize !== undefined) {
+        whereCondition.size.gte = filters.minSize;
+      }
+      if (filters.maxSize !== undefined) {
+        whereCondition.size.lte = filters.maxSize;
+      }
+    }
+
+    // Sorting logic
+    let orderBy: any = { createdAt: 'desc' };
+    
+    if (filters.sortBy) {
+      const validSortFields = ['name', 'fileName', 'size', 'createdAt', 'updatedAt'];
+      if (validSortFields.includes(filters.sortBy)) {
+        orderBy = { [filters.sortBy]: filters.sortOrder || 'asc' };
+      }
+    }
 
     const paginationOptions = PaginationUtils.createPrismaOptions(page, limit);
 
@@ -151,9 +259,7 @@ export class AssetGroupService {
           createdAt: true,
           updatedAt: true,
         },
-        orderBy: {
-          createdAt: 'desc',
-        },
+        orderBy,
       }),
       this.prisma.asset.count({ where: whereCondition }),
     ]);

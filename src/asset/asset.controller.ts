@@ -55,13 +55,36 @@ export class AssetController {
     @Query('assetGroupId') assetGroupId?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('search') search?: string,
+    @Query('mimeType') mimeType?: string,
+    @Query('minSize') minSize?: string,
+    @Query('maxSize') maxSize?: string,
+    @Query('createdAfter') createdAfter?: string,
+    @Query('createdBefore') createdBefore?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('sortOrder') sortOrder?: 'asc' | 'desc',
+    @Query('hasGroup') hasGroup?: string,
+    @Query('dateFilter') dateFilter?: 'latest' | 'oldest',
   ) {
     const userId = req.user.id;
     const groupId = assetGroupId ? parseInt(assetGroupId, 10) : undefined;
     const pageNum = page ? parseInt(page) : 1;
     const limitNum = limit ? parseInt(limit) : 10;
     
-    return this.assetService.findAll(userId, groupId, pageNum, limitNum);
+    const filters = {
+      search,
+      mimeType,
+      minSize: minSize ? parseInt(minSize) : undefined,
+      maxSize: maxSize ? parseInt(maxSize) : undefined,
+      createdAfter,
+      createdBefore,
+      sortBy,
+      sortOrder,
+      hasGroup: hasGroup === 'true' ? true : hasGroup === 'false' ? false : undefined,
+      dateFilter,
+    };
+    
+    return this.assetService.findAll(userId, groupId, pageNum, limitNum, filters);
   }
 
   @Get(':id')

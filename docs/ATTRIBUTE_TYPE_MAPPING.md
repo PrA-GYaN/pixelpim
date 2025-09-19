@@ -10,7 +10,7 @@ PixelPim supports user-friendly attribute types that are automatically mapped to
 |-------------------|--------------|-------------|----------------------|
 | **Short Text** | `STRING` | Brief text input (single line) | `"Brand Name"` |
 | **Paragraph** | `TEXT` | Multi-line text content | `"Product description..."` |
-| **HTML** | `TEXT` | Rich text with HTML formatting | `"<p>HTML content</p>"` |
+| **HTML** | `HTML` | Rich text with HTML formatting | `"<p>HTML content</p>"` |
 | **Integer** | `INTEGER` | Whole numbers only | `42` |
 | **Decimal** | `NUMBER` | Numbers with decimal places | `99.99` |
 | **Dropdown** | `ENUM` | Single selection from predefined options | `"Medium"` |
@@ -86,7 +86,7 @@ This returns:
   "typeMapping": {
     "Short Text": "STRING",
     "Paragraph": "TEXT",
-    "HTML": "TEXT",
+    "HTML": "HTML",
     "Integer": "INTEGER",
     "Decimal": "NUMBER",
     "Dropdown": "ENUM",

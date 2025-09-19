@@ -106,10 +106,69 @@ export class AssetService {
     assetGroupId?: number,
     page: number = 1,
     limit: number = 10,
+    filters: any = {},
   ) {
     const whereCondition: any = { userId };
+    
+    // Group filter
     if (assetGroupId !== undefined) {
       whereCondition.assetGroupId = assetGroupId;
+    }
+
+    // Has group filter
+    if (filters.hasGroup !== undefined) {
+      if (filters.hasGroup === true) {
+        whereCondition.assetGroupId = { not: null };
+      } else if (filters.hasGroup === false) {
+        whereCondition.assetGroupId = null;
+      }
+    }
+
+    // Search filter (name or fileName)
+    if (filters.search) {
+      whereCondition.OR = [
+        { name: { contains: filters.search, mode: 'insensitive' } },
+        { fileName: { contains: filters.search, mode: 'insensitive' } },
+      ];
+    }
+
+    // MIME type filter
+    if (filters.mimeType) {
+      whereCondition.mimeType = { contains: filters.mimeType, mode: 'insensitive' };
+    }
+
+    // Size filters
+    if (filters.minSize !== undefined || filters.maxSize !== undefined) {
+      whereCondition.size = {};
+      if (filters.minSize !== undefined) {
+        whereCondition.size.gte = filters.minSize;
+      }
+      if (filters.maxSize !== undefined) {
+        whereCondition.size.lte = filters.maxSize;
+      }
+    }
+
+    // Date range filters
+    if (filters.createdAfter || filters.createdBefore) {
+      whereCondition.createdAt = {};
+      if (filters.createdAfter) {
+        whereCondition.createdAt.gte = new Date(filters.createdAfter);
+      }
+      if (filters.createdBefore) {
+        whereCondition.createdAt.lte = new Date(filters.createdBefore);
+      }
+    }
+
+    // Sorting logic
+    let orderBy: any = { createdAt: 'desc' };
+    
+    if (filters.dateFilter) {
+      orderBy = { createdAt: filters.dateFilter === 'latest' ? 'desc' : 'asc' };
+    } else if (filters.sortBy) {
+      const validSortFields = ['name', 'fileName', 'size', 'createdAt', 'updatedAt'];
+      if (validSortFields.includes(filters.sortBy)) {
+        orderBy = { [filters.sortBy]: filters.sortOrder || 'asc' };
+      }
     }
 
     const paginationOptions = PaginationUtils.createPrismaOptions(page, limit);
@@ -121,9 +180,7 @@ export class AssetService {
         include: {
           assetGroup: true,
         },
-        orderBy: {
-          createdAt: 'desc',
-        },
+        orderBy,
       }),
       this.prisma.asset.count({ where: whereCondition }),
     ]);
