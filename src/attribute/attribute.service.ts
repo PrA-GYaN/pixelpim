@@ -89,6 +89,47 @@ export class AttributeService {
     }
   }
 
+  async findAllWithProductCounts(userId: number, page: number = 1, limit: number = 10): Promise<PaginatedResponse<AttributeResponseDto & { productCount: number }>> {
+    try {
+      this.logger.log(`Fetching attributes with product counts for user: ${userId}`);
+      
+      const whereCondition = { userId };
+      const paginationOptions = PaginationUtils.createPrismaOptions(page, limit);
+
+      const [attributes, total] = await Promise.all([
+        this.prisma.attribute.findMany({
+          where: whereCondition,
+          ...paginationOptions,
+          include: {
+            _count: {
+              select: { 
+                productAttributes: {
+                  where: {
+                    product: {
+                      userId: userId
+                    }
+                  }
+                }
+              }
+            }
+          },
+          orderBy: { createdAt: 'desc' },
+        }),
+        this.prisma.attribute.count({ where: whereCondition }),
+      ]);
+      
+      const transformedAttributes = attributes.map(attr => ({
+        ...this.transformAttributeForResponse(attr),
+        productCount: attr._count.productAttributes
+      }));
+      
+      return PaginationUtils.createPaginatedResponse(transformedAttributes, total, page, limit);
+    } catch (error) {
+      this.logger.error(`Failed to fetch attributes with product counts for user ${userId}: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
   async findAllWithFilters(userId: number, filters: AttributeFilterDto): Promise<PaginatedResponse<AttributeResponseDto>> {
     try {
       this.logger.log(`Fetching attributes with filters for user: ${userId}`, filters);

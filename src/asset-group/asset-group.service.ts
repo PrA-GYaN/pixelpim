@@ -5,13 +5,13 @@ import { PaginatedResponse, PaginationUtils } from '../common';
 
 @Injectable()
 export class AssetGroupService {
-  // Utility to recursively convert BigInt values to strings
+  // Utility to recursively convert BigInt values to strings while preserving dates
   private static convertBigIntToString(obj: any): any {
     if (typeof obj === 'bigint') {
       return obj.toString();
     }
     if (obj instanceof Date) {
-      return obj.toISOString().split('T')[0];
+      return obj.toISOString();
     }
     if (Array.isArray(obj)) {
       return obj.map(AssetGroupService.convertBigIntToString);

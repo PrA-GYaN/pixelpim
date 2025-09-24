@@ -14,10 +14,13 @@ import { PaginationUtils } from '../common';
 @Injectable()
 export class AssetService {
   constructor(private prisma: PrismaService) {}
-  // Utility to recursively convert BigInt values to strings
+  // Utility to recursively convert BigInt values to strings while preserving dates
   private static convertBigIntToString(obj: any): any {
     if (typeof obj === 'bigint') {
       return obj.toString();
+    }
+    if (obj instanceof Date) {
+      return obj.toISOString();
     }
     if (Array.isArray(obj)) {
       return obj.map(AssetService.convertBigIntToString);

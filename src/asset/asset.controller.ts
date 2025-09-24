@@ -70,6 +70,7 @@ export class AssetController {
     const groupId = assetGroupId ? parseInt(assetGroupId, 10) : undefined;
     const pageNum = page ? parseInt(page) : 1;
     const limitNum = limit ? parseInt(limit) : 10;
+    const sortOrderValidated = sortOrder === 'asc' ? 'asc' : 'desc';
     
     const filters = {
       search,
@@ -79,7 +80,7 @@ export class AssetController {
       createdAfter,
       createdBefore,
       sortBy,
-      sortOrder,
+      sortOrder: sortOrderValidated,
       hasGroup: hasGroup === 'true' ? true : hasGroup === 'false' ? false : undefined,
       dateFilter,
     };

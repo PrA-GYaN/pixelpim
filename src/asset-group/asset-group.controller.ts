@@ -47,6 +47,7 @@ export class AssetGroupController {
     const userId = req.user.id;
     const pageNum = page ? parseInt(page) : 1;
     const limitNum = limit ? parseInt(limit) : 10;
+    const sortOrderValidated = sortOrder === 'asc' ? 'asc' : 'desc';
     
     const filters = {
       search,
@@ -57,7 +58,7 @@ export class AssetGroupController {
       createdAfter,
       createdBefore,
       sortBy,
-      sortOrder,
+      sortOrder: sortOrderValidated,
       dateFilter,
       hasAssets: hasAssets === 'true' ? true : hasAssets === 'false' ? false : undefined,
     };
@@ -87,6 +88,7 @@ export class AssetGroupController {
     const userId = req.user.id;
     const pageNum = page ? parseInt(page) : 1;
     const limitNum = limit ? parseInt(limit) : 10;
+    const sortOrderValidated = sortOrder === 'asc' ? 'asc' : 'desc';
     
     const filters = {
       search,
@@ -94,7 +96,7 @@ export class AssetGroupController {
       minSize: minSize ? parseInt(minSize) : undefined,
       maxSize: maxSize ? parseInt(maxSize) : undefined,
       sortBy,
-      sortOrder,
+      sortOrder: sortOrderValidated,
     };
     
     return this.assetGroupService.getAssetsInGroup(id, userId, pageNum, limitNum, filters);

@@ -122,6 +122,21 @@ export class AttributeController {
     }
   }
 
+  @Get('with-product-counts')
+  async findAllWithProductCounts(
+    @User() user: any,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    try {
+      const pageNum = page ? parseInt(page) : 1;
+      const limitNum = limit ? parseInt(limit) : 10;
+      return await this.attributeService.findAllWithProductCounts(user.id, pageNum, limitNum);
+    } catch (error) {
+      return this.handleError(error, 'fetching attributes with product counts');
+    }
+  }
+
   @Get('groups')
   async findAllGroups(
     @User() user: any,
