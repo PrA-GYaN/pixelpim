@@ -103,7 +103,7 @@ export class AttributeService {
           include: {
             _count: {
               select: { 
-                productAttributes: {
+                products: {
                   where: {
                     product: {
                       userId: userId
@@ -120,7 +120,7 @@ export class AttributeService {
       
       const transformedAttributes = attributes.map(attr => ({
         ...this.transformAttributeForResponse(attr),
-        productCount: attr._count.productAttributes
+        productCount: (attr as any)._count.products
       }));
       
       return PaginationUtils.createPaginatedResponse(transformedAttributes, total, page, limit);
