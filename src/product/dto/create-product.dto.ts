@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, IsUrl, IsInt, IsIn, IsArray, ValidateNested } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsUrl, IsInt, IsIn, IsArray, ValidateNested, Length } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 
 export class ProductAttributeValueDto {
@@ -12,7 +12,8 @@ export class ProductAttributeValueDto {
 
 export class CreateProductDto {
   @IsString()
-  @IsNotEmpty()
+  @IsNotEmpty({ message: 'Product name is required' })
+  @Length(1, 60, { message: 'Product name must be between 1 and 60 characters' })
   @Transform(({ value }) => value?.trim())
   name: string;
 

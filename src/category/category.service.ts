@@ -28,6 +28,9 @@ export class CategoryService {
         await this.validateNoCircularReference(createCategoryDto.parentCategoryId, userId);
       }
 
+      // Check for name uniqueness based on category level
+      await this.validateCategoryNameUniqueness(createCategoryDto.name, userId, createCategoryDto.parentCategoryId);
+
       const result = await this.prisma.category.create({
         data: {
           name: createCategoryDto.name,
@@ -120,27 +123,27 @@ export class CategoryService {
     }
   }
 
-  async findOne(id: number, userId: number): Promise<CategoryResponseDto> {
+  async findOne(id: number, userId: number, productPage?: number, productLimit?: number): Promise<CategoryResponseDto> {
   try {
     this.logger.log(`Fetching category: ${id} for user: ${userId}`);
+
+    // Setup pagination for products
+    const pPage = productPage || 1;
+    const pLimit = productLimit || 10;
+    const paginationOptions = PaginationUtils.createPrismaOptions(pPage, pLimit);
 
     // Fetch all categories for this user (for recursive subcategories)
     const allCategories = await this.prisma.category.findMany({
       where: { userId },
       include: {
-        products: {
+        _count: {
           select: {
-            id: true,
-            name: true,
-            sku: true,
-            status: true,
-            imageUrl: true,
+            products: true,
           },
         },
       },
       orderBy: { name: 'asc' },
     });
-
 
     // Fetch the main category
     const category = await this.prisma.category.findFirst({
@@ -156,6 +159,12 @@ export class CategoryService {
             imageUrl: true,
           },
           orderBy: { createdAt: 'desc' },
+          ...paginationOptions,
+        },
+        _count: {
+          select: {
+            products: true,
+          },
         },
       },
     });
@@ -177,19 +186,12 @@ export class CategoryService {
             createdAt: sub.createdAt,
             updatedAt: sub.updatedAt,
             subcategories: buildSubcategoriesRecursively(sub.id),
-            products: sub.products?.map(product => ({
-              id: product.id,
-              name: product.name,
-              sku: product.sku,
-              status: product.status,
-              imageUrl: product.imageUrl,
-            })) || [],
+            productCount: sub._count?.products || 0,
           }));
       };
 
-
-    // Return full category response
-    return {
+    // Return full category response with pagination metadata for products
+    const response: CategoryResponseDto & { productsPagination?: any } = {
       id: category.id,
       name: category.name,
       description: category.description ?? undefined,
@@ -216,7 +218,15 @@ export class CategoryService {
         status: product.status,
         imageUrl: product.imageUrl,
       })),
+      productsPagination: {
+        page: pPage,
+        limit: pLimit,
+        total: category._count.products,
+        totalPages: Math.ceil(category._count.products / pLimit),
+      },
     };
+
+    return response;
   } catch (error) {
     if (error instanceof NotFoundException) {
       throw error;
@@ -232,7 +242,7 @@ export class CategoryService {
   async update(id: number, updateCategoryDto: UpdateCategoryDto, userId: number): Promise<CategoryResponseDto> {
     try {
       // Verify ownership first
-      await this.findOne(id, userId);
+      const existingCategory = await this.findOne(id, userId);
 
       this.logger.log(`Updating category: ${id} for user: ${userId}`);
 
@@ -250,6 +260,14 @@ export class CategoryService {
         } else {
           // If setting to null, no circular check needed
         }
+      }
+
+      // Check for name uniqueness if name is being updated
+      if (updateCategoryDto.name !== undefined && updateCategoryDto.name !== existingCategory.name) {
+        const newParentId = updateCategoryDto.parentCategoryId !== undefined 
+          ? updateCategoryDto.parentCategoryId 
+          : existingCategory.parentCategoryId;
+        await this.validateCategoryNameUniqueness(updateCategoryDto.name, userId, newParentId, id);
       }
 
       // Prepare update data
@@ -433,6 +451,43 @@ export class CategoryService {
 
     if (!parentCategory) {
       throw new BadRequestException('Parent category not found or does not belong to you');
+    }
+  }
+
+  private async validateCategoryNameUniqueness(
+    name: string, 
+    userId: number, 
+    parentCategoryId: number | null | undefined, 
+    excludeId?: number
+  ): Promise<void> {
+    // For root categories (parentCategoryId is null), check uniqueness among all root categories
+    if (!parentCategoryId) {
+      const existingCategory = await this.prisma.category.findFirst({
+        where: {
+          name,
+          userId,
+          parentCategoryId: null,
+          ...(excludeId ? { id: { not: excludeId } } : {}),
+        },
+      });
+
+      if (existingCategory) {
+        throw new BadRequestException('A root category with this name already exists');
+      }
+    } else {
+      // For subcategories, check uniqueness only among siblings (same parent)
+      const existingCategory = await this.prisma.category.findFirst({
+        where: {
+          name,
+          userId,
+          parentCategoryId,
+          ...(excludeId ? { id: { not: excludeId } } : {}),
+        },
+      });
+
+      if (existingCategory) {
+        throw new BadRequestException('A subcategory with this name already exists in the same parent category');
+      }
     }
   }
 

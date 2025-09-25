@@ -73,10 +73,15 @@ export class CategoryController {
   async findOne(
     @Param('id', ParseIntPipe) id: number,
     @GetUser() user: User,
+    @Query('productPage') productPage?: string,
+    @Query('productLimit') productLimit?: string,
   ): Promise<CategoryResponseDto> {
     this.logger.log(`User ${user.id} fetching category: ${id}`);
     
-    return this.categoryService.findOne(id, user.id);
+    const pPage = productPage ? parseInt(productPage) : undefined;
+    const pLimit = productLimit ? parseInt(productLimit) : undefined;
+    
+    return this.categoryService.findOne(id, user.id, pPage, pLimit);
   }
 
   @Get(':id/subcategories')

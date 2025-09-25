@@ -6,7 +6,7 @@ import { UserAttributeType, userTypeToStorageType } from '../../types/user-attri
 export class CreateAttributeDto {
   @IsString()
   @IsNotEmpty({ message: 'Attribute name is required' })
-  @Length(1, 100, { message: 'Attribute name must be between 1 and 100 characters' })
+  @Length(1, 30, { message: 'Attribute name must be between 1 and 30 characters' })
   @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
   @Matches(/^[a-zA-Z0-9\s\-_]+$/, { 
     message: 'Attribute name can only contain letters, numbers, spaces, hyphens, and underscores' 

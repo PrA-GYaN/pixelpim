@@ -1,5 +1,5 @@
-import { IsString, IsNotEmpty, IsArray, IsOptional, ValidateNested, IsNumber, IsBoolean } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsString, IsNotEmpty, IsArray, IsOptional, ValidateNested, IsNumber, IsBoolean, Length, Matches } from 'class-validator';
+import { Type, Transform } from 'class-transformer';
 
 export class FamilyAttributeDto {
   @IsNumber()
@@ -15,7 +15,12 @@ export class FamilyAttributeDto {
 
 export class CreateFamilyDto {
   @IsString()
-  @IsNotEmpty()
+  @IsNotEmpty({ message: 'Family name is required' })
+  @Length(1, 40, { message: 'Family name must be between 1 and 40 characters' })
+  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @Matches(/^[a-zA-Z0-9\s\-_&()']+$/, { 
+    message: 'Family name can only contain letters, numbers, spaces, hyphens, underscores, ampersands, parentheses, and apostrophes' 
+  })
   name: string;
 
   @IsArray()

@@ -4,7 +4,7 @@ import { Transform } from 'class-transformer';
 export class CreateCategoryDto {
   @IsString()
   @IsNotEmpty({ message: 'Category name is required' })
-  @Length(1, 100, { message: 'Category name must be between 1 and 100 characters' })
+  @Length(1, 50, { message: 'Category name must be between 1 and 50 characters' })
   @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
   @Matches(/^[a-zA-Z0-9\s\-_&()']+$/, { 
     message: 'Category name can only contain letters, numbers, spaces, hyphens, underscores, ampersands, parentheses, and apostrophes' 

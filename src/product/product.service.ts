@@ -1081,6 +1081,14 @@ export class ProductService {
                 name: true,
                 familyAttributes: {
                   include: {
+                    attribute: {
+                      select: {
+                        id: true,
+                        name: true,
+                        type: true,
+                        defaultValue: true,
+                      },
+                    },
                   },
                 },
               },
