@@ -5,6 +5,7 @@ export enum ExportFormat {
   CSV = 'csv',
   JSON = 'json',
   EXCEL = 'excel',
+  XML = 'xml',
 }
 
 export enum ProductAttribute {
@@ -75,7 +76,7 @@ export class ExportProductDto {
 }
 
 export class ExportProductResponseDto {
-  data: any[];
+  data: any[] | string;
   format: ExportFormat;
   filename: string;
   totalRecords: number;

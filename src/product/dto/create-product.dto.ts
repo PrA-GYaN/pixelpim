@@ -13,12 +13,13 @@ export class ProductAttributeValueDto {
 export class CreateProductDto {
   @IsString()
   @IsNotEmpty({ message: 'Product name is required' })
-  @Length(1, 60, { message: 'Product name must be between 1 and 60 characters' })
+  @Length(1, 100, { message: 'Product name must be between 1 and 100 characters' })
   @Transform(({ value }) => value?.trim())
   name: string;
 
   @IsString()
   @IsNotEmpty()
+  @Length(4, 40, { message: 'SKU must be between 4 and 40 characters' })
   @Transform(({ value }) => value?.trim())
   sku: string;
 

@@ -1,0 +1,50 @@
+### Scheduled Import API Examples
+
+@baseUrl = http://localhost:3000
+@authToken = Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsImVtYWlsIjoicHJhZ3lhbjE1MTZAZ21haWwuY29tIiwiaWF0IjoxNzU1MDc2Njk2LCJleHAiOjE3NTUxNjMwOTZ9.pQM2bGyQAKPr-NJhfIu7rDK6ygiXHc_qdcTXbXDDTYI
+
+### 1. Schedule a CSV import job
+POST {{baseUrl}}/products/import/schedule
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "cronExpression": "0 0 * * *",
+  "csvUrl": "https://example.com/products.csv",
+  "name": "Daily Product Import",
+  "description": "Import products from CSV every day at midnight"
+}
+
+### 2. Schedule a CSV import job with hourly frequency
+POST {{baseUrl}}/products/import/schedule
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "cronExpression": "0 */1 * * *",
+  "csvUrl": "https://example.com/hourly-products.csv",
+  "name": "Hourly Product Sync",
+  "description": "Sync products every hour"
+}
+
+### 3. Schedule a CSV import job without optional fields
+POST {{baseUrl}}/products/import/schedule
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "cronExpression": "0 9 * * 1",
+  "csvUrl": "https://example.com/weekly-products.csv"
+}
+
+### 4. Get all import jobs
+GET {{baseUrl}}/products/import/jobs
+Authorization: {{authToken}}
+
+### 5. Get a specific import job (replace {jobId} with actual job ID)
+GET {{baseUrl}}/products/import/jobs/job-12345
+Authorization: {{authToken}}
+
+### 6. Cancel an import job (replace {jobId} with actual job ID)
+DELETE {{baseUrl}}/products/import/jobs/job-12345
+Authorization: {{authToken}}

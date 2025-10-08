@@ -14,6 +14,7 @@ import {
   Logger,
   UseInterceptors,
   ClassSerializerInterceptor,
+  NotFoundException,
 } from '@nestjs/common';
 import { ProductService } from './product.service';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -22,11 +23,17 @@ import { UpdateProductAttributesDto } from './dto/update-product-attribute.dto';
 import { ProductResponseDto } from './dto/product-response.dto';
 import { CreateProductVariantDto, RemoveProductVariantDto, GetProductVariantsDto, ProductVariantResponseDto } from './dto/product-variant.dto';
 import { ExportProductDto, ExportProductResponseDto } from './dto/export-product.dto';
+import { MarketplaceExportDto, MarketplaceExportResponseDto, MarketplaceType } from './dto/marketplace-export.dto';
+import { ScheduleImportDto, ImportJobResponseDto } from './dto/schedule-import.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { User as GetUser } from '../auth/decorators/user.decorator';
 import { PaginatedResponse } from '../common';
 import { SortingDto } from '../common';
 import type { User } from '../../generated/prisma';
+import { MarketplaceTemplateService } from './services/marketplace-template.service';
+import { MarketplaceExportService } from './services/marketplace-export.service';
+import { CsvImportService } from './services/csv-import.service';
+import { ImportSchedulerService } from './services/import-scheduler.service';
 
 @Controller('products')
 @UseGuards(JwtAuthGuard)
@@ -270,6 +277,38 @@ export class ProductController {
     return this.productService.exportProducts(exportDto, user.id);
   }
 
+  // Marketplace Export Endpoints
+
+  @Get('marketplace/templates')
+  async getMarketplaceTemplates(
+    @GetUser() user: User,
+  ) {
+    this.logger.log(`User ${user.id} fetching marketplace templates`);
+    
+    return this.productService.getMarketplaceTemplates();
+  }
+
+  @Get('marketplace/templates/:marketplaceType')
+  async getMarketplaceTemplate(
+    @Param('marketplaceType') marketplaceType: string,
+    @GetUser() user: User,
+  ) {
+    this.logger.log(`User ${user.id} fetching template for marketplace: ${marketplaceType}`);
+    
+    return this.productService.getMarketplaceTemplate(marketplaceType as any);
+  }
+
+  @Post('marketplace/export')
+  @HttpCode(HttpStatus.OK)
+  async exportToMarketplace(
+    @Body() exportDto: MarketplaceExportDto,
+    @GetUser() user: User,
+  ): Promise<MarketplaceExportResponseDto> {
+    this.logger.log(`User ${user.id} exporting ${exportDto.productIds?.length || 0} products to ${exportDto.marketplaceType}`);
+    
+    return this.productService.exportToMarketplace(exportDto, user.id);
+  }
+
   // Product Attribute Value Management Endpoints
 
   @Patch(':id/attributes')
@@ -295,5 +334,49 @@ export class ProductController {
     this.logger.log(`User ${user.id} getting attribute values for product: ${productId}`);
     
     return this.productService.getProductAttributeValues(productId, user.id);
+  }
+
+  // CSV Import Scheduling Endpoints
+
+  @Post('import/schedule')
+  @HttpCode(HttpStatus.CREATED)
+  async scheduleCsvImport(
+    @Body() scheduleDto: ScheduleImportDto,
+    @GetUser() user: User,
+  ): Promise<ImportJobResponseDto> {
+    this.logger.log(`User ${user.id} scheduling CSV import from: ${scheduleDto.csvUrl}`);
+    
+    return this.productService.scheduleCsvImport(scheduleDto, user.id);
+  }
+
+  @Get('import/jobs')
+  async getImportJobs(
+    @GetUser() user: User,
+  ): Promise<ImportJobResponseDto[]> {
+    this.logger.log(`User ${user.id} fetching import jobs`);
+    
+    return this.productService.getImportJobs(user.id);
+  }
+
+  @Get('import/jobs/:jobId')
+  async getImportJob(
+    @Param('jobId') jobId: string,
+    @GetUser() user: User,
+  ): Promise<ImportJobResponseDto> {
+    this.logger.log(`User ${user.id} fetching import job: ${jobId}`);
+    
+    return this.productService.getImportJob(jobId, user.id);
+  }
+
+  @Delete('import/jobs/:jobId')
+  @HttpCode(HttpStatus.OK)
+  async cancelImportJob(
+    @Param('jobId') jobId: string,
+    @GetUser() user: User,
+  ): Promise<{ message: string }> {
+    this.logger.log(`User ${user.id} cancelling import job: ${jobId}`);
+    
+    const cancelled = await this.productService.cancelImportJob(jobId, user.id);
+    return { message: cancelled ? 'Import job cancelled successfully' : 'Import job not found' };
   }
 }

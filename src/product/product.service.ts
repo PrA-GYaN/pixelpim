@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException, Logger, forwardRef, Inject } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -7,6 +7,12 @@ import { UpdateProductAttributesDto } from './dto/update-product-attribute.dto';
 import { ProductResponseDto } from './dto/product-response.dto';
 import { CreateProductVariantDto, RemoveProductVariantDto, ProductVariantResponseDto, GetProductVariantsDto } from './dto/product-variant.dto';
 import { ExportProductDto, ExportProductResponseDto, ProductAttribute, ExportFormat, AttributeSelectionDto } from './dto/export-product.dto';
+import { MarketplaceExportDto, MarketplaceExportResponseDto, MarketplaceType } from './dto/marketplace-export.dto';
+import { ScheduleImportDto, ImportJobResponseDto } from './dto/schedule-import.dto';
+import { CsvImportService } from './services/csv-import.service';
+import { ImportSchedulerService } from './services/import-scheduler.service';
+import { MarketplaceTemplateService } from './services/marketplace-template.service';
+import { MarketplaceExportService } from './services/marketplace-export.service';
 import { PaginatedResponse, PaginationUtils } from '../common';
 import type { Product } from '../../generated/prisma';
 import { getUserFriendlyType } from '../types/user-attribute-type.enum';
@@ -18,6 +24,12 @@ export class ProductService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationService: NotificationService,
+    private readonly marketplaceTemplateService: MarketplaceTemplateService,
+    private readonly marketplaceExportService: MarketplaceExportService,
+    @Inject(forwardRef(() => CsvImportService))
+    private readonly csvImportService: CsvImportService,
+    @Inject(forwardRef(() => ImportSchedulerService))
+    private readonly importSchedulerService: ImportSchedulerService,
   ) {}
 
   async create(createProductDto: CreateProductDto, userId: number): Promise<ProductResponseDto> {
@@ -1695,19 +1707,16 @@ export class ProductService {
         throw new BadRequestException('One or more variant products not found or do not belong to you');
       }
 
-      // Create all possible combinations between all products in the variant group
-      // This creates a fully connected graph where every product is connected to every other product
-      const allProductIds = [productId, ...variantProductIds];
+      // Create only direct relationships between productId and each variantProductId
+      // This creates a star pattern where productId is linked to each variantProductId individually
       const variantData: { productAId: number; productBId: number }[] = [];
 
-      // Generate all unique pairs
-      for (let i = 0; i < allProductIds.length; i++) {
-        for (let j = i + 1; j < allProductIds.length; j++) {
-          const [smallerId, largerId] = allProductIds[i] < allProductIds[j] 
-            ? [allProductIds[i], allProductIds[j]] 
-            : [allProductIds[j], allProductIds[i]];
-          variantData.push({ productAId: smallerId, productBId: largerId });
-        }
+      // Create direct pairs only (productId ↔ each variantProductId)
+      for (const variantProductId of variantProductIds) {
+        const [smallerId, largerId] = productId < variantProductId 
+          ? [productId, variantProductId] 
+          : [variantProductId, productId];
+        variantData.push({ productAId: smallerId, productBId: largerId });
       }
 
       // Create variants using createMany (will ignore duplicates)
@@ -1767,8 +1776,8 @@ export class ProductService {
         },
       })) as ProductVariantResponseDto[];
 
-      this.logger.log(`Created ${result.count} variant relationships for product ${productId} and its variant group`);
-      return { message: `Successfully added ${result.count} variant relationships to create a fully connected variant group`, created: result.count, variants: transformedVariants };
+      this.logger.log(`Created ${result.count} direct variant relationships for product ${productId}`);
+      return { message: `Successfully created ${result.count} direct variant relationships. Each selected product is now linked directly to product ${productId}.`, created: result.count, variants: transformedVariants };
     } catch (error) {
       if (error instanceof BadRequestException) {
         throw error;
@@ -1828,67 +1837,20 @@ export class ProductService {
         throw new NotFoundException('Variant relationship not found');
       }
 
-      // Get all current variants for both products to understand the full graph
-      const allVariantsForBothProducts = await this.prisma.productVariant.findMany({
+      // Simply remove only the specific relationship requested
+      await this.prisma.productVariant.delete({
         where: {
-          OR: [
-            { productAId: { in: [smallerId, largerId] } },
-            { productBId: { in: [smallerId, largerId] } },
-          ],
+          productAId_productBId: {
+            productAId: smallerId,
+            productBId: largerId,
+          },
         },
       });
 
-      // Find all products connected to the larger ID (the one we want to remove from all relationships)
-      const connectedToLargerProduct = new Set<number>();
-      
-      allVariantsForBothProducts.forEach(v => {
-        if (v.productAId === largerId) {
-          connectedToLargerProduct.add(v.productBId);
-        }
-        if (v.productBId === largerId) {
-          connectedToLargerProduct.add(v.productAId);
-        }
-      });
-
-      // Remove the smaller product from the connected set since we want to keep its relationship with others
-      connectedToLargerProduct.delete(smallerId);
-
-      // Use a transaction to ensure atomicity
-      await this.prisma.$transaction(async (tx) => {
-        // First, delete the specific relationship requested
-        await tx.productVariant.delete({
-          where: {
-            productAId_productBId: {
-              productAId: smallerId,
-              productBId: largerId,
-            },
-          },
-        });
-
-        // Then, remove the larger product from all its other relationships
-        if (connectedToLargerProduct.size > 0) {
-          await tx.productVariant.deleteMany({
-            where: {
-              OR: [
-                {
-                  productAId: largerId,
-                  productBId: { in: Array.from(connectedToLargerProduct) },
-                },
-                {
-                  productAId: { in: Array.from(connectedToLargerProduct) },
-                  productBId: largerId,
-                },
-              ],
-            },
-          });
-        }
-      });
-
-      const removedRelationships = 1 + connectedToLargerProduct.size;
-      this.logger.log(`Removed ${removedRelationships} variant relationships involving product ${largerId}`);
+      this.logger.log(`Removed variant relationship between product ${smallerId} and ${largerId}`);
       
       return { 
-        message: `Successfully removed ${removedRelationships} variant relationships. Product ${largerId} has been disconnected from the variant group, while other relationships remain intact.` 
+        message: `Successfully removed variant relationship between products ${productId} and ${variantProductId}.` 
       };
     } catch (error) {
       if (error instanceof BadRequestException || error instanceof NotFoundException) {
@@ -2921,5 +2883,98 @@ export class ProductService {
       }
       this.handleDatabaseError(error, 'getProductFamilyAttributeValues');
     }
+  }
+
+  /**
+   * Get available marketplace templates
+   */
+  async getMarketplaceTemplates() {
+    try {
+      const marketplaces = this.marketplaceTemplateService.getAvailableMarketplaces();
+      return marketplaces.map(marketplace => ({
+        marketplaceType: marketplace,
+        displayName: this.getMarketplaceDisplayName(marketplace),
+        template: this.marketplaceTemplateService.getMarketplaceTemplate(marketplace)
+      }));
+    } catch (error) {
+      this.logger.error(`Failed to get marketplace templates: ${error.message}`, error.stack);
+      throw new BadRequestException('Failed to get marketplace templates');
+    }
+  }
+
+  /**
+   * Get template for specific marketplace
+   */
+  async getMarketplaceTemplate(marketplaceType: MarketplaceType) {
+    try {
+      const template = this.marketplaceTemplateService.getMarketplaceTemplate(marketplaceType);
+      return {
+        ...template,
+        displayName: this.getMarketplaceDisplayName(marketplaceType),
+        requiredFields: this.marketplaceTemplateService.getMarketplaceFields(marketplaceType),
+        availableFields: Object.values(template.fieldMappings.map(f => ({
+          field: f.ecommerceField,
+          displayName: this.marketplaceTemplateService.getFieldDisplayName(f.ecommerceField),
+          sourceField: f.sourceField,
+          defaultValue: f.defaultValue
+        })))
+      };
+    } catch (error) {
+      this.logger.error(`Failed to get template for ${marketplaceType}: ${error.message}`, error.stack);
+      throw new BadRequestException(`Failed to get template for ${marketplaceType}`);
+    }
+  }
+
+  /**
+   * Export products to marketplace format
+   */
+  async exportToMarketplace(exportDto: MarketplaceExportDto, userId: number): Promise<MarketplaceExportResponseDto> {
+    try {
+      return this.marketplaceExportService.exportToMarketplace(exportDto, userId);
+    } catch (error) {
+      this.logger.error(`Failed to export to marketplace: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
+  /**
+   * Get human-readable marketplace display names
+   */
+  private getMarketplaceDisplayName(marketplaceType: MarketplaceType): string {
+    const displayNames: Record<MarketplaceType, string> = {
+      [MarketplaceType.AMAZON]: 'Amazon Marketplace',
+      [MarketplaceType.ALIEXPRESS]: 'AliExpress',
+      [MarketplaceType.EBAY]: 'eBay',
+      [MarketplaceType.ETSY]: 'Etsy',
+      [MarketplaceType.SHOPIFY]: 'Shopify',
+      [MarketplaceType.WALMART]: 'Walmart Marketplace',
+      [MarketplaceType.FACEBOOK_MARKETPLACE]: 'Facebook Marketplace',
+      [MarketplaceType.GOOGLE_SHOPPING]: 'Google Shopping',
+      [MarketplaceType.CUSTOM]: 'Custom Template'
+    };
+    
+    return displayNames[marketplaceType] || marketplaceType;
+  }
+
+  // CSV Import Scheduling Methods
+
+  async scheduleCsvImport(scheduleDto: ScheduleImportDto, userId: number) {
+    return this.importSchedulerService.scheduleImport(scheduleDto, userId);
+  }
+
+  async getImportJobs(userId: number) {
+    return this.importSchedulerService.getAllJobs(userId);
+  }
+
+  async getImportJob(jobId: string, userId: number): Promise<ImportJobResponseDto> {
+    const job = this.importSchedulerService.getJob(jobId, userId);
+    if (!job) {
+      throw new NotFoundException(`Import job with ID ${jobId} not found`);
+    }
+    return job;
+  }
+
+  async cancelImportJob(jobId: string, userId: number): Promise<boolean> {
+    return this.importSchedulerService.cancelJob(jobId, userId);
   }
 }

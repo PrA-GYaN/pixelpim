@@ -2254,11 +2254,21 @@ Delete a product.
 ---
 
 #### Create Product Variants
-Create variant relationships between products.
+Create direct variant relationships between a main product and specified variant products.
 
 **Endpoint:** `POST /products/variants`
 
 **Authentication:** Required (JWT token)
+
+**Behavior:** Creates only direct relationships between `productId` and each product in `variantProductIds`. This creates a star pattern where the main product is directly linked to each variant, but variants are NOT automatically linked to each other.
+
+**Example:**
+If you link product 1 to products [2, 3, 4], it creates:
+- 1 ↔ 2
+- 1 ↔ 3  
+- 1 ↔ 4
+
+But NOT: 2 ↔ 3, 2 ↔ 4, or 3 ↔ 4
 
 **Request Body:**
 ```json
@@ -2282,8 +2292,8 @@ curl -X POST http://localhost:3000/products/variants \
 **Success Response (201):**
 ```json
 {
-  "message": "Product variant relationships created successfully",
-  "created": 6
+  "message": "Successfully created 3 direct variant relationships. Each selected product is now linked directly to product 1.",
+  "created": 3
 }
 ```
 
@@ -2453,7 +2463,7 @@ Same format as "Get All Product Variants" response.
 ---
 
 #### Remove Product Variant
-Remove a variant relationship between two products.
+Remove a specific variant relationship between two products.
 
 **Endpoint:** `DELETE /products/variants/:productId/:variantProductId`
 
@@ -2463,7 +2473,11 @@ Remove a variant relationship between two products.
 - `productId`: Product ID (integer)
 - `variantProductId`: Variant Product ID (integer)
 
+**Behavior:** Removes only the direct relationship between the two specified products. Other variant relationships remain intact.
+
 **Example:**
+If products A, B, and C are all linked as variants (A↔B, A↔C, B↔C), removing the relationship between A and B will only remove A↔B, leaving A↔C and B↔C intact.
+
 ```bash
 curl -X DELETE https://pixelpim.onrender.com/products/variants/433/432 \
   -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
@@ -2472,12 +2486,12 @@ curl -X DELETE https://pixelpim.onrender.com/products/variants/433/432 \
 **Success Response (200):**
 ```json
 {
-  "message": "Product variant relationship removed successfully"
+  "message": "Successfully removed variant relationship between products 433 and 432."
 }
 ```
 
 **Error Responses:**
-- `404 Not Found` - Product or variant not found
+- `404 Not Found` - Product or variant relationship not found
 - `400 Bad Request` - Invalid productId or variantProductId
 - `403 Forbidden` - You can only modify your own products
 

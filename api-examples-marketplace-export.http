@@ -1,0 +1,403 @@
+### Marketplace Export API Examples
+
+@baseUrl = http://localhost:3000
+@authToken = Bearer YOUR_JWT_TOKEN_HERE
+
+# Note: Update @baseUrl with your API base URL
+# Note: Update @authToken with a valid JWT token
+
+### Get All Marketplace Templates
+GET {{baseUrl}}/products/marketplace/templates
+Authorization: {{authToken}}
+
+# Response: Array of marketplace templates with their configurations
+# {
+#   "marketplaceType": "amazon",
+#   "displayName": "Amazon Marketplace",
+#   "template": {
+#     "marketplaceType": "amazon",
+#     "templateName": "Amazon Standard Template",
+#     "description": "Standard Amazon marketplace export template with required fields",
+#     "fieldMappings": [...],
+#     "fileFormat": "csv"
+#   }
+# }
+
+###
+
+### Get Specific Marketplace Template (Amazon)
+GET {{baseUrl}}/products/marketplace/templates/amazon
+Authorization: {{authToken}}
+
+# Response: Detailed template configuration for Amazon
+# {
+#   "marketplaceType": "amazon",
+#   "templateName": "Amazon Standard Template",
+#   "description": "Standard Amazon marketplace export template with required fields",
+#   "displayName": "Amazon Marketplace",
+#   "requiredFields": ["product_name", "sku", "price", "category"],
+#   "availableFields": [...],
+#   "fieldMappings": [...],
+#   "fileFormat": "csv"
+# }
+
+###
+
+### Get AliExpress Template
+GET {{baseUrl}}/products/marketplace/templates/aliexpress
+Authorization: {{authToken}}
+
+###
+
+### Get eBay Template
+GET {{baseUrl}}/products/marketplace/templates/ebay
+Authorization: {{authToken}}
+
+###
+
+### Get Shopify Template
+GET {{baseUrl}}/products/marketplace/templates/shopify
+Authorization: {{authToken}}
+
+###
+
+### Export Products to Amazon
+POST {{baseUrl}}/products/marketplace/export
+Authorization: {{authToken}}
+Content-Type: application/json
+
+{
+  "productIds": [1, 2, 3],
+  "marketplaceType": "amazon",
+  "fileFormat": "csv",
+  "filename": "amazon_products_export"
+}
+
+# Response:
+# {
+#   "data": [...], // Array of transformed product data
+#   "marketplaceType": "amazon",
+#   "templateUsed": "Amazon Standard Template",
+#   "fileFormat": "csv",
+#   "filename": "amazon_products_export.csv",
+#   "totalRecords": 3,
+#   "fieldMappings": [...],
+#   "exportedAt": "2024-01-01T00:00:00.000Z"
+# }
+
+###
+
+### Export Products to AliExpress with Custom Mappings
+POST {{baseUrl}}/products/marketplace/export
+Authorization: {{authToken}}
+Content-Type: application/json
+
+{
+  "productIds": [1, 2, 3, 4, 5],
+  "marketplaceType": "aliexpress",
+  "fileFormat": "csv",
+  "filename": "aliexpress_products",
+  "customFieldMappings": [
+    {
+      "ecommerceField": "product_name",
+      "sourceField": "name"
+    },
+    {
+      "ecommerceField": "sku",
+      "sourceField": "sku"
+    },
+    {
+      "ecommerceField": "price",
+      "sourceField": "price",
+      "defaultValue": "1.00"
+    },
+    {
+      "ecommerceField": "category",
+      "sourceField": "categoryName"
+    },
+    {
+      "ecommerceField": "product_image",
+      "sourceField": "imageUrl"
+    },
+    {
+      "ecommerceField": "weight",
+      "sourceField": "weight",
+      "defaultValue": "0.1"
+    },
+    {
+      "ecommerceField": "inventory_quantity",
+      "sourceField": "inventory",
+      "defaultValue": "999"
+    }
+  ]
+}
+
+###
+
+### Export Products to eBay
+POST {{baseUrl}}/products/marketplace/export
+Authorization: {{authToken}}
+Content-Type: application/json
+
+{
+  "productIds": [1, 2, 3],
+  "marketplaceType": "ebay",
+  "fileFormat": "csv",
+  "filename": "ebay_listings"
+}
+
+###
+
+### Export Products to Etsy
+POST {{baseUrl}}/products/marketplace/export
+Authorization: {{authToken}}
+Content-Type: application/json
+
+{
+  "productIds": [1, 2, 3],
+  "marketplaceType": "etsy",
+  "fileFormat": "csv",
+  "filename": "etsy_products"
+}
+
+###
+
+### Export Products to Shopify
+POST {{baseUrl}}/products/marketplace/export
+Authorization: {{authToken}}
+Content-Type: application/json
+
+{
+  "productIds": [1, 2, 3, 4, 5],
+  "marketplaceType": "shopify",
+  "fileFormat": "csv",
+  "filename": "shopify_import"
+}
+
+###
+
+### Export Products to Walmart Marketplace (Excel Format)
+POST {{baseUrl}}/products/marketplace/export
+Authorization: {{authToken}}
+Content-Type: application/json
+
+{
+  "productIds": [1, 2],
+  "marketplaceType": "walmart",
+  "fileFormat": "xlsx",
+  "filename": "walmart_products"
+}
+
+###
+
+### Export Products to Google Shopping (XML Feed)
+POST {{baseUrl}}/products/marketplace/export
+Authorization: {{authToken}}
+Content-Type: application/json
+
+{
+  "productIds": [1, 2, 3, 4, 5],
+  "marketplaceType": "google_shopping",
+  "fileFormat": "xml",
+  "filename": "google_shopping_feed"
+}
+
+###
+
+### Export Products to Facebook Marketplace
+POST {{baseUrl}}/products/marketplace/export
+Authorization: {{authToken}}
+Content-Type: application/json
+
+{
+  "productIds": [1, 2, 3],
+  "marketplaceType": "facebook_marketplace",
+  "fileFormat": "csv",
+  "filename": "facebook_products"
+}
+
+###
+
+### Custom Template Export with All Field Mappings
+POST {{baseUrl}}/products/marketplace/export
+Authorization: {{authToken}}
+Content-Type: application/json
+
+{
+  "productIds": [1],
+  "marketplaceType": "custom",
+  "fileFormat": "json",
+  "filename": "custom_export",
+  "customFieldMappings": [
+    {
+      "ecommerceField": "product_name",
+      "sourceField": "name"
+    },
+    {
+      "ecommerceField": "product_description",
+      "sourceField": "description",
+      "defaultValue": ""
+    },
+    {
+      "ecommerceField": "sku",
+      "sourceField": "sku"
+    },
+    {
+      "ecommerceField": "price",
+      "sourceField": "price",
+      "defaultValue": "0.00"
+    },
+    {
+      "ecommerceField": "brand",
+      "sourceField": "brand",
+      "defaultValue": ""
+    },
+    {
+      "ecommerceField": "category",
+      "sourceField": "categoryName"
+    },
+    {
+      "ecommerceField": "product_image",
+      "sourceField": "imageUrl"
+    },
+    {
+      "ecommerceField": "weight",
+      "sourceField": "weight",
+      "defaultValue": "1"
+    },
+    {
+      "ecommerceField": "inventory_quantity",
+      "sourceField": "inventory",
+      "defaultValue": "0"
+    },
+    {
+      "ecommerceField": "status",
+      "sourceField": "status",
+      "transformation": "status_to_availability"
+    }
+  ]
+}
+
+###
+
+### Available Marketplace Types:
+# - amazon: Amazon Marketplace
+# - aliexpress: AliExpress
+# - ebay: eBay
+# - etsy: Etsy
+# - shopify: Shopify
+# - walmart: Walmart Marketplace
+# - facebook_marketplace: Facebook Marketplace
+# - google_shopping: Google Shopping
+# - custom: Custom Template
+
+###
+
+### Available File Formats:
+# - csv: Comma Separated Values
+# - xlsx: Excel Spreadsheet
+# - json: JSON Format
+# - xml: XML Feed (mainly for Google Shopping)
+
+###
+
+### Field Mapping Structure:
+# {
+#   "ecommerceField": "marketplace_specific_field_name",
+#   "sourceField": "pixelpim_field_or_attribute_name",
+#   "defaultValue": "fallback_value_if_source_is_empty",
+#   "transformation": "optional_data_transformation_rule"
+# }
+
+###
+
+### Available Transformations:
+# - status_to_amazon: Converts PixelPim status to Amazon format
+# - status_to_availability: Converts status to availability (in stock/out of stock)
+# - name_to_handle: Converts product name to URL-friendly handle
+
+###
+
+### Common Source Fields in PixelPim:
+# - name: Product name
+# - sku: Product SKU
+# - status: Product status (complete/incomplete)
+# - categoryName: Category name
+# - familyName: Family name
+# - imageUrl: Product image URL
+# - productLink: Product URL
+# - createdAt: Creation timestamp
+# - updatedAt: Last update timestamp
+# - price: Price attribute value
+# - brand: Brand attribute value
+# - description: Description attribute value
+# - weight: Weight attribute value
+# - inventory: Inventory/stock attribute value
+# - Any custom attribute name from your PixelPim system
+
+###
+
+### Error Responses:
+
+### Missing Required Fields
+POST {{baseUrl}}/products/marketplace/export
+Authorization: {{authToken}}
+Content-Type: application/json
+
+{
+  "productIds": [1],
+  "marketplaceType": "amazon",
+  "customFieldMappings": [
+    {
+      "ecommerceField": "product_name",
+      "sourceField": "name"
+    }
+  ]
+}
+
+# Response: 400 Bad Request
+# {
+#   "statusCode": 400,
+#   "message": "Missing required fields for amazon: sku, price, category",
+#   "error": "Bad Request"
+# }
+
+###
+
+### Invalid Marketplace Type
+POST {{baseUrl}}/products/marketplace/export
+Authorization: {{authToken}}
+Content-Type: application/json
+
+{
+  "productIds": [1],
+  "marketplaceType": "invalid_marketplace"
+}
+
+# Response: 400 Bad Request
+# {
+#   "statusCode": 400,
+#   "message": "No template found for marketplace: invalid_marketplace",
+#   "error": "Bad Request"
+# }
+
+###
+
+### No Products Found
+POST {{baseUrl}}/products/marketplace/export
+Authorization: {{authToken}}
+Content-Type: application/json
+
+{
+  "productIds": [999, 1000],
+  "marketplaceType": "amazon"
+}
+
+# Response: 404 Not Found
+# {
+#   "statusCode": 404,
+#   "message": "No products found with the provided IDs or access denied",
+#   "error": "Not Found"
+# }
+
+###
