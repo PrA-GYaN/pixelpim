@@ -280,3 +280,45 @@ Authorization: {{authToken}}
     }
   ]
 }
+
+### Direct CSV Import (One-time import)
+POST {{baseUrl}}/products/import-csv
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "csvUrl": "https://example.com/products.csv"
+}
+
+###
+# CSV Import Format Guide:
+# 
+# Required Fields:
+# - name (or Name, product_name) - Product name
+# - sku (or SKU, product_sku) - Product SKU
+# 
+# Optional Standard Fields:
+# - categoryName (or category_name, category) - Auto-creates category if not exists
+# - familyName (or family_name, family) - Auto-creates family if not exists  
+# - productLink (or product_link, url) - Product URL
+# - imageUrl (or image_url, image) - Main image URL
+# - subImages (or sub_images) - Comma-separated image URLs
+# 
+# Custom Attributes:
+# - Any other column becomes a custom attribute with auto-inferred type
+# 
+# Example CSV:
+# name,sku,categoryName,familyName,color,size,weight,price,inStock,description
+# "Red T-Shirt",TSH-001,Clothing,Apparel,Red,Large,0.3,29.99,true,"Cotton t-shirt"
+# "Blue Jeans",JNS-002,Clothing,Apparel,Blue,"32x34",1.2,79.99,false,"Denim jeans"
+# 
+# Type Auto-Inference:
+# - BOOLEAN: true/false, yes/no, 1/0
+# - INTEGER: 123, -456
+# - NUMBER: 12.34, -56.78  
+# - DATE: 2024-01-15, 01/15/2024
+# - URL: https://example.com
+# - EMAIL: user@example.com
+# - ARRAY: red,blue,green (comma-separated)
+# - TEXT: Long descriptions (>255 chars)
+# - STRING: Everything else (default)

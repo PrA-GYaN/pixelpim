@@ -8,7 +8,7 @@ import { ProductResponseDto } from './dto/product-response.dto';
 import { CreateProductVariantDto, RemoveProductVariantDto, ProductVariantResponseDto, GetProductVariantsDto } from './dto/product-variant.dto';
 import { ExportProductDto, ExportProductResponseDto, ProductAttribute, ExportFormat, AttributeSelectionDto } from './dto/export-product.dto';
 import { MarketplaceExportDto, MarketplaceExportResponseDto, MarketplaceType } from './dto/marketplace-export.dto';
-import { ScheduleImportDto, ImportJobResponseDto } from './dto/schedule-import.dto';
+import { ScheduleImportDto, UpdateScheduledImportDto, ImportJobResponseDto } from './dto/schedule-import.dto';
 import { CsvImportService } from './services/csv-import.service';
 import { ImportSchedulerService } from './services/import-scheduler.service';
 import { MarketplaceTemplateService } from './services/marketplace-template.service';
@@ -2962,19 +2962,43 @@ export class ProductService {
     return this.importSchedulerService.scheduleImport(scheduleDto, userId);
   }
 
-  async getImportJobs(userId: number) {
-    return this.importSchedulerService.getAllJobs(userId);
+  async getImportJobs(userId: number, includeExecutions: boolean = true) {
+    return this.importSchedulerService.getAllJobs(userId, includeExecutions);
   }
 
-  async getImportJob(jobId: string, userId: number): Promise<ImportJobResponseDto> {
-    const job = this.importSchedulerService.getJob(jobId, userId);
+  async getImportJob(jobId: string, userId: number, includeExecutions: boolean = true): Promise<ImportJobResponseDto> {
+    const job = await this.importSchedulerService.getJob(jobId, userId, includeExecutions);
     if (!job) {
       throw new NotFoundException(`Import job with ID ${jobId} not found`);
     }
     return job;
   }
 
+  async updateScheduledImport(jobId: string, updateDto: UpdateScheduledImportDto, userId: number) {
+    return this.importSchedulerService.updateScheduledImport(jobId, updateDto, userId);
+  }
+
+  async pauseImportJob(jobId: string, userId: number): Promise<boolean> {
+    return this.importSchedulerService.pauseJob(jobId, userId);
+  }
+
+  async resumeImportJob(jobId: string, userId: number): Promise<boolean> {
+    return this.importSchedulerService.resumeJob(jobId, userId);
+  }
+
   async cancelImportJob(jobId: string, userId: number): Promise<boolean> {
     return this.importSchedulerService.cancelJob(jobId, userId);
+  }
+
+  async deleteImportJob(jobId: string, userId: number): Promise<boolean> {
+    return this.importSchedulerService.deleteJob(jobId, userId);
+  }
+
+  async getExecutionLogs(jobId: string, userId: number, page: number = 1, limit: number = 20) {
+    return this.importSchedulerService.getExecutionLogs(jobId, userId, page, limit);
+  }
+
+  async getExecutionStats(jobId: string, userId: number) {
+    return this.importSchedulerService.getExecutionStats(jobId, userId);
   }
 }

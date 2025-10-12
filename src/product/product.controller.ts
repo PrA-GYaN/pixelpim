@@ -24,7 +24,13 @@ import { ProductResponseDto } from './dto/product-response.dto';
 import { CreateProductVariantDto, RemoveProductVariantDto, GetProductVariantsDto, ProductVariantResponseDto } from './dto/product-variant.dto';
 import { ExportProductDto, ExportProductResponseDto } from './dto/export-product.dto';
 import { MarketplaceExportDto, MarketplaceExportResponseDto, MarketplaceType } from './dto/marketplace-export.dto';
-import { ScheduleImportDto, ImportJobResponseDto } from './dto/schedule-import.dto';
+import { 
+  ScheduleImportDto, 
+  UpdateScheduledImportDto,
+  ImportJobResponseDto, 
+  ImportExecutionLogResponseDto,
+  ImportExecutionStatsDto
+} from './dto/schedule-import.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { User as GetUser } from '../auth/decorators/user.decorator';
 import { PaginatedResponse } from '../common';
@@ -352,20 +358,57 @@ export class ProductController {
   @Get('import/jobs')
   async getImportJobs(
     @GetUser() user: User,
+    @Query('includeExecutions') includeExecutions?: boolean,
   ): Promise<ImportJobResponseDto[]> {
     this.logger.log(`User ${user.id} fetching import jobs`);
     
-    return this.productService.getImportJobs(user.id);
+    return this.productService.getImportJobs(user.id, includeExecutions);
   }
 
   @Get('import/jobs/:jobId')
   async getImportJob(
     @Param('jobId') jobId: string,
     @GetUser() user: User,
+    @Query('includeExecutions') includeExecutions?: boolean,
   ): Promise<ImportJobResponseDto> {
     this.logger.log(`User ${user.id} fetching import job: ${jobId}`);
     
-    return this.productService.getImportJob(jobId, user.id);
+    return this.productService.getImportJob(jobId, user.id, includeExecutions);
+  }
+
+  @Patch('import/jobs/:jobId')
+  async updateScheduledImport(
+    @Param('jobId') jobId: string,
+    @Body() updateDto: UpdateScheduledImportDto,
+    @GetUser() user: User,
+  ): Promise<ImportJobResponseDto> {
+    this.logger.log(`User ${user.id} updating scheduled import job: ${jobId}`);
+    
+    return this.productService.updateScheduledImport(jobId, updateDto, user.id);
+  }
+
+  @Post('import/jobs/:jobId/pause')
+  @HttpCode(HttpStatus.OK)
+  async pauseImportJob(
+    @Param('jobId') jobId: string,
+    @GetUser() user: User,
+  ): Promise<{ message: string }> {
+    this.logger.log(`User ${user.id} pausing import job: ${jobId}`);
+    
+    const paused = await this.productService.pauseImportJob(jobId, user.id);
+    return { message: paused ? 'Import job paused successfully' : 'Import job not found' };
+  }
+
+  @Post('import/jobs/:jobId/resume')
+  @HttpCode(HttpStatus.OK)
+  async resumeImportJob(
+    @Param('jobId') jobId: string,
+    @GetUser() user: User,
+  ): Promise<{ message: string }> {
+    this.logger.log(`User ${user.id} resuming import job: ${jobId}`);
+    
+    const resumed = await this.productService.resumeImportJob(jobId, user.id);
+    return { message: resumed ? 'Import job resumed successfully' : 'Import job not found' };
   }
 
   @Delete('import/jobs/:jobId')
@@ -378,5 +421,44 @@ export class ProductController {
     
     const cancelled = await this.productService.cancelImportJob(jobId, user.id);
     return { message: cancelled ? 'Import job cancelled successfully' : 'Import job not found' };
+  }
+
+  @Delete('import/jobs/:jobId/delete')
+  @HttpCode(HttpStatus.OK)
+  async deleteImportJob(
+    @Param('jobId') jobId: string,
+    @GetUser() user: User,
+  ): Promise<{ message: string }> {
+    this.logger.log(`User ${user.id} deleting import job: ${jobId}`);
+    
+    const deleted = await this.productService.deleteImportJob(jobId, user.id);
+    return { message: deleted ? 'Import job deleted successfully' : 'Import job not found' };
+  }
+
+  @Get('import/jobs/:jobId/executions')
+  async getExecutionLogs(
+    @Param('jobId') jobId: string,
+    @GetUser() user: User,
+    @Query('page', new ParseIntPipe({ optional: true })) page: number = 1,
+    @Query('limit', new ParseIntPipe({ optional: true })) limit: number = 20,
+  ): Promise<{
+    logs: ImportExecutionLogResponseDto[];
+    total: number;
+    page: number;
+    totalPages: number;
+  }> {
+    this.logger.log(`User ${user.id} fetching execution logs for job: ${jobId}`);
+    
+    return this.productService.getExecutionLogs(jobId, user.id, page, limit);
+  }
+
+  @Get('import/jobs/:jobId/stats')
+  async getExecutionStats(
+    @Param('jobId') jobId: string,
+    @GetUser() user: User,
+  ): Promise<ImportExecutionStatsDto> {
+    this.logger.log(`User ${user.id} fetching execution stats for job: ${jobId}`);
+    
+    return this.productService.getExecutionStats(jobId, user.id);
   }
 }

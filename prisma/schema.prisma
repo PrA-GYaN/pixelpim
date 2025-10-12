@@ -17,14 +17,16 @@ model User {
   provider        String           @default("local")
   createdAt       DateTime         @default(now())
 
-  attributes      Attribute[]      @relation("UserAttributes")
-  attributeGroups AttributeGroup[] @relation("UserAttributeGroups")
-  families        Family[]         @relation("UserFamilies")
-  categories      Category[]       @relation("UserCategories")
-  products        Product[]        @relation("UserProducts")
-  assets          Asset[]          @relation("UserAssets")
-  assetGroups     AssetGroup[]     @relation("UserAssetGroups")
-  notifications   Notification[]   @relation("UserNotifications")
+  attributes         Attribute[]         @relation("UserAttributes")
+  attributeGroups    AttributeGroup[]    @relation("UserAttributeGroups")
+  families           Family[]            @relation("UserFamilies")
+  categories         Category[]          @relation("UserCategories")
+  products           Product[]           @relation("UserProducts")
+  assets             Asset[]             @relation("UserAssets")
+  assetGroups        AssetGroup[]        @relation("UserAssetGroups")
+  notifications      Notification[]      @relation("UserNotifications")
+  scheduledImports   ScheduledImport[]   @relation("UserScheduledImports")
+  importExecutionLogs ImportExecutionLog[] @relation("UserImportExecutionLogs")
 }
 
 model Otp {
@@ -253,4 +255,51 @@ model Notification {
 
   @@index([userId, createdAt])
   @@index([entityType, action])
+}
+
+model ScheduledImport {
+  id             String             @id @default(cuid())
+  name           String?
+  description    String?
+  cronExpression String
+  csvUrl         String
+  status         String             @default("pending") // pending, active, paused, cancelled
+  isActive       Boolean            @default(true)
+  lastRun        DateTime?
+  nextRun        DateTime?
+  errorCount     Int                @default(0)
+  successCount   Int                @default(0)
+  userId         Int
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  user           User               @relation("UserScheduledImports", fields: [userId], references: [id], onDelete: Cascade)
+  executionLogs  ImportExecutionLog[]
+
+  @@index([userId, status])
+  @@index([isActive, nextRun])
+}
+
+model ImportExecutionLog {
+  id                Int             @id @default(autoincrement())
+  scheduledImportId String
+  status            String          // processing, completed, failed
+  startTime         DateTime        @default(now())
+  endTime           DateTime?
+  itemsProcessed    Int             @default(0)
+  itemsImported     Int             @default(0)
+  itemsFailed       Int             @default(0)
+  errorMessage      String?
+  errorDetails      Json?
+  executionSummary  Json?           // Store detailed results, errors array, etc.
+  userId            Int
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  scheduledImport   ScheduledImport @relation(fields: [scheduledImportId], references: [id], onDelete: Cascade)
+  user              User            @relation("UserImportExecutionLogs", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([scheduledImportId, createdAt])
+  @@index([userId, status])
+  @@index([startTime])
 }
