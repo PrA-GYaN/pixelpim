@@ -110,9 +110,20 @@ export class CsvImportService {
 
   private async downloadCsv(url: string): Promise<string> {
     return new Promise((resolve, reject) => {
-      const protocol = url.startsWith('https') ? https : http;
+      // Check if it's a Google Spreadsheet URL and convert to CSV export URL
+      let downloadUrl = url;
+      const googleSheetsRegex = /^https:\/\/docs\.google\.com\/spreadsheets\/d\/([a-zA-Z0-9-_]+)(?:\/.*)?(?:\?.*)?$/;
+      const match = url.match(googleSheetsRegex);
+      
+      if (match) {
+        const spreadsheetId = match[1];
+        downloadUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv`;
+        this.logger.debug(`Converted Google Spreadsheet URL to CSV export URL: ${downloadUrl}`);
+      }
 
-      protocol.get(url, (response) => {
+      const protocol = downloadUrl.startsWith('https') ? https : http;
+
+      protocol.get(downloadUrl, (response) => {
         if (response.statusCode !== 200) {
           reject(new Error(`Failed to download CSV: HTTP ${response.statusCode}`));
           return;
