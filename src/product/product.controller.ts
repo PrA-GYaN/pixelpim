@@ -31,6 +31,7 @@ import {
   ImportExecutionLogResponseDto,
   ImportExecutionStatsDto
 } from './dto/schedule-import.dto';
+import { ImportCsvDto, ImportCsvResponseDto } from './dto/import-csv.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { User as GetUser } from '../auth/decorators/user.decorator';
 import { PaginatedResponse } from '../common';
@@ -47,7 +48,10 @@ import { ImportSchedulerService } from './services/import-scheduler.service';
 export class ProductController {
   private readonly logger = new Logger(ProductController.name);
 
-  constructor(private readonly productService: ProductService) {}
+  constructor(
+    private readonly productService: ProductService,
+    private readonly csvImportService: CsvImportService,
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
@@ -340,6 +344,19 @@ export class ProductController {
     this.logger.log(`User ${user.id} getting attribute values for product: ${productId}`);
     
     return this.productService.getProductAttributeValues(productId, user.id);
+  }
+
+  // CSV Import Endpoints
+
+  @Post('import-csv')
+  @HttpCode(HttpStatus.OK)
+  async importFromCsv(
+    @Body() importDto: ImportCsvDto,
+    @GetUser() user: User,
+  ): Promise<ImportCsvResponseDto> {
+    this.logger.log(`User ${user.id} importing CSV from: ${importDto.csvUrl}`);
+    
+    return this.csvImportService.importFromCsv(importDto.csvUrl, user.id);
   }
 
   // CSV Import Scheduling Endpoints

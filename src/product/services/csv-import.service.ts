@@ -112,42 +112,70 @@ export class CsvImportService {
     return new Promise((resolve, reject) => {
       // Check if it's a Google Spreadsheet URL and convert to CSV export URL
       let downloadUrl = url;
-      const googleSheetsRegex = /^https:\/\/docs\.google\.com\/spreadsheets\/d\/([a-zA-Z0-9-_]+)(?:\?.*)?$/;
-      const googleSheetsPubRegex = /^https:\/\/docs\.google\.com\/spreadsheets\/d\/e\/([a-zA-Z0-9-_]+)\/pub\?.*$/;
+      const googleSheetsRegex = /^https:\/\/docs\.google\.com\/spreadsheets\/d\/([a-zA-Z0-9-_]+)(?:\/.*)?$/;
+      const googleSheetsPubRegex = /^https:\/\/docs\.google\.com\/spreadsheets\/d\/e\/([a-zA-Z0-9-_]+)\/pub(?:\?.*)?$/;
       const match = url.match(googleSheetsRegex);
       const pubMatch = url.match(googleSheetsPubRegex);
       
       if (pubMatch) {
         const spreadsheetId = pubMatch[1];
-        downloadUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv`;
+        // For published sheets, use the /pub format with output=csv parameter
+        downloadUrl = `https://docs.google.com/spreadsheets/d/e/${spreadsheetId}/pub?output=csv`;
         this.logger.debug(`Converted Google published sheet URL to CSV export URL: ${downloadUrl}`);
       } else if (match) {
         const spreadsheetId = match[1];
-        downloadUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv`;
+        downloadUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=0`;
         this.logger.debug(`Converted Google Spreadsheet URL to CSV export URL: ${downloadUrl}`);
       }
 
-      const protocol = downloadUrl.startsWith('https') ? https : http;
+      this.downloadWithRedirects(downloadUrl, 0, resolve, reject);
+    });
+  }
 
-      protocol.get(downloadUrl, (response) => {
-        if (response.statusCode !== 200) {
-          this.logger.error(`Failed to download CSV: HTTP ${response.statusCode}, headers: ${JSON.stringify(response.headers)}`);
-          reject(new Error(`Failed to download CSV: HTTP ${response.statusCode}`));
-          return;
-        }
+  private downloadWithRedirects(
+    url: string, 
+    redirectCount: number, 
+    resolve: (data: string) => void, 
+    reject: (error: Error) => void,
+    maxRedirects: number = 5
+  ): void {
+    if (redirectCount > maxRedirects) {
+      reject(new Error(`Too many redirects (${redirectCount})`));
+      return;
+    }
 
-        let data = '';
-        response.on('data', (chunk) => {
-          data += chunk;
-        });
+    const protocol = url.startsWith('https') ? https : http;
 
-        response.on('end', () => {
-          this.logger.log(`Downloaded CSV data (first 1000 characters): ${data.substring(0, 1000)}${data.length > 1000 ? '...' : ''}`);
-          resolve(data);
-        });
-      }).on('error', (error) => {
-        reject(new Error(`Failed to download CSV: ${error.message}`));
+    this.logger.debug(`Downloading from: ${url} (redirect count: ${redirectCount})`);
+
+    protocol.get(url, (response) => {
+      const statusCode = response.statusCode || 0;
+      
+      // Handle redirects (301, 302, 307, 308)
+      if (statusCode >= 300 && statusCode < 400 && response.headers.location) {
+        const redirectUrl = response.headers.location;
+        this.logger.debug(`Following redirect (${statusCode}) to: ${redirectUrl}`);
+        this.downloadWithRedirects(redirectUrl, redirectCount + 1, resolve, reject, maxRedirects);
+        return;
+      }
+
+      if (statusCode !== 200) {
+        this.logger.error(`Failed to download CSV: HTTP ${statusCode}, headers: ${JSON.stringify(response.headers)}`);
+        reject(new Error(`Failed to download CSV: HTTP ${statusCode}`));
+        return;
+      }
+
+      let data = '';
+      response.on('data', (chunk) => {
+        data += chunk;
       });
+
+      response.on('end', () => {
+        this.logger.log(`Downloaded CSV data (first 1000 characters): ${data.substring(0, 1000)}${data.length > 1000 ? '...' : ''}`);
+        resolve(data);
+      });
+    }).on('error', (error) => {
+      reject(new Error(`Failed to download CSV: ${error.message}`));
     });
   }
 
