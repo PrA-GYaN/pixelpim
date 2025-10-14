@@ -112,18 +112,19 @@ export class CsvImportService {
     return new Promise((resolve, reject) => {
       // Check if it's a Google Spreadsheet URL and convert to CSV export URL
       let downloadUrl = url;
-      const googleSheetsRegex = /^https:\/\/docs\.google\.com\/spreadsheets\/d\/([a-zA-Z0-9-_]+)(?:\/.*)?(?:\?.*)?$/;
+      const googleSheetsRegex = /^https:\/\/docs\.google\.com\/spreadsheets\/d\/([a-zA-Z0-9-_]+)(?:\?.*)?$/;
       const googleSheetsPubRegex = /^https:\/\/docs\.google\.com\/spreadsheets\/d\/e\/([a-zA-Z0-9-_]+)\/pub\?.*$/;
       const match = url.match(googleSheetsRegex);
       const pubMatch = url.match(googleSheetsPubRegex);
       
-      if (match) {
+      if (pubMatch) {
+        const spreadsheetId = pubMatch[1];
+        downloadUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv`;
+        this.logger.debug(`Converted Google published sheet URL to CSV export URL: ${downloadUrl}`);
+      } else if (match) {
         const spreadsheetId = match[1];
         downloadUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv`;
         this.logger.debug(`Converted Google Spreadsheet URL to CSV export URL: ${downloadUrl}`);
-      } else if (pubMatch) {
-        downloadUrl = url.replace(/output=[a-z]+/, 'output=csv');
-        this.logger.debug(`Converted Google published sheet URL to CSV: ${downloadUrl}`);
       }
 
       const protocol = downloadUrl.startsWith('https') ? https : http;
