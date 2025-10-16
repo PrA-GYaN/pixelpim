@@ -242,6 +242,263 @@ export class ProductService {
     }
   }
 
+  async upsertProductFromCsv(createProductDto: CreateProductDto, userId: number): Promise<ProductResponseDto> {
+    try {
+      this.logger.log(`Upserting product: ${createProductDto.name} for user: ${userId}`);
+
+      // Validate category if provided
+      if (createProductDto.categoryId) {
+        await this.validateCategory(createProductDto.categoryId, userId);
+      }
+
+      // Validate attribute group if provided
+      if (createProductDto.attributeGroupId) {
+        await this.validateAttributeGroup(createProductDto.attributeGroupId, userId);
+      }
+
+      // Validate family if provided
+      if (createProductDto.familyId) {
+        await this.validateFamily(createProductDto.familyId, userId);
+      }
+
+      // Filter out attributes that are already in the family
+      let filteredAttributes = createProductDto.attributes;
+      let removedAttributeNames: string[] = [];
+      if (createProductDto.familyId && createProductDto.attributes && createProductDto.attributes.length > 0) {
+        const familyAttributeIds = await this.getFamilyAttributeIds(createProductDto.familyId);
+        const { filteredAttributes: newFilteredAttributes, removedAttributes } = this.filterDuplicateAttributes(createProductDto.attributes, familyAttributeIds);
+
+        if (removedAttributes.length > 0) {
+          removedAttributeNames = await this.getAttributeNames(removedAttributes);
+          this.logger.warn(`Removed duplicate attributes from product upsert: ${removedAttributeNames.join(', ')} (already present in family)`);
+        }
+
+        filteredAttributes = newFilteredAttributes;
+      }
+
+      // Use Prisma upsert for the product
+      const product = await this.prisma.product.upsert({
+        where: {
+          sku_userId: {
+            sku: createProductDto.sku,
+            userId,
+          },
+        },
+        update: {
+          name: createProductDto.name,
+          productLink: createProductDto.productLink,
+          imageUrl: createProductDto.imageUrl,
+          subImages: createProductDto.subImages || [],
+          categoryId: createProductDto.categoryId,
+          attributeGroupId: createProductDto.attributeGroupId,
+          familyId: createProductDto.familyId,
+        },
+        create: {
+          name: createProductDto.name,
+          sku: createProductDto.sku,
+          productLink: createProductDto.productLink,
+          imageUrl: createProductDto.imageUrl,
+          subImages: createProductDto.subImages || [],
+          categoryId: createProductDto.categoryId,
+          attributeGroupId: createProductDto.attributeGroupId,
+          familyId: createProductDto.familyId,
+          userId,
+        },
+        include: {
+          category: {
+            select: {
+              id: true,
+              name: true,
+              description: true,
+            },
+          },
+          attributeGroup: {
+            select: {
+              id: true,
+              name: true,
+              description: true,
+            },
+          },
+          family: {
+            select: {
+              id: true,
+              name: true,
+              familyAttributes: {
+                include: {
+                  attribute: true,
+                },
+              },
+            },
+          },
+          attributes: {
+            select: {
+              attributeId: true,
+            },
+          },
+          assets: {
+            select: {
+              assetId: true,
+            },
+          },
+        },
+      });
+
+      // Handle attributes - for upsert, we need to manage ProductAttribute entries
+      if (filteredAttributes && filteredAttributes.length > 0) {
+        // First, get existing ProductAttribute entries for this product
+        const existingProductAttributes = await this.prisma.productAttribute.findMany({
+          where: { productId: product.id },
+          select: { attributeId: true },
+        });
+        const existingAttributeIds = existingProductAttributes.map(pa => pa.attributeId);
+
+        // Determine which attributes to add and which to remove
+        const attributesToAdd = filteredAttributes.filter(attrId => !existingAttributeIds.includes(attrId));
+        const attributesToRemove = existingAttributeIds.filter(attrId => !filteredAttributes.includes(attrId));
+
+        // Remove attributes that are no longer in the list
+        if (attributesToRemove.length > 0) {
+          await this.prisma.productAttribute.deleteMany({
+            where: {
+              productId: product.id,
+              attributeId: { in: attributesToRemove },
+            },
+          });
+        }
+
+        // Add new attributes
+        if (attributesToAdd.length > 0) {
+          await this.prisma.productAttribute.createMany({
+            data: attributesToAdd.map(attributeId => ({ productId: product.id, attributeId })),
+            skipDuplicates: true,
+          });
+        }
+      } else {
+        // If no attributes provided, remove all existing ProductAttribute entries
+        await this.prisma.productAttribute.deleteMany({ where: { productId: product.id } });
+      }
+
+      // Handle attributes with values if provided
+      if (createProductDto.attributesWithValues && createProductDto.attributesWithValues.length > 0) {
+        // Validate that all attributes belong to the user
+        const attributeIds = createProductDto.attributesWithValues.map(av => av.attributeId);
+        const existingAttributes = await this.prisma.attribute.findMany({
+          where: {
+            id: { in: attributeIds },
+            userId,
+          },
+        });
+
+        if (existingAttributes.length !== attributeIds.length) {
+          throw new BadRequestException('One or more attributes do not exist or do not belong to you');
+        }
+
+        // Filter out attributes that are already in the family
+        let filteredAttributesWithValues = createProductDto.attributesWithValues;
+        if (createProductDto.familyId) {
+          const familyAttributeIds = await this.getFamilyAttributeIds(createProductDto.familyId);
+          filteredAttributesWithValues = createProductDto.attributesWithValues.filter(
+            av => !familyAttributeIds.includes(av.attributeId)
+          );
+        }
+
+        // Upsert ProductAttribute entries with values
+        for (const { attributeId, value } of filteredAttributesWithValues) {
+          await this.prisma.productAttribute.upsert({
+            where: {
+              productId_attributeId: {
+                productId: product.id,
+                attributeId,
+              },
+            },
+            update: {
+              value: value || null,
+            },
+            create: {
+              productId: product.id,
+              attributeId,
+              value: value || null,
+            },
+          });
+        }
+      }
+
+      // Handle family attributes with values if provided
+      if (createProductDto.familyAttributesWithValues && createProductDto.familyAttributesWithValues.length > 0) {
+        if (!createProductDto.familyId) {
+          throw new BadRequestException('Cannot set family attribute values without a family assigned');
+        }
+
+        // Get family attributes to validate and get familyAttributeId mapping
+        const familyAttributes = await this.prisma.familyAttribute.findMany({
+          where: { familyId: createProductDto.familyId },
+          include: { attribute: true },
+        });
+
+        const familyAttributeMap = new Map(
+          familyAttributes.map(fa => [fa.attribute.id, fa.id])
+        );
+
+        // Validate that all provided attributes belong to the family
+        for (const { attributeId } of createProductDto.familyAttributesWithValues) {
+          if (!familyAttributeMap.has(attributeId)) {
+            throw new BadRequestException(`Attribute ${attributeId} is not part of the selected family`);
+          }
+        }
+
+        // Upsert ProductAttribute entries for family attributes with values
+        for (const { attributeId, value } of createProductDto.familyAttributesWithValues) {
+          const familyAttributeId = familyAttributeMap.get(attributeId);
+          
+          await this.prisma.productAttribute.upsert({
+            where: {
+              productId_attributeId: {
+                productId: product.id,
+                attributeId,
+              },
+            },
+            update: {
+              value: value || null,
+              familyAttributeId,
+            },
+            create: {
+              productId: product.id,
+              attributeId,
+              familyAttributeId,
+              value: value || null,
+            },
+          });
+        }
+      }
+
+      // Calculate status
+      const status = await this.calculateProductStatus(product.id);
+      await this.prisma.product.update({ where: { id: product.id }, data: { status } });
+      this.logger.log(`Product ${product.id} upserted with status: ${status}`);
+
+      // Fetch updated product with status
+      const result = await this.findOne(product.id, userId);
+      this.logger.log(`Successfully upserted product with ID: ${result.id}`);
+      
+      // Log notification - check if it was created or updated
+      const wasCreated = !product.createdAt; // If createdAt is not set, it was created
+      if (wasCreated) {
+        await this.notificationService.logProductCreation(userId, result.name, result.id);
+      } else {
+        await this.notificationService.logProductUpdate(userId, result.name, result.id);
+      }
+      
+      return {
+        ...result,
+        removedAttributesMessage: removedAttributeNames.length > 0
+          ? `Removed duplicate attributes: ${removedAttributeNames.join(', ')} (already present in family)`
+          : undefined,
+      };
+    } catch (error) {
+      this.handleDatabaseError(error, 'upsert');
+    }
+  }
+
   async findAll(
     userId: number, 
     search?: string,

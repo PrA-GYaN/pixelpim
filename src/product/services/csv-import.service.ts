@@ -317,7 +317,7 @@ export class CsvImportService {
     // Prepare product data
     const productData = await this.buildProductData(row, userId);
 
-    await this.productService.create(productData, userId);
+    await this.productService.upsertProductFromCsv(productData, userId);
   }
 
   private async buildProductData(row: NormalizedCsvRow, userId: number): Promise<any> {
@@ -325,8 +325,8 @@ export class CsvImportService {
     const categoryId = row.category ? await this.getOrCreateCategory(row.category.trim(), userId) : undefined;
     const familyId = row.family ? await this.getOrCreateFamily(row.family.trim(), userId) : undefined;
 
-    // Parse attributes with caching
-    const attributes = await this.parseAndCreateAttributes(row, userId);
+    // Parse attributes with caching - now returns attribute-value pairs
+    const attributeValuePairs = await this.parseAndCreateAttributes(row, userId);
 
     return {
       name: row.name!.trim(),
@@ -334,10 +334,9 @@ export class CsvImportService {
       productLink: row.productLink?.trim(),
       imageUrl: row.imageUrl?.trim(),
       subImages: this.parseSubImages(row.subImages || ''),
-      status: 'incomplete',
       categoryId,
       familyId,
-      attributes,
+      attributesWithValues: attributeValuePairs,
     };
   }
 
@@ -545,8 +544,8 @@ export class CsvImportService {
            false;
   }
 
-  private async parseAndCreateAttributes(row: any, userId: number): Promise<number[]> {
-    const attributeIds: number[] = [];
+  private async parseAndCreateAttributes(row: any, userId: number): Promise<{ attributeId: number; value: string }[]> {
+    const attributeValuePairs: { attributeId: number; value: string }[] = [];
     
     // Define columns to skip (these are product fields, not attributes)
     const skipColumns = new Set([
@@ -576,7 +575,10 @@ export class CsvImportService {
         
         // Find or create the attribute
         const attributeId = await this.findOrCreateAttribute(attributeName, columnValue, userId);
-        attributeIds.push(attributeId);
+        attributeValuePairs.push({
+          attributeId,
+          value: String(columnValue).trim()
+        });
 
         this.logger.debug(`Processed attribute: ${attributeName} (ID: ${attributeId}) with value: ${columnValue}`);
       } catch (error) {
@@ -585,7 +587,7 @@ export class CsvImportService {
       }
     }
 
-    return attributeIds;
+    return attributeValuePairs;
   }
 
   private parseAttributes(attributesStr: string): number[] {
