@@ -1,4 +1,4 @@
-// utils/productUtils.ts
+// utils/productStatusUtils.ts
 
 import { PrismaClient } from '../../generated/prisma';
 
@@ -15,15 +15,20 @@ export async function updateProductStatus(productId: number) {
             where: { isRequired: true },
             include: {
               attribute: {
-                  select: { id: true, defaultValue: true }
+                select: { id: true, name: true, defaultValue: true }
               }
             }
           }
         }
       },
-    attributes: {
-      include: { attribute: { select: { id: true, defaultValue: true } } }
-    }
+      attributes: {
+        select: {
+          value: true,
+          attribute: {
+            select: { id: true, name: true, defaultValue: true }
+          }
+        }
+      }
     }
   });
 
@@ -32,59 +37,46 @@ export async function updateProductStatus(productId: number) {
     return;
   }
 
-  // 1. If Family exists, all required attributes must have either custom values or default values, Status Complete
-  // 2. If have attribute ids in attributes, then they must have either custom values or default values, Status Complete
-  // 3. If it doesn't have family or attribute ids in attributes, Status Complete
+  const hasFamily = !!product.family;
+  const productAttributes = product.attributes || [];
 
-    const hasFamily = !!product.family;
-    const productAttributes = (product.attributes as any) || [];
-    const hasAttributeIds = productAttributes.length > 0;
-
-  let status = 'complete';
+  let status = 'incomplete';
   let reason = '';
 
+  // Product is complete ONLY if it has a family AND all required attributes have values
   if (hasFamily) {
-    // Check all required family attributes - they need to have either custom values or default values
-    const requiredAttributes = (product.family as any)?.familyAttributes || [];
+    const requiredAttributes = product.family?.familyAttributes || [];
 
-    // For family attributes, we need to check if there are ProductAttribute entries with values
-    const requiredAttributeIds = requiredAttributes.map((fa: any) => fa.attribute.id);
-    const familyAttributeValues = productAttributes.filter((pa: any) =>
-      requiredAttributeIds.includes(pa.attribute.id)
-    );
+    if (requiredAttributes.length > 0) {
+      // Check if all required family attributes have product-attribute values (not default values)
+      const requiredAttributeIds = requiredAttributes.map((fa: any) => fa.attribute.id);
+      const familyAttributeValues = productAttributes.filter((pa: any) =>
+        requiredAttributeIds.includes(pa.attribute.id)
+      );
 
-    // Check if all required family attributes have values (either custom or default)
-    const allRequiredHaveValues = requiredAttributes.every((fa: any) => {
-      const productAttr = familyAttributeValues.find((pa: any) => pa.attribute.id === fa.attribute.id);
-      const hasCustomValue = productAttr?.value !== null && productAttr?.value !== '';
-      const hasDefaultValue = fa.attribute?.defaultValue !== null && fa.attribute?.defaultValue !== '';
-      return hasCustomValue || hasDefaultValue;
-    });
+      const allRequiredHaveProductValues = requiredAttributes.every((fa: any) => {
+        const productAttr = familyAttributeValues.find((pa: any) => pa.attribute.id === fa.attribute.id);
+        // Only consider product-attribute values, not default values
+        const hasProductValue = productAttr && productAttr.value !== null && productAttr.value !== '';
+        return hasProductValue;
+      });
 
-    if (!allRequiredHaveValues) {
-      status = 'incomplete';
-      reason = 'Family exists but not all required attributes have values.';
+      if (allRequiredHaveProductValues) {
+        status = 'complete';
+        reason = 'Family exists and all required attributes have product-attribute values.';
+      } else {
+        status = 'incomplete';
+        reason = 'Family exists but not all required attributes have product-attribute values.';
+      }
     } else {
-      reason = 'Family exists and all required attributes have values.';
-    }
-  } else if (hasAttributeIds) {
-    // Check all product attributes - they need to have either custom values or default values
-    const allAttributesHaveValues = productAttributes.every((attr: any) => {
-      const hasCustomValue = attr.value !== null && attr.value !== '';
-      const hasDefaultValue = attr.attribute?.defaultValue !== null && attr.attribute?.defaultValue !== '';
-      return hasCustomValue || hasDefaultValue;
-    });
-
-    if (!allAttributesHaveValues) {
+      // Family exists but has no required attributes - still incomplete
       status = 'incomplete';
-      reason = 'Product has attributes but not all have values.';
-    } else {
-      reason = 'Product has attributes and all have values.';
+      reason = 'Family exists but has no required attributes.';
     }
   } else {
-    // No family and no attribute ids, status is complete
-    status = 'complete';
-    reason = 'Product has neither family nor attribute IDs.';
+    // No family - incomplete
+    status = 'incomplete';
+    reason = 'Product does not have a family assigned.';
   }
 
   await prisma.product.update({

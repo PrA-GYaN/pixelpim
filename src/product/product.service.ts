@@ -1203,65 +1203,47 @@ export class ProductService {
     const productAttributes = product.attributes || [];
     const hasCustomAttributes = productAttributes.length > 0;
 
-    let status = 'complete';
+    let status = 'incomplete';
     let reason = '';
 
-    // Rule 1: If Family exists, all its required attributes must have product-attribute values
+    // Rule 1: Product is complete ONLY if it has a family AND all required attributes have values
     if (hasFamily) {
       const requiredAttributes = product.family?.familyAttributes || [];
-      
+
       if (requiredAttributes.length > 0) {
-        // For family attributes, we need to check if there are ProductAttribute entries with values
+        // Check if all required family attributes have product-attribute values (not default values)
         const requiredAttributeIds = requiredAttributes.map((fa: any) => fa.attribute.id);
-        const familyAttributeValues = productAttributes.filter((pa: any) => 
+        const familyAttributeValues = productAttributes.filter((pa: any) =>
           requiredAttributeIds.includes(pa.attribute.id)
         );
-        
-        // Check if all required family attributes have product-attribute values (not default values)
+
         const allRequiredHaveProductValues = requiredAttributes.every((fa: any) => {
           const productAttr = familyAttributeValues.find((pa: any) => pa.attribute.id === fa.attribute.id);
           // Only consider product-attribute values, not default values
           const hasProductValue = productAttr && productAttr.value !== null && productAttr.value !== '';
           return hasProductValue;
         });
-        
-        if (!allRequiredHaveProductValues) {
+
+        if (allRequiredHaveProductValues) {
+          status = 'complete';
+          reason = 'Family exists and all required attributes have product-attribute values.';
+        } else {
           status = 'incomplete';
           reason = 'Family exists but not all required attributes have product-attribute values.';
-        } else {
-          reason = 'Family exists and all required attributes have product-attribute values.';
         }
       } else {
-        // Family has no required attributes
+        // Family exists but has no required attributes - still incomplete
+        status = 'incomplete';
         reason = 'Family exists but has no required attributes.';
       }
+    } else {
+      // No family - incomplete
+      status = 'incomplete';
+      reason = 'Product does not have a family assigned.';
     }
 
-    // Rule 2: If Custom Attributes exist, they must have product-attribute values
-    if (status === 'complete' && hasCustomAttributes) {
-      // Check all custom product attributes - they need to have product-attribute values
-      const allCustomAttributesHaveValues = productAttributes.every((attr: any) => {
-        // Only consider product-attribute values, not default values
-        const hasProductValue = attr.value !== null && attr.value !== '';
-        return hasProductValue;
-      });
-      
-      if (!allCustomAttributesHaveValues) {
-        status = 'incomplete';
-        reason = 'Custom attributes exist but not all have product-attribute values.';
-      } else {
-        const previousReason = reason;
-        reason = previousReason ? 
-          `${previousReason} Custom attributes exist and all have product-attribute values.` :
-          'Custom attributes exist and all have product-attribute values.';
-      }
-    }
-
-    // Rule 3: If no family and no custom attributes, status is complete
-    if (!hasFamily && !hasCustomAttributes) {
-      status = 'complete';
-      reason = 'Product has neither family nor custom attributes.';
-    }
+    // Note: Custom attributes are no longer considered for status calculation
+    // Only family and required attributes matter
 
     this.logger.log(`[calculateProductStatus] Calculated status '${status}' for productId ${productId}. Reason: ${reason}`);
     return status;
