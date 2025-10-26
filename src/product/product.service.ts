@@ -861,6 +861,11 @@ export class ProductService {
         updateData.familyId = updateProductDto.familyId;
       }
 
+      // Handle parentProductId to support variant linking/unlinking
+      if (updateProductDto.parentProductId !== undefined) {
+        updateData.parentProductId = updateProductDto.parentProductId;
+      }
+
       // Update product main fields
       await this.prisma.product.update({
         where: { id },
