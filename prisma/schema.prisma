@@ -27,6 +27,7 @@ model User {
   notifications      Notification[]      @relation("UserNotifications")
   scheduledImports   ScheduledImport[]   @relation("UserScheduledImports")
   importExecutionLogs ImportExecutionLog[] @relation("UserImportExecutionLogs")
+  integrationLogs     IntegrationLog[]    @relation("UserIntegrationLogs")
 }
 
 model Otp {
@@ -146,6 +147,7 @@ model Product {
   categoryId       Int?
   attributeGroupId Int?
   familyId         Int?
+  parentProductId  Int?
   userId           Int
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
@@ -156,9 +158,9 @@ model Product {
   family           Family?         @relation("ProductFamilies", fields: [familyId], references: [id])
   user             User            @relation("UserProducts", fields: [userId], references: [id], onDelete: Cascade)
 
-  // Variant relationships (symmetric many-to-many)
-  variantLinksA    ProductVariant[] @relation("ProductVariantA")
-  variantLinksB    ProductVariant[] @relation("ProductVariantB")
+  // One-to-many variant relationship (self-relation)
+  parentProduct    Product?        @relation("ProductVariants", fields: [parentProductId], references: [id], onDelete: Cascade)
+  variants         Product[]       @relation("ProductVariants")
 
   // Assets attached to Product via join table
   assets          ProductAsset[]
@@ -167,17 +169,7 @@ model Product {
   @@unique([name, userId])
 }
 
-model ProductVariant {
-  id         Int     @id @default(autoincrement())
-  productAId Int
-  productBId Int
 
-  productA   Product @relation("ProductVariantA", fields: [productAId], references: [id], onDelete: Cascade)
-  productB   Product @relation("ProductVariantB", fields: [productBId], references: [id], onDelete: Cascade)
-
-  @@unique([productAId, productBId])
-  @@map("product_variants")
-}
 
 model ProductAsset {
   id        Int      @id @default(autoincrement())
@@ -302,4 +294,19 @@ model ImportExecutionLog {
   @@index([scheduledImportId, createdAt])
   @@index([userId, status])
   @@index([startTime])
+}
+
+model IntegrationLog {
+  id                   Int      @id @default(autoincrement())
+  productId            Int
+  status               String   // 'success', 'error'
+  message              String?
+  woocommerceProductId Int?
+  timestamp            DateTime @default(now())
+  userId               Int
+
+  user                 User     @relation("UserIntegrationLogs", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, productId])
+  @@index([timestamp])
 }

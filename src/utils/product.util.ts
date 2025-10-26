@@ -200,16 +200,7 @@ export class ProductUtilService {
       }
 
       if (opts.includeVariants) {
-        includeObject.variantLinksA = {
-          include: {
-            productB: true,
-          },
-        };
-        includeObject.variantLinksB = {
-          include: {
-            productA: true,
-          },
-        };
+        includeObject.variants = true;
       }
 
       // Fetch the product with all specified relations
@@ -348,12 +339,9 @@ export class ProductUtilService {
       if (opts.includeVariants) {
         const variants: any[] = [];
 
-        // Collect variants from both directions
-        if (product.variantLinksA) {
-          variants.push(...product.variantLinksA.map((link: any) => link.productB));
-        }
-        if (product.variantLinksB) {
-          variants.push(...product.variantLinksB.map((link: any) => link.productA));
+        // In the new one-to-many relationship, only parent products have variants
+        if (product.variants && Array.isArray(product.variants)) {
+          variants.push(...product.variants);
         }
 
         populatedProduct.variants = variants.map(variant => ({
