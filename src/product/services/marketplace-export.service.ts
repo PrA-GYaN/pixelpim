@@ -122,26 +122,11 @@ export class MarketplaceExportService {
           },
         },
         // Add variant information if needed
-        variantLinksA: {
-          include: {
-            productB: {
-              select: {
-                id: true,
-                name: true,
-                sku: true,
-              },
-            },
-          },
-        },
-        variantLinksB: {
-          include: {
-            productA: {
-              select: {
-                id: true,
-                name: true,
-                sku: true,
-              },
-            },
+        variants: {
+          select: {
+            id: true,
+            name: true,
+            sku: true,
           },
         },
       },
