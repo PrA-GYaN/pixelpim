@@ -82,8 +82,11 @@ export class AssetGroupService {
   return AssetGroupService.convertBigIntToString(assetGroup);
   }
 
-  async findAll(userId: number, page: number = 1, limit: number = 10, filters: any = {}) {
-    const whereCondition: any = { userId };
+  async findAll(userId: number, parentGroupId: number | null, page: number = 1, limit: number = 10, filters: any = {}) {
+    const whereCondition: any = { 
+      userId,
+      parentGroupId: parentGroupId === null ? null : parentGroupId,
+    };
 
     // Search filter (group name)
     if (filters.search) {
@@ -123,6 +126,7 @@ export class AssetGroupService {
         select: {
           id: true,
           groupName: true,
+          parentGroupId: true,
           createdDate: true,
           createdAt: true,
           updatedAt: true,
@@ -131,6 +135,7 @@ export class AssetGroupService {
           _count: {
             select: {
               assets: true,
+              childGroups: true,
             },
           },
         },
@@ -195,13 +200,16 @@ export class AssetGroupService {
       select: {
         id: true,
         groupName: true,
+        parentGroupId: true,
         createdDate: true,
         createdAt: true,
         updatedAt: true,
         userId: true,
+        totalSize: true,
         _count: {
           select: {
             assets: true,
+            childGroups: true,
           },
         },
       },

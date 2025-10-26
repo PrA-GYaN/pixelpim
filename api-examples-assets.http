@@ -12,31 +12,50 @@ Authorization: Bearer {{authToken}}
 Content-Type: application/json
 
 {
-  "groupName": "Product Images"
+  "groupName": "Product Images",
+  "parentGroupId": null
 }
 
 ### 2. Get All Asset Groups
 GET {{baseUrl}}/asset-groups
 Authorization: Bearer {{authToken}}
 
-### 3. Get Asset Group by ID
+### 3. Get All Asset Groups (with filters)
+GET {{baseUrl}}/asset-groups?page=1&limit=10&search=product&sortBy=groupName&sortOrder=asc
+Authorization: Bearer {{authToken}}
+
+### 4. Get Asset Group by ID
 GET {{baseUrl}}/asset-groups/1
 Authorization: Bearer {{authToken}}
 
-### 4. Update Asset Group
+### 5. Update Asset Group
 PATCH {{baseUrl}}/asset-groups/1
 Authorization: Bearer {{authToken}}
 Content-Type: application/json
 
 {
-  "groupName": "Updated Product Images"
+  "groupName": "Updated Product Images",
+  "parentGroupId": null
 }
 
-### 5. Get Assets in Group
+### 6. Get Assets in Group
 GET {{baseUrl}}/asset-groups/1/assets
 Authorization: Bearer {{authToken}}
 
-### 6. Upload Asset (without group)
+### 7. Get Assets in Group (with filters)
+GET {{baseUrl}}/asset-groups/1/assets?page=1&limit=10&search=image&mimeType=image&sortBy=name
+Authorization: Bearer {{authToken}}
+
+### 8. Attach Assets to Group
+POST {{baseUrl}}/asset-groups/1/attach-assets
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "assetIds": [1, 2, 3]
+}
+
+### 9. Upload Asset (without group)
 POST {{baseUrl}}/assets/upload
 Authorization: Bearer {{authToken}}
 Content-Type: multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW
@@ -52,7 +71,7 @@ Content-Type: image/jpeg
 < ./path/to/your/image.jpg
 ------WebKitFormBoundary7MA4YWxkTrZu0gW--
 
-### 7. Upload Asset (with group)
+### 10. Upload Asset (with group)
 POST {{baseUrl}}/assets/upload
 Authorization: Bearer {{authToken}}
 Content-Type: multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW
@@ -72,19 +91,23 @@ Content-Type: image/jpeg
 < ./path/to/your/image.jpg
 ------WebKitFormBoundary7MA4YWxkTrZu0gW--
 
-### 8. Get All Assets
+### 11. Get All Assets
 GET {{baseUrl}}/assets
 Authorization: Bearer {{authToken}}
 
-### 9. Get Assets by Group
+### 12. Get All Assets (with filters)
+GET {{baseUrl}}/assets?page=1&limit=10&search=image&mimeType=image&minSize=1000&maxSize=1000000&sortBy=name&sortOrder=asc
+Authorization: Bearer {{authToken}}
+
+### 13. Get Assets by Group
 GET {{baseUrl}}/assets?assetGroupId=1
 Authorization: Bearer {{authToken}}
 
-### 10. Get Asset by ID
+### 14. Get Asset by ID
 GET {{baseUrl}}/assets/1
 Authorization: Bearer {{authToken}}
 
-### 11. Update Asset (change name)
+### 15. Update Asset (change name)
 PATCH {{baseUrl}}/assets/1
 Authorization: Bearer {{authToken}}
 Content-Type: application/json
@@ -93,7 +116,7 @@ Content-Type: application/json
   "name": "Updated Asset Name"
 }
 
-### 12. Update Asset (move to different group)
+### 16. Update Asset (move to different group)
 PATCH {{baseUrl}}/assets/1
 Authorization: Bearer {{authToken}}
 Content-Type: application/json
@@ -102,7 +125,7 @@ Content-Type: application/json
   "assetGroupId": 2
 }
 
-### 13. Remove Asset from Group
+### 17. Remove Asset from Group
 PATCH {{baseUrl}}/assets/1
 Authorization: Bearer {{authToken}}
 Content-Type: application/json
@@ -111,21 +134,38 @@ Content-Type: application/json
   "assetGroupId": null
 }
 
-### 14. Delete Asset
+### 18. Export Assets as JSON
+GET {{baseUrl}}/assets/export/json
+Authorization: Bearer {{authToken}}
+
+### 19. Export Assets as JSON (by group)
+GET {{baseUrl}}/assets/export/json?assetGroupId=1
+Authorization: Bearer {{authToken}}
+
+### 20. Download Assets as ZIP
+POST {{baseUrl}}/assets/zip
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "files": ["https://res.cloudinary.com/your-cloud/image/upload/v1234567890/pixelpim/assets/sample1.jpg", "https://res.cloudinary.com/your-cloud/image/upload/v1234567890/pixelpim/assets/sample2.jpg"]
+}
+
+### 21. Delete Asset
 DELETE {{baseUrl}}/assets/1
 Authorization: Bearer {{authToken}}
 
-### 15. Delete Asset Group
+### 22. Delete Asset Group
 DELETE {{baseUrl}}/asset-groups/1
 Authorization: Bearer {{authToken}}
 
 ###
 # Example Response for Upload Asset:
 # {
-#   "id": 1,
+#   "id": "1",
 #   "name": "Sample Image",
 #   "fileName": "sample.jpg",
-#   "filePath": "pixelpim/assets/sample_abc123",
+#   "filePath": "https://res.cloudinary.com/your-cloud/image/upload/v1723634600/pixelpim/assets/sample_abc123.jpg",
 #   "mimeType": "image/jpeg",
 #   "uploadDate": "2025-08-14T10:30:00.000Z",
 #   "size": 245760,
@@ -134,19 +174,65 @@ Authorization: Bearer {{authToken}}
 #   "createdAt": "2025-08-14T10:30:00.000Z",
 #   "updatedAt": "2025-08-14T10:30:00.000Z",
 #   "assetGroup": {
-#     "id": 1,
+#     "id": "1",
 #     "groupName": "Product Images",
 #     "createdDate": "2025-08-14T10:00:00.000Z",
-#     "totalSize": 245760,
+#     "totalSize": "245760",
 #     "userId": 1
 #   },
 #   "url": "https://res.cloudinary.com/your-cloud/image/upload/v1723634600/pixelpim/assets/sample_abc123.jpg",
-#   "thumbnailUrl": "https://res.cloudinary.com/your-cloud/image/upload/c_fill,h_300,w_300/v1723634600/pixelpim/assets/sample_abc123.jpg",
-#   "formattedSize": "240 KB",
-#   "cloudinaryData": {
-#     "public_id": "pixelpim/assets/sample_abc123",
-#     "format": "jpg",
-#     "resource_type": "image",
-#     "created_at": "2025-08-14T10:30:00Z"
+#   "formattedSize": "240 KB"
+# }
+
+###
+# Example Response for Get Assets (Paginated):
+# {
+#   "data": [
+#     {
+#       "id": "1",
+#       "name": "Sample Image",
+#       "fileName": "sample.jpg",
+#       "filePath": "https://res.cloudinary.com/your-cloud/image/upload/v1723634600/pixelpim/assets/sample_abc123.jpg",
+#       "mimeType": "image/jpeg",
+#       "uploadDate": "2025-08-14T10:30:00.000Z",
+#       "size": 245760,
+#       "userId": 1,
+#       "assetGroupId": 1,
+#       "createdAt": "2025-08-14T10:30:00.000Z",
+#       "updatedAt": "2025-08-14T10:30:00.000Z",
+#       "assetGroup": {
+#         "id": "1",
+#         "groupName": "Product Images",
+#         "createdDate": "2025-08-14T10:00:00.000Z",
+#         "totalSize": "245760",
+#         "userId": 1
+#       },
+#       "url": "https://res.cloudinary.com/your-cloud/image/upload/v1723634600/pixelpim/assets/sample_abc123.jpg",
+#       "formattedSize": "240 KB"
+#     }
+#   ],
+#   "meta": {
+#     "total": 1,
+#     "page": 1,
+#     "limit": 10,
+#     "totalPages": 1
 #   }
 # }
+
+###
+# Example Response for Export Assets as JSON:
+# [
+#   {
+#     "id": "1",
+#     "name": "Sample Image",
+#     "url": "https://res.cloudinary.com/your-cloud/image/upload/v1723634600/pixelpim/assets/sample_abc123.jpg",
+#     "fileName": "sample.jpg",
+#     "mimeType": "image/jpeg",
+#     "size": "245760",
+#     "uploadDate": "2025-08-14T10:30:00.000Z",
+#     "folder": {
+#       "id": 1,
+#       "name": "Product Images"
+#     }
+#   }
+# ]

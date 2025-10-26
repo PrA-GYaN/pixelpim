@@ -63,7 +63,49 @@ export class AssetGroupController {
       hasAssets: hasAssets === 'true' ? true : hasAssets === 'false' ? false : undefined,
     };
     
-    return this.assetGroupService.findAll(userId, pageNum, limitNum, filters);
+    // Only return root level groups (parentGroupId = null)
+    return this.assetGroupService.findAll(userId, null, pageNum, limitNum, filters);
+  }
+
+  @Get(':parentId/children')
+  async findChildren(
+    @Param('parentId', ParseIntPipe) parentId: number,
+    @Req() req: any,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+    @Query('minAssets') minAssets?: string,
+    @Query('maxAssets') maxAssets?: string,
+    @Query('minSize') minSize?: string,
+    @Query('maxSize') maxSize?: string,
+    @Query('createdAfter') createdAfter?: string,
+    @Query('createdBefore') createdBefore?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('sortOrder') sortOrder?: 'asc' | 'desc',
+    @Query('dateFilter') dateFilter?: 'latest' | 'oldest',
+    @Query('hasAssets') hasAssets?: string,
+  ) {
+    const userId = req.user.id;
+    const pageNum = page ? parseInt(page) : 1;
+    const limitNum = limit ? parseInt(limit) : 10;
+    const sortOrderValidated = sortOrder === 'asc' ? 'asc' : 'desc';
+    
+    const filters = {
+      search,
+      minAssets: minAssets ? parseInt(minAssets) : undefined,
+      maxAssets: maxAssets ? parseInt(maxAssets) : undefined,
+      minSize: minSize ? parseInt(minSize) : undefined,
+      maxSize: maxSize ? parseInt(maxSize) : undefined,
+      createdAfter,
+      createdBefore,
+      sortBy,
+      sortOrder: sortOrderValidated,
+      dateFilter,
+      hasAssets: hasAssets === 'true' ? true : hasAssets === 'false' ? false : undefined,
+    };
+    
+    // Return groups with specific parentGroupId
+    return this.assetGroupService.findAll(userId, parentId, pageNum, limitNum, filters);
   }
 
   @Get(':id')
