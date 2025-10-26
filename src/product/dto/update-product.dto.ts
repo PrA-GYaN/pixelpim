@@ -64,4 +64,9 @@ export class UpdateProductDto extends PartialType(CreateProductDto) {
   @IsInt()
   @Transform(({ value }) => value === null || value === undefined ? value : parseInt(value))
   familyId?: number | null;
+
+  @IsOptional()
+  @IsInt()
+  @Transform(({ value }) => value === null || value === undefined ? value : parseInt(value))
+  parentProductId?: number | null;
 }
