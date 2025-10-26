@@ -138,4 +138,14 @@ export class AssetController {
     const userId = req.user.id;
     return this.assetService.remove(id, userId);
   }
+
+  @Get('export/json')
+  async exportAsJson(
+    @Req() req: any,
+    @Query('assetGroupId') assetGroupId?: string,
+  ) {
+    const userId = req.user.id;
+    const groupId = assetGroupId ? parseInt(assetGroupId, 10) : undefined;
+    return this.assetService.exportAsJson(userId, groupId);
+  }
 }

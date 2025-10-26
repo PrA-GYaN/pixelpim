@@ -188,13 +188,19 @@ model AssetGroup {
   createdDate DateTime @default(now())
   totalSize   BigInt   @default(0)
   userId      Int
+  parentGroupId Int?   // Parent folder/group
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   user        User     @relation("UserAssetGroups", fields: [userId], references: [id], onDelete: Cascade)
   assets      Asset[]  @relation("AssetGroupAssets")
+  
+  // Self-referencing relationship for hierarchical folder structure
+  parentGroup AssetGroup? @relation("AssetGroupHierarchy", fields: [parentGroupId], references: [id], onDelete: Cascade)
+  childGroups AssetGroup[] @relation("AssetGroupHierarchy")
 
-  @@unique([groupName, userId])
+  // Allow same name in different parent folders (Windows Explorer behavior)
+  @@unique([groupName, userId, parentGroupId])
 }
 
 model Asset {
@@ -214,7 +220,8 @@ model Asset {
   assetGroup   AssetGroup? @relation("AssetGroupAssets", fields: [assetGroupId], references: [id], onDelete: SetNull)
   productAssets ProductAsset[] @relation("ProductAssetToAsset")
 
-  @@unique([name, userId])
+  // Allow same name in different folders (Windows Explorer behavior)
+  @@unique([name, userId, assetGroupId])
 }
 
 model ProductAttribute {
@@ -299,14 +306,21 @@ model ImportExecutionLog {
 model IntegrationLog {
   id                   Int      @id @default(autoincrement())
   productId            Int
-  status               String   // 'success', 'error'
+  integrationType      String   // 'woocommerce', 'amazon', 'shopify', etc.
+  operation            String   // 'export', 'import', 'update', 'delete', 'webhook'
+  status               String   // 'success', 'error', 'pending'
   message              String?
-  woocommerceProductId Int?
+  errorDetails         Json?    // Detailed error information
+  externalProductId    String?  // External platform product ID (WooCommerce ID, Amazon ASIN, etc.)
+  externalSku          String?  // External SKU if different from internal
+  metadata             Json?    // Additional platform-specific data
   timestamp            DateTime @default(now())
   userId               Int
 
   user                 User     @relation("UserIntegrationLogs", fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, productId])
+  @@index([userId, integrationType])
   @@index([timestamp])
+  @@index([externalProductId, integrationType])
 }

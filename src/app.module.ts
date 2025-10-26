@@ -13,6 +13,7 @@ import { AssetModule } from './asset/asset.module';
 import { AssetGroupModule } from './asset-group/asset-group.module';
 import { NotificationModule } from './notification/notification.module';
 import { SupportModule } from './support/support.module';
+import { IntegrationModule } from './integration/integration.module';
 
 @Module({
   imports: [
@@ -30,7 +31,8 @@ import { SupportModule } from './support/support.module';
     AssetModule,
     AssetGroupModule,
     NotificationModule,
-    SupportModule
+    SupportModule,
+    IntegrationModule
   ],
   controllers: [AppController],
   providers: [AppService],

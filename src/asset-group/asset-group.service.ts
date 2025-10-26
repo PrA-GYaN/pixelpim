@@ -29,26 +29,43 @@ export class AssetGroupService {
   constructor(private prisma: PrismaService) {}
 
   async create(createAssetGroupDto: CreateAssetGroupDto, userId: number) {
-    // Check if asset group with same name already exists for this user
+    // Check if asset group with same name already exists in the same parent folder
     const existingGroup = await this.prisma.assetGroup.findFirst({
       where: {
         groupName: createAssetGroupDto.groupName,
         userId,
+        parentGroupId: createAssetGroupDto.parentGroupId ?? null,
       },
     });
 
     if (existingGroup) {
-      throw new ConflictException('Asset group with this name already exists');
+      throw new ConflictException('Asset group with this name already exists in this folder');
+    }
+
+    // If parentGroupId is provided, verify it exists and belongs to the user
+    if (createAssetGroupDto.parentGroupId) {
+      const parentGroup = await this.prisma.assetGroup.findFirst({
+        where: {
+          id: createAssetGroupDto.parentGroupId,
+          userId,
+        },
+      });
+
+      if (!parentGroup) {
+        throw new NotFoundException('Parent folder not found or does not belong to you');
+      }
     }
 
     const assetGroup = await this.prisma.assetGroup.create({
       data: {
         groupName: createAssetGroupDto.groupName,
+        parentGroupId: createAssetGroupDto.parentGroupId,
         userId,
       },
       select: {
         id: true,
         groupName: true,
+        parentGroupId: true,
         createdDate: true,
         createdAt: true,
         updatedAt: true,
@@ -272,18 +289,42 @@ export class AssetGroupService {
   async update(id: number, updateAssetGroupDto: UpdateAssetGroupDto, userId: number) {
     const assetGroup = await this.findOne(id, userId);
 
-    // Check if new name conflicts with existing group
+    // Check if new name conflicts with existing group in the same parent folder
     if (updateAssetGroupDto.groupName && updateAssetGroupDto.groupName !== assetGroup.groupName) {
+      const targetParentId = updateAssetGroupDto.parentGroupId !== undefined 
+        ? updateAssetGroupDto.parentGroupId 
+        : assetGroup.parentGroupId;
+        
       const existingGroup = await this.prisma.assetGroup.findFirst({
         where: {
           groupName: updateAssetGroupDto.groupName,
           userId,
+          parentGroupId: targetParentId ?? null,
           id: { not: id },
         },
       });
 
       if (existingGroup) {
-        throw new ConflictException('Asset group with this name already exists');
+        throw new ConflictException('Asset group with this name already exists in this folder');
+      }
+    }
+
+    // If changing parent, verify the new parent exists
+    if (updateAssetGroupDto.parentGroupId !== undefined && updateAssetGroupDto.parentGroupId !== null) {
+      const parentGroup = await this.prisma.assetGroup.findFirst({
+        where: {
+          id: updateAssetGroupDto.parentGroupId,
+          userId,
+        },
+      });
+
+      if (!parentGroup) {
+        throw new NotFoundException('Parent folder not found or does not belong to you');
+      }
+      
+      // Prevent circular references - can't be parent of itself
+      if (updateAssetGroupDto.parentGroupId === id) {
+        throw new ConflictException('A folder cannot be its own parent');
       }
     }
 
@@ -293,6 +334,7 @@ export class AssetGroupService {
       select: {
         id: true,
         groupName: true,
+        parentGroupId: true,
         createdDate: true,
         createdAt: true,
         updatedAt: true,

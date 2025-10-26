@@ -23,7 +23,7 @@ import { UpdateProductAttributesDto } from './dto/update-product-attribute.dto';
 import { ProductResponseDto } from './dto/product-response.dto';
 import { AddVariantDto, RemoveVariantDto, GetProductVariantsDto, ProductVariantResponseDto } from './dto/product-variant.dto';
 import { ExportProductDto, ExportProductResponseDto } from './dto/export-product.dto';
-import { MarketplaceExportDto, MarketplaceExportResponseDto, MarketplaceType } from './dto/marketplace-export.dto';
+// import { MarketplaceExportDto, MarketplaceExportResponseDto, MarketplaceType } from './dto/marketplace-export.dto';
 import { 
   ScheduleImportDto, 
   UpdateScheduledImportDto,
@@ -35,12 +35,12 @@ import { ImportCsvDto, ImportCsvResponseDto } from './dto/import-csv.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { User as GetUser } from '../auth/decorators/user.decorator';
 import { PaginatedResponse } from '../common';
-import { SortingDto } from '../common';
+// import { SortingDto } from '../common';
 import type { User } from '../../generated/prisma';
-import { MarketplaceTemplateService } from './services/marketplace-template.service';
-import { MarketplaceExportService } from './services/marketplace-export.service';
+// import { MarketplaceTemplateService } from './services/marketplace-template.service';
+// import { MarketplaceExportService } from './services/marketplace-export.service';
 import { CsvImportService } from './services/csv-import.service';
-import { ImportSchedulerService } from './services/import-scheduler.service';
+// import { ImportSchedulerService } from './services/import-scheduler.service';
 
 @Controller('products')
 @UseGuards(JwtAuthGuard)
@@ -276,37 +276,37 @@ export class ProductController {
     return this.productService.exportProducts(exportDto, user.id);
   }
 
-  // Marketplace Export Endpoints
+  // // Marketplace Export Endpoints
 
-  @Get('marketplace/templates')
-  async getMarketplaceTemplates(
-    @GetUser() user: User,
-  ) {
-    this.logger.log(`User ${user.id} fetching marketplace templates`);
+  // @Get('marketplace/templates')
+  // async getMarketplaceTemplates(
+  //   @GetUser() user: User,
+  // ) {
+  //   this.logger.log(`User ${user.id} fetching marketplace templates`);
     
-    return this.productService.getMarketplaceTemplates();
-  }
+  //   return this.productService.getMarketplaceTemplates();
+  // }
 
-  @Get('marketplace/templates/:marketplaceType')
-  async getMarketplaceTemplate(
-    @Param('marketplaceType') marketplaceType: string,
-    @GetUser() user: User,
-  ) {
-    this.logger.log(`User ${user.id} fetching template for marketplace: ${marketplaceType}`);
+  // @Get('marketplace/templates/:marketplaceType')
+  // async getMarketplaceTemplate(
+  //   @Param('marketplaceType') marketplaceType: string,
+  //   @GetUser() user: User,
+  // ) {
+  //   this.logger.log(`User ${user.id} fetching template for marketplace: ${marketplaceType}`);
     
-    return this.productService.getMarketplaceTemplate(marketplaceType as any);
-  }
+  //   return this.productService.getMarketplaceTemplate(marketplaceType as any);
+  // }
 
-  @Post('marketplace/export')
-  @HttpCode(HttpStatus.OK)
-  async exportToMarketplace(
-    @Body() exportDto: MarketplaceExportDto,
-    @GetUser() user: User,
-  ): Promise<MarketplaceExportResponseDto> {
-    this.logger.log(`User ${user.id} exporting ${exportDto.productIds?.length || 0} products to ${exportDto.marketplaceType}`);
+  // @Post('marketplace/export')
+  // @HttpCode(HttpStatus.OK)
+  // async exportToMarketplace(
+  //   @Body() exportDto: MarketplaceExportDto,
+  //   @GetUser() user: User,
+  // ): Promise<MarketplaceExportResponseDto> {
+  //   this.logger.log(`User ${user.id} exporting ${exportDto.productIds?.length || 0} products to ${exportDto.marketplaceType}`);
     
-    return this.productService.exportToMarketplace(exportDto, user.id);
-  }
+  //   return this.productService.exportToMarketplace(exportDto, user.id);
+  // }
 
   // Product Attribute Value Management Endpoints
 

@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateAssetDto, UpdateAssetDto } from './dto';
@@ -54,6 +55,19 @@ export class AssetService {
       'file:',
       file.originalname,
     );
+
+    // Check if asset with same name already exists in the same folder
+    const existingAsset = await this.prisma.asset.findFirst({
+      where: {
+        name: createAssetDto.name,
+        userId,
+        assetGroupId: createAssetDto.assetGroupId ?? null,
+      },
+    });
+
+    if (existingAsset) {
+      throw new BadRequestException('Asset with this name already exists in this folder');
+    }
 
     // Upload to Cloudinary
     const uploadOptions = CloudinaryUtil.getAssetUploadOptions();
@@ -231,6 +245,27 @@ export class AssetService {
     const asset = await this.findOne(id, userId);
     const oldAssetGroupId = asset.assetGroupId;
     console.log('Updating asset:', id, 'with data:', updateAssetDto);
+    
+    // Check if new name conflicts with existing asset in the same folder
+    if (updateAssetDto.name && updateAssetDto.name !== asset.name) {
+      const targetGroupId = updateAssetDto.assetGroupId !== undefined 
+        ? updateAssetDto.assetGroupId 
+        : oldAssetGroupId;
+        
+      const existingAsset = await this.prisma.asset.findFirst({
+        where: {
+          name: updateAssetDto.name,
+          userId,
+          assetGroupId: targetGroupId ?? null,
+          id: { not: id },
+        },
+      });
+
+      if (existingAsset) {
+        throw new ConflictException('Asset with this name already exists in this folder');
+      }
+    }
+    
     if (
       updateAssetDto.assetGroupId &&
       updateAssetDto.assetGroupId !== oldAssetGroupId
@@ -308,5 +343,59 @@ export class AssetService {
         totalSize: totalSize._sum.size || 0,
       },
     });
+  }
+
+  /**
+   * Export assets as JSON
+   * @param userId - User ID
+   * @param assetGroupId - Optional: Filter by specific folder/group
+   * @returns Array of assets in JSON format
+   */
+  async exportAsJson(userId: number, assetGroupId?: number) {
+    const whereCondition: any = { userId };
+    
+    if (assetGroupId !== undefined) {
+      whereCondition.assetGroupId = assetGroupId;
+    }
+
+    const assets = await this.prisma.asset.findMany({
+      where: whereCondition,
+      select: {
+        id: true,
+        name: true,
+        filePath: true,
+        fileName: true,
+        mimeType: true,
+        size: true,
+        uploadDate: true,
+        assetGroupId: true,
+        assetGroup: {
+          select: {
+            id: true,
+            groupName: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    // Transform assets to clean JSON format
+    const exportData = assets.map(asset => ({
+      id: asset.id.toString(),
+      name: asset.name,
+      url: asset.filePath,
+      fileName: asset.fileName,
+      mimeType: asset.mimeType,
+      size: asset.size.toString(),
+      uploadDate: asset.uploadDate.toISOString(),
+      folder: asset.assetGroup ? {
+        id: asset.assetGroup.id,
+        name: asset.assetGroup.groupName,
+      } : null,
+    }));
+
+    return exportData;
   }
 }

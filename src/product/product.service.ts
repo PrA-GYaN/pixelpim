@@ -7,14 +7,14 @@ import { UpdateProductAttributesDto } from './dto/update-product-attribute.dto';
 import { ProductResponseDto } from './dto/product-response.dto';
 import { AddVariantDto, RemoveVariantDto, ProductVariantResponseDto, GetProductVariantsDto } from './dto/product-variant.dto';
 import { ExportProductDto, ExportProductResponseDto, ProductAttribute, ExportFormat, AttributeSelectionDto } from './dto/export-product.dto';
-import { MarketplaceExportDto, MarketplaceExportResponseDto, MarketplaceType } from './dto/marketplace-export.dto';
+// import { MarketplaceExportDto, MarketplaceExportResponseDto, MarketplaceType } from './dto/marketplace-export.dto';
 import { ScheduleImportDto, UpdateScheduledImportDto, ImportJobResponseDto } from './dto/schedule-import.dto';
 import { CsvImportService } from './services/csv-import.service';
 import { ImportSchedulerService } from './services/import-scheduler.service';
-import { MarketplaceTemplateService } from './services/marketplace-template.service';
-import { MarketplaceExportService } from './services/marketplace-export.service';
+// import { MarketplaceTemplateService } from './services/marketplace-template.service';
+// import { MarketplaceExportService } from './services/marketplace-export.service';
 import { PaginatedResponse, PaginationUtils } from '../common';
-import type { Product } from '../../generated/prisma';
+// import type { Product } from '../../generated/prisma';
 import { getUserFriendlyType } from '../types/user-attribute-type.enum';
 
 @Injectable()
@@ -24,8 +24,6 @@ export class ProductService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationService: NotificationService,
-    private readonly marketplaceTemplateService: MarketplaceTemplateService,
-    private readonly marketplaceExportService: MarketplaceExportService,
     @Inject(forwardRef(() => CsvImportService))
     private readonly csvImportService: CsvImportService,
     @Inject(forwardRef(() => ImportSchedulerService))
@@ -861,9 +859,14 @@ export class ProductService {
         updateData.familyId = updateProductDto.familyId;
       }
 
-      // Handle parentProductId to support variant linking/unlinking
+      // Handle parentProductId to support variant linking/unlinking with inheritance
       if (updateProductDto.parentProductId !== undefined) {
         updateData.parentProductId = updateProductDto.parentProductId;
+        
+        // If setting a parent (making this product a variant), inherit family and attributes
+        if (updateProductDto.parentProductId !== null) {
+          await this.inheritFromParentProduct(id, updateProductDto.parentProductId, userId);
+        }
       }
 
       // Update product main fields
@@ -2750,75 +2753,209 @@ export class ProductService {
   }
 
   /**
-   * Get available marketplace templates
+   * Inherit family and attributes from parent product when setting parentProductId
+   * This intelligently merges parent data with existing child data:
+   * - Sets family from parent if child doesn't have one
+   * - For each parent attribute:
+   *   - If child already has the attribute with a value, keep child's value
+   *   - If child has the attribute but no value, take parent's value
+   *   - If attribute only exists in parent, copy it to child
    */
-  async getMarketplaceTemplates() {
+  private async inheritFromParentProduct(childProductId: number, parentProductId: number, userId: number): Promise<void> {
     try {
-      const marketplaces = this.marketplaceTemplateService.getAvailableMarketplaces();
-      return marketplaces.map(marketplace => ({
-        marketplaceType: marketplace,
-        displayName: this.getMarketplaceDisplayName(marketplace),
-        template: this.marketplaceTemplateService.getMarketplaceTemplate(marketplace)
-      }));
-    } catch (error) {
-      this.logger.error(`Failed to get marketplace templates: ${error.message}`, error.stack);
-      throw new BadRequestException('Failed to get marketplace templates');
-    }
-  }
+      this.logger.log(`Inheriting family and attributes from parent ${parentProductId} to child ${childProductId}`);
 
-  /**
-   * Get template for specific marketplace
-   */
-  async getMarketplaceTemplate(marketplaceType: MarketplaceType) {
-    try {
-      const template = this.marketplaceTemplateService.getMarketplaceTemplate(marketplaceType);
-      return {
-        ...template,
-        displayName: this.getMarketplaceDisplayName(marketplaceType),
-        requiredFields: this.marketplaceTemplateService.getMarketplaceFields(marketplaceType),
-        availableFields: Object.values(template.fieldMappings.map(f => ({
-          field: f.ecommerceField,
-          displayName: this.marketplaceTemplateService.getFieldDisplayName(f.ecommerceField),
-          sourceField: f.sourceField,
-          defaultValue: f.defaultValue
-        })))
-      };
-    } catch (error) {
-      this.logger.error(`Failed to get template for ${marketplaceType}: ${error.message}`, error.stack);
-      throw new BadRequestException(`Failed to get template for ${marketplaceType}`);
-    }
-  }
+      // Fetch parent product with all necessary data
+      const parentProduct = await this.prisma.product.findFirst({
+        where: { id: parentProductId, userId },
+        include: {
+          family: true,
+          attributes: {
+            include: {
+              attribute: true,
+            },
+          },
+        },
+      });
 
-  /**
-   * Export products to marketplace format
-   */
-  async exportToMarketplace(exportDto: MarketplaceExportDto, userId: number): Promise<MarketplaceExportResponseDto> {
-    try {
-      return this.marketplaceExportService.exportToMarketplace(exportDto, userId);
+      if (!parentProduct) {
+        throw new BadRequestException('Parent product not found or does not belong to you');
+      }
+
+      // Prevent variants from being parents
+      if (parentProduct.parentProductId) {
+        throw new BadRequestException('Cannot use a variant product as a parent. Variants cannot have their own variants.');
+      }
+
+      // Fetch child product
+      const childProduct = await this.prisma.product.findFirst({
+        where: { id: childProductId, userId },
+        include: {
+          attributes: {
+            include: {
+              attribute: true,
+            },
+          },
+        },
+      });
+
+      if (!childProduct) {
+        throw new NotFoundException('Child product not found');
+      }
+
+      // Step 1: Inherit family from parent if child doesn't have one
+      if (parentProduct.familyId && !childProduct.familyId) {
+        await this.prisma.product.update({
+          where: { id: childProductId },
+          data: { familyId: parentProduct.familyId },
+        });
+        this.logger.log(`Inherited family ${parentProduct.familyId} from parent to child product ${childProductId}`);
+      }
+
+      // Step 2: Merge attributes intelligently
+      // Create a map of child's existing attributes with their values
+      const childAttributeMap = new Map(
+        childProduct.attributes.map(attr => [attr.attributeId, attr])
+      );
+
+      // Process each parent attribute
+      for (const parentAttr of parentProduct.attributes) {
+        const childAttr = childAttributeMap.get(parentAttr.attributeId);
+
+        if (childAttr) {
+          // Child already has this attribute
+          if (!childAttr.value || childAttr.value.trim() === '') {
+            // Child has attribute but no value - take parent's value
+            if (parentAttr.value && parentAttr.value.trim() !== '') {
+              await this.prisma.productAttribute.update({
+                where: {
+                  productId_attributeId: {
+                    productId: childProductId,
+                    attributeId: parentAttr.attributeId,
+                  },
+                },
+                data: {
+                  value: parentAttr.value,
+                  familyAttributeId: parentAttr.familyAttributeId,
+                },
+              });
+              this.logger.log(`Updated attribute ${parentAttr.attributeId} with parent's value for child ${childProductId}`);
+            }
+          } else {
+            // Child has attribute with value - keep child's value, but ensure familyAttributeId is set
+            if (parentAttr.familyAttributeId && !childAttr.familyAttributeId) {
+              await this.prisma.productAttribute.update({
+                where: {
+                  productId_attributeId: {
+                    productId: childProductId,
+                    attributeId: parentAttr.attributeId,
+                  },
+                },
+                data: {
+                  familyAttributeId: parentAttr.familyAttributeId,
+                },
+              });
+            }
+            this.logger.log(`Kept existing value for attribute ${parentAttr.attributeId} in child ${childProductId}`);
+          }
+        } else {
+          // Child doesn't have this attribute - copy from parent
+          await this.prisma.productAttribute.create({
+            data: {
+              productId: childProductId,
+              attributeId: parentAttr.attributeId,
+              familyAttributeId: parentAttr.familyAttributeId,
+              value: parentAttr.value,
+            },
+          });
+          this.logger.log(`Copied new attribute ${parentAttr.attributeId} from parent to child ${childProductId}`);
+        }
+      }
+
+      // Step 3: Recalculate child product status
+      const status = await this.calculateProductStatus(childProductId);
+      await this.prisma.product.update({
+        where: { id: childProductId },
+        data: { status },
+      });
+      this.logger.log(`Updated child product ${childProductId} status to ${status} after inheritance`);
+
     } catch (error) {
-      this.logger.error(`Failed to export to marketplace: ${error.message}`, error.stack);
+      this.logger.error(`Failed to inherit from parent product: ${error.message}`, error.stack);
       throw error;
     }
   }
 
   /**
-   * Get human-readable marketplace display names
+   * Get available marketplace templates
    */
-  private getMarketplaceDisplayName(marketplaceType: MarketplaceType): string {
-    const displayNames: Record<MarketplaceType, string> = {
-      [MarketplaceType.AMAZON]: 'Amazon Marketplace',
-      [MarketplaceType.ALIEXPRESS]: 'AliExpress',
-      [MarketplaceType.EBAY]: 'eBay',
-      [MarketplaceType.ETSY]: 'Etsy',
-      [MarketplaceType.SHOPIFY]: 'Shopify',
-      [MarketplaceType.WALMART]: 'Walmart Marketplace',
-      [MarketplaceType.FACEBOOK_MARKETPLACE]: 'Facebook Marketplace',
-      [MarketplaceType.GOOGLE_SHOPPING]: 'Google Shopping',
-      [MarketplaceType.CUSTOM]: 'Custom Template'
-    };
+  // async getMarketplaceTemplates() {
+  //   try {
+  //     const marketplaces = this.marketplaceTemplateService.getAvailableMarketplaces();
+  //     return marketplaces.map(marketplace => ({
+  //       marketplaceType: marketplace,
+  //       displayName: this.getMarketplaceDisplayName(marketplace),
+  //       template: this.marketplaceTemplateService.getMarketplaceTemplate(marketplace)
+  //     }));
+  //   } catch (error) {
+  //     this.logger.error(`Failed to get marketplace templates: ${error.message}`, error.stack);
+  //     throw new BadRequestException('Failed to get marketplace templates');
+  //   }
+  // }
+
+  // /**
+  //  * Get template for specific marketplace
+  //  */
+  // async getMarketplaceTemplate(marketplaceType: MarketplaceType) {
+  //   try {
+  //     const template = this.marketplaceTemplateService.getMarketplaceTemplate(marketplaceType);
+  //     return {
+  //       ...template,
+  //       displayName: this.getMarketplaceDisplayName(marketplaceType),
+  //       requiredFields: this.marketplaceTemplateService.getMarketplaceFields(marketplaceType),
+  //       availableFields: Object.values(template.fieldMappings.map(f => ({
+  //         field: f.ecommerceField,
+  //         displayName: this.marketplaceTemplateService.getFieldDisplayName(f.ecommerceField),
+  //         sourceField: f.sourceField,
+  //         defaultValue: f.defaultValue
+  //       })))
+  //     };
+  //   } catch (error) {
+  //     this.logger.error(`Failed to get template for ${marketplaceType}: ${error.message}`, error.stack);
+  //     throw new BadRequestException(`Failed to get template for ${marketplaceType}`);
+  //   }
+  // }
+
+  // /**
+  //  * Export products to marketplace format
+  //  */
+  // async exportToMarketplace(exportDto: MarketplaceExportDto, userId: number): Promise<MarketplaceExportResponseDto> {
+  //   try {
+  //     return this.marketplaceExportService.exportToMarketplace(exportDto, userId);
+  //   } catch (error) {
+  //     this.logger.error(`Failed to export to marketplace: ${error.message}`, error.stack);
+  //     throw error;
+  //   }
+  // }
+
+  // /**
+  //  * Get human-readable marketplace display names
+  //  */
+  // private getMarketplaceDisplayName(marketplaceType: MarketplaceType): string {
+  //   const displayNames: Record<MarketplaceType, string> = {
+  //     [MarketplaceType.AMAZON]: 'Amazon Marketplace',
+  //     [MarketplaceType.ALIEXPRESS]: 'AliExpress',
+  //     [MarketplaceType.EBAY]: 'eBay',
+  //     [MarketplaceType.ETSY]: 'Etsy',
+  //     [MarketplaceType.SHOPIFY]: 'Shopify',
+  //     [MarketplaceType.WALMART]: 'Walmart Marketplace',
+  //     [MarketplaceType.FACEBOOK_MARKETPLACE]: 'Facebook Marketplace',
+  //     [MarketplaceType.GOOGLE_SHOPPING]: 'Google Shopping',
+  //     [MarketplaceType.CUSTOM]: 'Custom Template'
+  //   };
     
-    return displayNames[marketplaceType] || marketplaceType;
-  }
+  //   return displayNames[marketplaceType] || marketplaceType;
+  // }
 
   // CSV Import Scheduling Methods
 
