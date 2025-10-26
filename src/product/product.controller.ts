@@ -21,7 +21,7 @@ import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { UpdateProductAttributesDto } from './dto/update-product-attribute.dto';
 import { ProductResponseDto } from './dto/product-response.dto';
-import { CreateProductVariantDto, RemoveProductVariantDto, GetProductVariantsDto, ProductVariantResponseDto } from './dto/product-variant.dto';
+import { AddVariantDto, RemoveVariantDto, GetProductVariantsDto, ProductVariantResponseDto } from './dto/product-variant.dto';
 import { ExportProductDto, ExportProductResponseDto } from './dto/export-product.dto';
 import { MarketplaceExportDto, MarketplaceExportResponseDto, MarketplaceType } from './dto/marketplace-export.dto';
 import { 
@@ -219,50 +219,39 @@ export class ProductController {
 
   // Product Variant Management Endpoints
 
-  @Get('variants')
-  async getAllProductVariants(
-    @GetUser() user: User,
-    @Query() queryDto: GetProductVariantsDto,
-  ): Promise<PaginatedResponse<ProductVariantResponseDto>> {
-    this.logger.log(`User ${user.id} getting all product variants with pagination: page=${queryDto.page}, limit=${queryDto.limit}, sortBy=${queryDto.sortBy}, sortOrder=${queryDto.sortOrder}, search=${queryDto.search}, status=${queryDto.status}`);
-    
-    return this.productService.getAllProductVariants(user.id, queryDto);
-  }
-
-  @Post('variants')
+  @Post(':parentId/variants')
   @HttpCode(HttpStatus.CREATED)
-  async createVariant(
-    @Body() createVariantDto: CreateProductVariantDto,
+  async addVariant(
+    @Param('parentId', ParseIntPipe) parentId: number,
+    @Body() addVariantDto: AddVariantDto,
     @GetUser() user: User,
-  ) {
-    this.logger.log(`User ${user.id} creating product variant relationships`);
+  ): Promise<ProductResponseDto> {
+    this.logger.log(`User ${user.id} adding variant to parent product ${parentId}`);
     
-    return this.productService.createVariant(createVariantDto, user.id);
+    return this.productService.addVariant(parentId, addVariantDto, user.id);
   }
 
-  @Delete('variants/:productId/:variantProductId')
+  @Delete(':parentId/variants/:variantId')
   @HttpCode(HttpStatus.OK)
   async removeVariant(
-    @Param('productId', ParseIntPipe) productId: number,
-    @Param('variantProductId', ParseIntPipe) variantProductId: number,
+    @Param('parentId', ParseIntPipe) parentId: number,
+    @Param('variantId', ParseIntPipe) variantId: number,
     @GetUser() user: User,
-  ) {
-    this.logger.log(`User ${user.id} removing product variant relationship`);
-    this.logger.log(`Removing variant relationship: productId=${productId}, variantProductId=${variantProductId}`);
+  ): Promise<{ message: string }> {
+    this.logger.log(`User ${user.id} removing variant ${variantId} from parent product ${parentId}`);
     
-    const removeVariantDto = { productId, variantProductId };
-    return this.productService.removeVariant(removeVariantDto, user.id);
+    return this.productService.removeVariant(parentId, variantId, user.id);
   }
 
-  @Get(':id/variants')
-  async getProductVariants(
-    @Param('id', ParseIntPipe) productId: number,
+  @Get(':parentId/variants')
+  async getVariants(
+    @Param('parentId', ParseIntPipe) parentId: number,
     @GetUser() user: User,
     @Query() queryDto: GetProductVariantsDto,
   ): Promise<PaginatedResponse<ProductVariantResponseDto>> {
-    this.logger.log(`User ${user.id} getting variants for product: ${productId} with pagination: page=${queryDto.page}, limit=${queryDto.limit}, sortBy=${queryDto.sortBy}, sortOrder=${queryDto.sortOrder}, search=${queryDto.search}, status=${queryDto.status}`);
+    this.logger.log(`User ${user.id} getting variants for parent product ${parentId} with pagination: page=${queryDto.page}, limit=${queryDto.limit}`);
     
-    return this.productService.getProductVariants(productId, user.id, queryDto);
+    return this.productService.getVariants(parentId, user.id, queryDto);
   }
 
   // Product Export Endpoint

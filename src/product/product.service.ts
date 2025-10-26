@@ -5,7 +5,7 @@ import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { UpdateProductAttributesDto } from './dto/update-product-attribute.dto';
 import { ProductResponseDto } from './dto/product-response.dto';
-import { CreateProductVariantDto, RemoveProductVariantDto, ProductVariantResponseDto, GetProductVariantsDto } from './dto/product-variant.dto';
+import { AddVariantDto, RemoveVariantDto, ProductVariantResponseDto, GetProductVariantsDto } from './dto/product-variant.dto';
 import { ExportProductDto, ExportProductResponseDto, ProductAttribute, ExportFormat, AttributeSelectionDto } from './dto/export-product.dto';
 import { MarketplaceExportDto, MarketplaceExportResponseDto, MarketplaceType } from './dto/marketplace-export.dto';
 import { ScheduleImportDto, UpdateScheduledImportDto, ImportJobResponseDto } from './dto/schedule-import.dto';
@@ -515,7 +515,10 @@ export class ProductService {
     try {
       this.logger.log(`Fetching products for user: ${userId}`);
 
-      const whereCondition: any = { userId };
+      const whereCondition: any = { 
+        userId,
+        parentProductId: null, // Exclude variant products from main product list
+      };
 
       if (search) {
         whereCondition.OR = [
@@ -610,30 +613,13 @@ export class ProductService {
                 },
               },
             },
-            variantLinksA: {
-              include: {
-                productB: {
-                  select: {
-                    id: true,
-                    name: true,
-                    sku: true,
-                    imageUrl: true,
-                    status: true,
-                  },
-                },
-              },
-            },
-            variantLinksB: {
-              include: {
-                productA: {
-                  select: {
-                    id: true,
-                    name: true,
-                    sku: true,
-                    imageUrl: true,
-                    status: true,
-                  },
-                },
+            variants: {
+              select: {
+                id: true,
+                name: true,
+                sku: true,
+                imageUrl: true,
+                status: true,
               },
             },
           },
@@ -710,30 +696,13 @@ export class ProductService {
               },
             },
           },
-          variantLinksA: {
-            include: {
-              productB: {
-                select: {
-                  id: true,
-                  name: true,
-                  sku: true,
-                  imageUrl: true,
-                  status: true,
-                },
-              },
-            },
-          },
-          variantLinksB: {
-            include: {
-              productA: {
-                select: {
-                  id: true,
-                  name: true,
-                  sku: true,
-                  imageUrl: true,
-                  status: true,
-                },
-              },
+          variants: {
+            select: {
+              id: true,
+              name: true,
+              sku: true,
+              imageUrl: true,
+              status: true,
             },
           },
           assets: {
@@ -804,30 +773,13 @@ export class ProductService {
               },
             },
           },
-          variantLinksA: {
-            include: {
-              productB: {
-                select: {
-                  id: true,
-                  name: true,
-                  sku: true,
-                  imageUrl: true,
-                  status: true,
-                },
-              },
-            },
-          },
-          variantLinksB: {
-            include: {
-              productA: {
-                select: {
-                  id: true,
-                  name: true,
-                  sku: true,
-                  imageUrl: true,
-                  status: true,
-                },
-              },
+          variants: {
+            select: {
+              id: true,
+              name: true,
+              sku: true,
+              imageUrl: true,
+              status: true,
             },
           },
         },
@@ -1344,30 +1296,13 @@ export class ProductService {
                 },
               },
             },
-            variantLinksA: {
-              include: {
-                productB: {
-                  select: {
-                    id: true,
-                    name: true,
-                    sku: true,
-                    imageUrl: true,
-                    status: true,
-                  },
-                },
-              },
-            },
-            variantLinksB: {
-              include: {
-                productA: {
-                  select: {
-                    id: true,
-                    name: true,
-                    sku: true,
-                    imageUrl: true,
-                    status: true,
-                  },
-                },
+            variants: {
+              select: {
+                id: true,
+                name: true,
+                sku: true,
+                imageUrl: true,
+                status: true,
               },
             },
           },
@@ -1454,30 +1389,13 @@ export class ProductService {
                 },
               },
             },
-            variantLinksA: {
-              include: {
-                productB: {
-                  select: {
-                    id: true,
-                    name: true,
-                    sku: true,
-                    imageUrl: true,
-                    status: true,
-                  },
-                },
-              },
-            },
-            variantLinksB: {
-              include: {
-                productA: {
-                  select: {
-                    id: true,
-                    name: true,
-                    sku: true,
-                    imageUrl: true,
-                    status: true,
-                  },
-                },
+            variants: {
+              select: {
+                id: true,
+                name: true,
+                sku: true,
+                imageUrl: true,
+                status: true,
               },
             },
           },
@@ -1564,30 +1482,13 @@ export class ProductService {
                 },
               },
             },
-            variantLinksA: {
-              include: {
-                productB: {
-                  select: {
-                    id: true,
-                    name: true,
-                    sku: true,
-                    imageUrl: true,
-                    status: true,
-                  },
-                },
-              },
-            },
-            variantLinksB: {
-              include: {
-                productA: {
-                  select: {
-                    id: true,
-                    name: true,
-                    sku: true,
-                    imageUrl: true,
-                    status: true,
-                  },
-                },
+            variants: {
+              select: {
+                id: true,
+                name: true,
+                sku: true,
+                imageUrl: true,
+                status: true,
               },
             },
           },
@@ -1674,30 +1575,13 @@ export class ProductService {
                 },
               },
             },
-            variantLinksA: {
-              include: {
-                productB: {
-                  select: {
-                    id: true,
-                    name: true,
-                    sku: true,
-                    imageUrl: true,
-                    status: true,
-                  },
-                },
-              },
-            },
-            variantLinksB: {
-              include: {
-                productA: {
-                  select: {
-                    id: true,
-                    name: true,
-                    sku: true,
-                    imageUrl: true,
-                    status: true,
-                  },
-                },
+            variants: {
+              select: {
+                id: true,
+                name: true,
+                sku: true,
+                imageUrl: true,
+                status: true,
               },
             },
           },
@@ -1763,17 +1647,12 @@ export class ProductService {
   }
 
   private async transformProductForResponse(product: any): Promise<ProductResponseDto> {
-    // Extract variants from the product data
+    // Extract variants from the product data (one-to-many relationship)
     const variants: any[] = [];
     
-    if (product.variantLinksA) {
-      // When this product is productA, add all productB variants
-      variants.push(...product.variantLinksA.map((link: any) => link.productB));
-    }
-    
-    if (product.variantLinksB) {
-      // When this product is productB, add all productA variants
-      variants.push(...product.variantLinksB.map((link: any) => link.productA));
+    if (product.variants && product.variants.length > 0) {
+      // If this product is a parent, include its variants
+      variants.push(...product.variants);
     }
 
     // Attributes details
@@ -1838,6 +1717,7 @@ export class ProductService {
       categoryId: product.categoryId,
       attributeGroupId: product.attributeGroupId,
       familyId: product.familyId,
+      parentProductId: product.parentProductId,
       userId: product.userId,
       createdAt: formatDate(product.createdAt),
       updatedAt: formatDate(product.updatedAt),
@@ -1921,478 +1801,242 @@ export class ProductService {
 
   // Product Variant Management Methods
 
-  async createVariant(createVariantDto: CreateProductVariantDto, userId: number): Promise<{ message: string; created: number; variants: ProductVariantResponseDto[] }> {
+  /**
+   * Add a variant to a parent product with automatic inheritance of family and attributes
+   * @param parentId - The ID of the parent product
+   * @param variantData - The data for the new variant product
+   * @param userId - The ID of the user
+   * @returns Promise<ProductResponseDto>
+   */
+  async addVariant(parentId: number, variantData: AddVariantDto, userId: number): Promise<ProductResponseDto> {
     try {
-      const { productId, variantProductIds } = createVariantDto;
+      this.logger.log(`Adding variant to parent product ${parentId} for user: ${userId}`);
 
-      // Verify the main product exists and belongs to the user
-      const mainProduct = await this.prisma.product.findFirst({
-        where: { id: productId, userId },
-      });
-
-      if (!mainProduct) {
-        throw new BadRequestException('Main product not found or does not belong to you');
-      }
-
-      // Verify all variant products exist and belong to the user
-      const variantProducts = await this.prisma.product.findMany({
-        where: {
-          id: { in: variantProductIds },
-          userId,
-        },
-      });
-
-      if (variantProducts.length !== variantProductIds.length) {
-        throw new BadRequestException('One or more variant products not found or do not belong to you');
-      }
-
-      // Create only direct relationships between productId and each variantProductId
-      // This creates a star pattern where productId is linked to each variantProductId individually
-      const variantData: { productAId: number; productBId: number }[] = [];
-
-      // Create direct pairs only (productId ↔ each variantProductId)
-      for (const variantProductId of variantProductIds) {
-        const [smallerId, largerId] = productId < variantProductId 
-          ? [productId, variantProductId] 
-          : [variantProductId, productId];
-        variantData.push({ productAId: smallerId, productBId: largerId });
-      }
-
-      // Create variants using createMany (will ignore duplicates)
-      const result = await this.prisma.productVariant.createMany({
-        data: variantData,
-        skipDuplicates: true,
-      });
-
-      // Fetch the created variants with product details
-      const createdVariants = await this.prisma.productVariant.findMany({
-        where: {
-          OR: variantData.map(v => ({
-            productAId: v.productAId,
-            productBId: v.productBId,
-          })),
-        },
+      // Verify the parent product exists and belongs to the user
+      const parentProduct = await this.prisma.product.findFirst({
+        where: { id: parentId, userId },
         include: {
-          productA: {
-            select: {
-              id: true,
-              name: true,
-              sku: true,
-              imageUrl: true,
-              status: true,
-              createdAt: true,
-              updatedAt: true,
+          family: {
+            include: {
+              familyAttributes: true,
             },
           },
-          productB: {
-            select: {
-              id: true,
-              name: true,
-              sku: true,
-              imageUrl: true,
-              status: true,
-              createdAt: true,
-              updatedAt: true,
+          attributes: {
+            include: {
+              attribute: true,
             },
           },
         },
       });
 
-      // Transform the variants
-      const transformedVariants = createdVariants.map(variant => ({
-        ...variant,
-        productA: {
-          ...variant.productA,
-          imageUrl: variant.productA.imageUrl ?? undefined,
-          createdAt: variant.productA.createdAt.toISOString().split('T')[0],
-          updatedAt: variant.productA.updatedAt.toISOString().split('T')[0],
-        },
-        productB: {
-          ...variant.productB,
-          imageUrl: variant.productB.imageUrl ?? undefined,
-          createdAt: variant.productB.createdAt.toISOString().split('T')[0],
-          updatedAt: variant.productB.updatedAt.toISOString().split('T')[0],
-        },
-      })) as ProductVariantResponseDto[];
-
-      this.logger.log(`Created ${result.count} direct variant relationships for product ${productId}`);
-      return { message: `Successfully created ${result.count} direct variant relationships. Each selected product is now linked directly to product ${productId}.`, created: result.count, variants: transformedVariants };
-    } catch (error) {
-      if (error instanceof BadRequestException) {
-        throw error;
-      }
-      this.logger.error(`Failed to create product variants: ${error.message}`, error.stack);
-      throw new BadRequestException('Failed to create product variants');
-    }
-  }
-
-  async removeVariant(removeVariantDto: RemoveProductVariantDto, userId: number): Promise<{ message: string }> {
-    try {
-      this.logger.log(`RemoveVariant called with DTO: ${JSON.stringify(removeVariantDto)}, userId: ${userId}`);
-      
-      const { productId, variantProductId } = removeVariantDto;
-      
-      // Validate that we have proper numbers
-      if (!Number.isInteger(productId) || !Number.isInteger(variantProductId)) {
-        throw new BadRequestException('Product IDs must be valid integers');
-      }
-      
-      if (productId <= 0 || variantProductId <= 0) {
-        throw new BadRequestException('Product IDs must be positive integers');
-      }
-      
-      if (productId === variantProductId) {
-        throw new BadRequestException('Cannot remove variant relationship with the same product');
+      if (!parentProduct) {
+        throw new BadRequestException('Parent product not found or does not belong to you');
       }
 
-      this.logger.log(`Removing variant relationship between ${productId} and ${variantProductId}`);
-
-      // Ensure proper ordering
-      const [smallerId, largerId] = productId < variantProductId ? [productId, variantProductId] : [variantProductId, productId];
-
-      // Verify both products belong to the user
-      const products = await this.prisma.product.findMany({
-        where: {
-          id: { in: [smallerId, largerId] },
-          userId,
-        },
-      });
-
-      if (products.length !== 2) {
-        throw new BadRequestException('One or both products not found or do not belong to you');
+      // Prevent variants from being parents
+      if (parentProduct.parentProductId) {
+        throw new BadRequestException('Cannot add variants to a variant product. Variants cannot have their own variants.');
       }
 
-      // Find the specific variant relationship to remove
-      const variant = await this.prisma.productVariant.findUnique({
-        where: {
-          productAId_productBId: {
-            productAId: smallerId,
-            productBId: largerId,
-          },
-        },
-      });
-
-      if (!variant) {
-        throw new NotFoundException('Variant relationship not found');
-      }
-
-      // Simply remove only the specific relationship requested
-      await this.prisma.productVariant.delete({
-        where: {
-          productAId_productBId: {
-            productAId: smallerId,
-            productBId: largerId,
-          },
-        },
-      });
-
-      this.logger.log(`Removed variant relationship between product ${smallerId} and ${largerId}`);
-      
-      return { 
-        message: `Successfully removed variant relationship between products ${productId} and ${variantProductId}.` 
+      // Prepare variant data with inheritance
+      const variantProductData: any = {
+        ...variantData,
+        parentProductId: parentId,
+        familyId: parentProduct.familyId, // Inherit family
+        categoryId: parentProduct.categoryId, // Optionally inherit category
+        userId,
       };
+
+      // Create the variant product
+      const variant = await this.prisma.product.create({
+        data: {
+          name: variantProductData.name,
+          sku: variantProductData.sku,
+          productLink: variantProductData.productLink,
+          imageUrl: variantProductData.imageUrl,
+          subImages: variantProductData.subImages || [],
+          categoryId: variantProductData.categoryId,
+          attributeGroupId: variantProductData.attributeGroupId,
+          familyId: variantProductData.familyId,
+          parentProductId: variantProductData.parentProductId,
+          userId: variantProductData.userId,
+        },
+      });
+
+      // Copy all attributes from parent to variant
+      if (parentProduct.attributes && parentProduct.attributes.length > 0) {
+        const attributesToCopy = parentProduct.attributes.map(attr => ({
+          productId: variant.id,
+          attributeId: attr.attributeId,
+          familyAttributeId: attr.familyAttributeId,
+          value: attr.value, // Copy the value from parent
+        }));
+
+        await this.prisma.productAttribute.createMany({
+          data: attributesToCopy,
+          skipDuplicates: true,
+        });
+      }
+
+      // Calculate status for the variant
+      const status = await this.calculateProductStatus(variant.id);
+      await this.prisma.product.update({ 
+        where: { id: variant.id }, 
+        data: { status } 
+      });
+
+      this.logger.log(`Successfully created variant ${variant.id} for parent product ${parentId}`);
+
+      // Log notification
+      await this.notificationService.logProductCreation(userId, variant.name, variant.id);
+
+      // Return the complete variant product
+      return await this.findOne(variant.id, userId);
     } catch (error) {
       if (error instanceof BadRequestException || error instanceof NotFoundException) {
         throw error;
       }
-      this.logger.error(`Failed to remove product variant: ${error.message}`, error.stack);
-      throw new BadRequestException('Failed to remove product variant');
+      this.logger.error(`Failed to add variant: ${error.message}`, error.stack);
+      throw new BadRequestException('Failed to add variant');
     }
   }
 
-  async getAllProductVariants(
-    userId: number, 
+  /**
+   * Remove a variant from a parent product
+   * @param parentId - The ID of the parent product
+   * @param variantId - The ID of the variant to remove
+   * @param userId - The ID of the user
+   * @returns Promise<{ message: string }>
+   */
+  async removeVariant(parentId: number, variantId: number, userId: number): Promise<{ message: string }> {
+    try {
+      this.logger.log(`Removing variant ${variantId} from parent product ${parentId} for user: ${userId}`);
+
+      // Verify the parent product exists and belongs to the user
+      const parentProduct = await this.prisma.product.findFirst({
+        where: { id: parentId, userId },
+      });
+
+      if (!parentProduct) {
+        throw new BadRequestException('Parent product not found or does not belong to you');
+      }
+
+      // Verify the variant exists and belongs to the user and is actually a variant of the parent
+      const variant = await this.prisma.product.findFirst({
+        where: { 
+          id: variantId, 
+          userId,
+          parentProductId: parentId,
+        },
+      });
+
+      if (!variant) {
+        throw new BadRequestException('Variant not found or does not belong to the specified parent product');
+      }
+
+      // Delete the variant (cascade will handle related records)
+      await this.prisma.product.delete({
+        where: { id: variantId },
+      });
+
+      this.logger.log(`Successfully removed variant ${variantId} from parent product ${parentId}`);
+
+      // Log notification
+      await this.notificationService.logProductDeletion(userId, variant.name);
+
+      return { message: `Successfully removed variant product ${variant.name}` };
+    } catch (error) {
+      if (error instanceof BadRequestException || error instanceof NotFoundException) {
+        throw error;
+      }
+      this.logger.error(`Failed to remove variant: ${error.message}`, error.stack);
+      throw new BadRequestException('Failed to remove variant');
+    }
+  }
+
+  /**
+   * Get all variants for a specific parent product
+   * @param parentId - The ID of the parent product
+   * @param userId - The ID of the user
+   * @param queryDto - Pagination and filtering options
+   * @returns Promise<PaginatedResponse<ProductVariantResponseDto>>
+   */
+  async getVariants(
+    parentId: number,
+    userId: number,
     queryDto: GetProductVariantsDto
   ): Promise<PaginatedResponse<ProductVariantResponseDto>> {
     try {
+      this.logger.log(`Getting variants for parent product ${parentId} for user: ${userId}`);
+
+      // Verify the parent product exists and belongs to the user
+      const parentProduct = await this.prisma.product.findFirst({
+        where: { id: parentId, userId },
+      });
+
+      if (!parentProduct) {
+        throw new BadRequestException('Parent product not found or does not belong to you');
+      }
+
       const { page = 1, limit = 10, sortBy = 'name', sortOrder = 'asc', search, status } = queryDto;
       const skip = (page - 1) * limit;
 
-      // Build where clause for filtering
+      // Build where clause
       const whereClause: any = {
-        OR: [
-          { productA: { userId } },
-          { productB: { userId } },
-        ],
+        parentProductId: parentId,
+        userId,
       };
 
-      // Add search filtering
       if (search) {
         whereClause.OR = [
-          {
-            productA: {
-              userId,
-              OR: [
-                { name: { contains: search, mode: 'insensitive' } },
-                { sku: { contains: search, mode: 'insensitive' } },
-              ],
-            },
-          },
-          {
-            productB: {
-              userId,
-              OR: [
-                { name: { contains: search, mode: 'insensitive' } },
-                { sku: { contains: search, mode: 'insensitive' } },
-              ],
-            },
-          },
+          { name: { contains: search, mode: 'insensitive' } },
+          { sku: { contains: search, mode: 'insensitive' } },
         ];
       }
 
-      // Add status filtering
       if (status) {
-        const statusCondition = { status };
-        if (search) {
-          // If both search and status filters are applied
-          whereClause.OR = [
-            {
-              productA: {
-                userId,
-                ...statusCondition,
-                OR: [
-                  { name: { contains: search, mode: 'insensitive' } },
-                  { sku: { contains: search, mode: 'insensitive' } },
-                ],
-              },
-            },
-            {
-              productB: {
-                userId,
-                ...statusCondition,
-                OR: [
-                  { name: { contains: search, mode: 'insensitive' } },
-                  { sku: { contains: search, mode: 'insensitive' } },
-                ],
-              },
-            },
-          ];
-        } else {
-          // Only status filter
-          whereClause.OR = [
-            {
-              productA: {
-                userId,
-                ...statusCondition,
-              },
-            },
-            {
-              productB: {
-                userId,
-                ...statusCondition,
-              },
-            },
-          ];
-        }
-      }
-
-      // Get total count for user's products variants
-      const total = await this.prisma.productVariant.count({
-        where: whereClause,
-      });
-
-      // Get paginated variants for user's products
-      const variants = await this.prisma.productVariant.findMany({
-        where: whereClause,
-        include: {
-          productA: {
-            select: {
-              id: true,
-              name: true,
-              sku: true,
-              imageUrl: true,
-              status: true,
-              createdAt: true,
-              updatedAt: true,
-            },
-          },
-          productB: {
-            select: {
-              id: true,
-              name: true,
-              sku: true,
-              imageUrl: true,
-              status: true,
-              createdAt: true,
-              updatedAt: true,
-            },
-          },
-        },
-        skip,
-        take: limit,
-        orderBy: [
-          {
-            productA: {
-              [sortBy]: sortOrder,
-            },
-          },
-          {
-            productB: {
-              [sortBy]: sortOrder,
-            },
-          },
-        ],
-      });
-
-      // Transform the response to handle null/undefined differences
-      const transformedVariants = variants.map(variant => ({
-        ...variant,
-        productA: {
-          ...variant.productA,
-          imageUrl: variant.productA.imageUrl ?? undefined,
-          createdAt: variant.productA.createdAt.toISOString().split('T')[0],
-          updatedAt: variant.productA.updatedAt.toISOString().split('T')[0],
-        },
-        productB: {
-          ...variant.productB,
-          imageUrl: variant.productB.imageUrl ?? undefined,
-          createdAt: variant.productB.createdAt.toISOString().split('T')[0],
-          updatedAt: variant.productB.updatedAt.toISOString().split('T')[0],
-        },
-      })) as ProductVariantResponseDto[];
-
-      const totalPages = Math.ceil(total / limit);
-      
-      return {
-        data: transformedVariants,
-        pagination: {
-          page,
-          limit,
-          total,
-          totalPages,
-          hasNext: page < totalPages,
-          hasPrev: page > 1,
-        },
-      };
-    } catch (error) {
-      this.logger.error(`Failed to get all product variants: ${error.message}`, error.stack);
-      throw new BadRequestException('Failed to get all product variants');
-    }
-  }
-
-  async getProductVariants(
-    productId: number, 
-    userId: number, 
-    queryDto: GetProductVariantsDto
-  ): Promise<PaginatedResponse<ProductVariantResponseDto>> {
-    try {
-      // Verify the product exists and belongs to the user
-      const product = await this.prisma.product.findFirst({
-        where: { id: productId, userId },
-      });
-
-      if (!product) {
-        throw new BadRequestException('Product not found or does not belong to you');
-      }
-
-      const { page = 1, limit = 10, sortBy = 'name', sortOrder = 'asc', search, status } = queryDto;
-      const skip = (page - 1) * limit;
-
-      // Build base where clause for variants of this specific product
-      let whereClause: any = {
-        OR: [
-          { productAId: productId },
-          { productBId: productId },
-        ],
-      };
-
-      // Add search and status filtering if provided
-      if (search || status) {
-        const productFilters: any = {};
-        
-        if (search) {
-          productFilters.OR = [
-            { name: { contains: search, mode: 'insensitive' } },
-            { sku: { contains: search, mode: 'insensitive' } },
-          ];
-        }
-        
-        if (status) {
-          productFilters.status = status;
-        }
-
-        // Apply filters to both productA and productB
-        whereClause = {
-          OR: [
-            {
-              productAId: productId,
-              productB: productFilters,
-            },
-            {
-              productBId: productId,
-              productA: productFilters,
-            },
-          ],
-        };
+        whereClause.status = status;
       }
 
       // Get total count
-      const total = await this.prisma.productVariant.count({
+      const total = await this.prisma.product.count({
         where: whereClause,
       });
 
-      // Get paginated variants where this product is either productA or productB
-      const variants = await this.prisma.productVariant.findMany({
+      // Get paginated variants
+      const variants = await this.prisma.product.findMany({
         where: whereClause,
-        include: {
-          productA: {
-            select: {
-              id: true,
-              name: true,
-              sku: true,
-              imageUrl: true,
-              status: true,
-              createdAt: true,
-              updatedAt: true,
-            },
-          },
-          productB: {
-            select: {
-              id: true,
-              name: true,
-              sku: true,
-              imageUrl: true,
-              status: true,
-              createdAt: true,
-              updatedAt: true,
-            },
-          },
+        select: {
+          id: true,
+          name: true,
+          sku: true,
+          imageUrl: true,
+          status: true,
+          parentProductId: true,
+          createdAt: true,
+          updatedAt: true,
         },
         skip,
         take: limit,
-        orderBy: [
-          {
-            productA: {
-              [sortBy]: sortOrder,
-            },
-          },
-          {
-            productB: {
-              [sortBy]: sortOrder,
-            },
-          },
-        ],
+        orderBy: {
+          [sortBy]: sortOrder,
+        },
       });
 
-      // Transform the response to handle null/undefined differences
+      // Transform the response
       const transformedVariants = variants.map(variant => ({
-        ...variant,
-        productA: {
-          ...variant.productA,
-          imageUrl: variant.productA.imageUrl ?? undefined,
-          createdAt: variant.productA.createdAt.toISOString().split('T')[0],
-          updatedAt: variant.productA.updatedAt.toISOString().split('T')[0],
-        },
-        productB: {
-          ...variant.productB,
-          imageUrl: variant.productB.imageUrl ?? undefined,
-          createdAt: variant.productB.createdAt.toISOString().split('T')[0],
-          updatedAt: variant.productB.updatedAt.toISOString().split('T')[0],
-        },
+        id: variant.id,
+        name: variant.name,
+        sku: variant.sku,
+        imageUrl: variant.imageUrl ?? undefined,
+        status: variant.status,
+        parentProductId: variant.parentProductId ?? undefined,
+        createdAt: variant.createdAt.toISOString().split('T')[0],
+        updatedAt: variant.updatedAt.toISOString().split('T')[0],
       })) as ProductVariantResponseDto[];
 
       const totalPages = Math.ceil(total / limit);
-      
+
       return {
         data: transformedVariants,
         pagination: {
@@ -2408,8 +2052,8 @@ export class ProductService {
       if (error instanceof BadRequestException) {
         throw error;
       }
-      this.logger.error(`Failed to get product variants: ${error.message}`, error.stack);
-      throw new BadRequestException('Failed to get product variants');
+      this.logger.error(`Failed to get variants: ${error.message}`, error.stack);
+      throw new BadRequestException('Failed to get variants');
     }
   }
 
@@ -2601,42 +2245,18 @@ export class ProductService {
    */
   private async getProductVariantsForExport(productId: number): Promise<any[]> {
     try {
-      const variants = await this.prisma.productVariant.findMany({
+      const variants = await this.prisma.product.findMany({
         where: {
-          OR: [
-            { productAId: productId },
-            { productBId: productId },
-          ],
+          parentProductId: productId,
         },
-        include: {
-          productA: {
-            select: {
-              id: true,
-              name: true,
-              sku: true,
-            },
-          },
-          productB: {
-            select: {
-              id: true,
-              name: true,
-              sku: true,
-            },
-          },
+        select: {
+          id: true,
+          name: true,
+          sku: true,
         },
       });
 
-      // Collect variants (excluding the current product)
-      const variantProducts: any[] = [];
-      variants.forEach(variant => {
-        if (variant.productAId === productId) {
-          variantProducts.push(variant.productB);
-        } else {
-          variantProducts.push(variant.productA);
-        }
-      });
-
-      return variantProducts;
+      return variants;
     } catch (error) {
       this.logger.error(`Failed to fetch variants for product ${productId}: ${error.message}`);
       return [];

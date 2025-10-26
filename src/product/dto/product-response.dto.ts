@@ -19,6 +19,7 @@ export class ProductResponseDto {
   categoryId?: number;
   attributeGroupId?: number;
   familyId?: number;
+  parentProductId?: number;
   userId: number;
   createdAt: string;
   updatedAt: string;
