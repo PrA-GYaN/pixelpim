@@ -20,7 +20,7 @@ export class AmazonService extends BaseIntegrationService {
     protected configService: ConfigService,
   ) {
     super(prisma, configService);
-    this.connect();
+    // Removed automatic connect() call - will be initialized later when needed
   }
 
   async connect(): Promise<void> {

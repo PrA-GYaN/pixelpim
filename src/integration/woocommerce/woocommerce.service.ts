@@ -17,7 +17,7 @@ export class WooCommerceService extends BaseIntegrationService {
     protected configService: ConfigService,
   ) {
     super(prisma, configService);
-    this.connect();
+    // Removed automatic connect() call - will be initialized later when needed
   }
 
   connect(): void {
