@@ -34,6 +34,27 @@ export class ProductService {
     try {
       this.logger.log(`Creating product: ${createProductDto.name} for user: ${userId}`);
 
+      // Handle parentSku - convert to parentProductId
+      let parentProductId: number | undefined;
+      if (createProductDto.parentSku) {
+        const parentProduct = await this.prisma.product.findUnique({
+          where: {
+            sku_userId: {
+              sku: createProductDto.parentSku,
+              userId,
+            },
+          },
+          select: { id: true },
+        });
+
+        if (!parentProduct) {
+          throw new BadRequestException(`Parent product with SKU "${createProductDto.parentSku}" not found`);
+        }
+
+        parentProductId = parentProduct.id;
+        this.logger.log(`Resolved parent SKU "${createProductDto.parentSku}" to parent product ID: ${parentProductId}`);
+      }
+
       // Validate category if provided
       if (createProductDto.categoryId) {
         await this.validateCategory(createProductDto.categoryId, userId);
@@ -75,6 +96,7 @@ export class ProductService {
           categoryId: createProductDto.categoryId,
           attributeGroupId: createProductDto.attributeGroupId,
           familyId: createProductDto.familyId,
+          parentProductId: parentProductId,
           userId,
         },
         include: {
@@ -703,6 +725,15 @@ export class ProductService {
               status: true,
             },
           },
+          parentProduct: {
+            select: {
+              id: true,
+              name: true,
+              sku: true,
+              imageUrl: true,
+              status: true,
+            },
+          },
           assets: {
             include: {
               asset: true,
@@ -780,6 +811,15 @@ export class ProductService {
               status: true,
             },
           },
+          parentProduct: {
+            select: {
+              id: true,
+              name: true,
+              sku: true,
+              imageUrl: true,
+              status: true,
+            },
+          },
         },
       });
 
@@ -807,6 +847,33 @@ export class ProductService {
 
       this.logger.log(`Updating product: ${id} for user: ${userId}`);
       this.logger.debug(`Update data: ${JSON.stringify(updateProductDto)}`);
+
+      // Handle parentSku - convert to parentProductId
+      let parentProductId: number | null | undefined;
+      if (updateProductDto.parentSku !== undefined) {
+        if (updateProductDto.parentSku === null || updateProductDto.parentSku === '') {
+          // Explicitly setting to null to remove parent
+          parentProductId = null;
+        } else {
+          const parentProduct = await this.prisma.product.findUnique({
+            where: {
+              sku_userId: {
+                sku: updateProductDto.parentSku,
+                userId,
+              },
+            },
+            select: { id: true },
+          });
+
+          if (!parentProduct) {
+            throw new BadRequestException(`Parent product with SKU "${updateProductDto.parentSku}" not found`);
+          }
+
+          parentProductId = parentProduct.id;
+          this.logger.log(`Resolved parent SKU "${updateProductDto.parentSku}" to parent product ID: ${parentProductId}`);
+        }
+      }
+
       // Validate category if being updated
       if (updateProductDto.categoryId !== undefined && updateProductDto.categoryId !== null) {
         await this.validateCategory(updateProductDto.categoryId, userId);
@@ -859,8 +926,15 @@ export class ProductService {
         updateData.familyId = updateProductDto.familyId;
       }
 
-      // Handle parentProductId to support variant linking/unlinking with inheritance
-      if (updateProductDto.parentProductId !== undefined) {
+      // Handle parentProductId (from parentSku or direct parentProductId)
+      if (parentProductId !== undefined) {
+        updateData.parentProductId = parentProductId;
+        
+        // If setting a parent (making this product a variant), inherit family and attributes
+        if (parentProductId !== null) {
+          await this.inheritFromParentProduct(id, parentProductId, userId);
+        }
+      } else if (updateProductDto.parentProductId !== undefined) {
         updateData.parentProductId = updateProductDto.parentProductId;
         
         // If setting a parent (making this product a variant), inherit family and attributes
@@ -1771,6 +1845,13 @@ export class ProductService {
         status: variant.status,
       })) : undefined,
       totalVariants: variants.length,
+      parentProduct: product.parentProduct ? {
+        id: product.parentProduct.id,
+        name: product.parentProduct.name,
+        sku: product.parentProduct.sku,
+        imageUrl: product.parentProduct.imageUrl,
+        status: product.parentProduct.status,
+      } : undefined,
       attributes,
       assets,
     };

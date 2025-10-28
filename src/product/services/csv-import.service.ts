@@ -16,6 +16,7 @@ interface CsvRow {
 interface NormalizedCsvRow {
   name?: string;
   sku?: string;
+  parentSku?: string;
   family?: string;
   category?: string;
   productLink?: string;
@@ -46,6 +47,9 @@ const CSV_FIELD_MAPPINGS: Record<string, string> = {
   'product name': 'name',
   'product_sku': 'sku',
   'product sku': 'sku',
+  'parent_sku': 'parentSku',
+  'parent sku': 'parentSku',
+  'parent': 'parentSku',
   'family_name': 'family',
   'family name': 'family',
   'category_name': 'category',
@@ -61,7 +65,7 @@ const CSV_FIELD_MAPPINGS: Record<string, string> = {
 };
 
 const SKIP_COLUMNS = new Set([
-  'name', 'sku', 'productLink', 'imageUrl', 'subImages', 'category', 'family', 'status'
+  'name', 'sku', 'parentSku', 'productLink', 'imageUrl', 'subImages', 'category', 'family', 'status'
 ]);
 
 const ATTRIBUTE_TYPE_COMPATIBILITY: Record<string, string[]> = {
@@ -314,10 +318,14 @@ export class CsvImportService {
       throw new Error('Missing required fields: name and sku are mandatory');
     }
 
-    // Prepare product data
-    const productData = await this.buildProductData(row, userId);
-
-    await this.productService.upsertProductFromCsv(productData, userId);
+    // Check if this product has a parent SKU (making it a variant)
+    if (row.parentSku && row.parentSku.trim()) {
+      await this.createVariantProduct(row, userId);
+    } else {
+      // Prepare product data for regular product
+      const productData = await this.buildProductData(row, userId);
+      await this.productService.upsertProductFromCsv(productData, userId);
+    }
   }
 
   private async buildProductData(row: NormalizedCsvRow, userId: number): Promise<any> {
@@ -338,6 +346,252 @@ export class CsvImportService {
       familyId,
       attributesWithValues: attributeValuePairs,
     };
+  }
+
+  private async createVariantProduct(row: NormalizedCsvRow, userId: number): Promise<void> {
+    this.logger.debug(`Processing variant product with parent SKU: ${row.parentSku}`);
+
+    const parentSku = row.parentSku!.trim();
+
+    // Find or create the parent product
+    let parentProduct = await this.prisma.product.findUnique({
+      where: {
+        sku_userId: {
+          sku: parentSku,
+          userId,
+        },
+      },
+      include: {
+        family: true,
+        attributes: {
+          include: {
+            attribute: true,
+          },
+        },
+      },
+    });
+
+    // If parent product doesn't exist, create it with basic info
+    if (!parentProduct) {
+      this.logger.warn(`Parent product with SKU ${parentSku} not found, creating placeholder product`);
+      
+      parentProduct = await this.prisma.product.create({
+        data: {
+          name: `Parent Product - ${parentSku}`,
+          sku: parentSku,
+          userId,
+          status: 'incomplete',
+        },
+        include: {
+          family: true,
+          attributes: {
+            include: {
+              attribute: true,
+            },
+          },
+        },
+      });
+    }
+
+    // Verify parent is not a variant itself
+    if (parentProduct.parentProductId) {
+      throw new Error(`Cannot add variant to ${parentSku} because it is itself a variant. Variants cannot have their own variants.`);
+    }
+
+    // Build variant product data
+    const categoryId = row.category ? await this.getOrCreateCategory(row.category.trim(), userId) : parentProduct.categoryId;
+    const familyId = row.family ? await this.getOrCreateFamily(row.family.trim(), userId) : parentProduct.familyId;
+    
+    // Parse attributes for the variant
+    const attributeValuePairs = await this.parseAndCreateAttributes(row, userId);
+
+    // Check if variant with this SKU already exists
+    const existingVariant = await this.prisma.product.findUnique({
+      where: {
+        sku_userId: {
+          sku: row.sku!.trim(),
+          userId,
+        },
+      },
+    });
+
+    if (existingVariant) {
+      // Update existing variant
+      this.logger.log(`Updating existing variant product: ${row.sku}`);
+      
+      await this.prisma.product.update({
+        where: { id: existingVariant.id },
+        data: {
+          name: row.name!.trim(),
+          productLink: row.productLink?.trim(),
+          imageUrl: row.imageUrl?.trim(),
+          subImages: this.parseSubImages(row.subImages || ''),
+          categoryId,
+          familyId,
+          parentProductId: parentProduct.id,
+        },
+      });
+
+      // Update attributes
+      if (attributeValuePairs.length > 0) {
+        // Remove existing product attributes
+        await this.prisma.productAttribute.deleteMany({
+          where: { 
+            productId: existingVariant.id,
+            familyAttributeId: null, // Only delete non-family attributes
+          },
+        });
+
+        // Add new attributes
+        for (const { attributeId, value } of attributeValuePairs) {
+          await this.prisma.productAttribute.upsert({
+            where: {
+              productId_attributeId: {
+                productId: existingVariant.id,
+                attributeId,
+              },
+            },
+            update: {
+              value: value || null,
+            },
+            create: {
+              productId: existingVariant.id,
+              attributeId,
+              value: value || null,
+            },
+          });
+        }
+      }
+
+      // Recalculate status
+      const status = await this.calculateProductStatus(existingVariant.id);
+      await this.prisma.product.update({ 
+        where: { id: existingVariant.id }, 
+        data: { status } 
+      });
+    } else {
+      // Create new variant
+      this.logger.log(`Creating new variant product: ${row.sku} for parent: ${parentSku}`);
+      
+      const variant = await this.prisma.product.create({
+        data: {
+          name: row.name!.trim(),
+          sku: row.sku!.trim(),
+          productLink: row.productLink?.trim(),
+          imageUrl: row.imageUrl?.trim(),
+          subImages: this.parseSubImages(row.subImages || ''),
+          categoryId,
+          familyId,
+          parentProductId: parentProduct.id,
+          userId,
+          status: 'incomplete',
+        },
+      });
+
+      // Copy parent attributes to variant if no custom attributes provided
+      if (attributeValuePairs.length === 0 && parentProduct.attributes && parentProduct.attributes.length > 0) {
+        const attributesToCopy = parentProduct.attributes.map(attr => ({
+          productId: variant.id,
+          attributeId: attr.attributeId,
+          familyAttributeId: attr.familyAttributeId,
+          value: attr.value,
+        }));
+
+        await this.prisma.productAttribute.createMany({
+          data: attributesToCopy,
+          skipDuplicates: true,
+        });
+      } else if (attributeValuePairs.length > 0) {
+        // Add custom attributes
+        for (const { attributeId, value } of attributeValuePairs) {
+          await this.prisma.productAttribute.create({
+            data: {
+              productId: variant.id,
+              attributeId,
+              value: value || null,
+            },
+          });
+        }
+      }
+
+      // Calculate status
+      const status = await this.calculateProductStatus(variant.id);
+      await this.prisma.product.update({ 
+        where: { id: variant.id }, 
+        data: { status } 
+      });
+    }
+  }
+
+  private async calculateProductStatus(productId: number): Promise<string> {
+    // Get the product with all its attributes and family attributes
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+      include: {
+        family: {
+          include: {
+            familyAttributes: {
+              where: { isRequired: true },
+            },
+          },
+        },
+        attributeGroup: {
+          include: {
+            attributes: {
+              where: { required: true },
+            },
+          },
+        },
+        attributes: true,
+      },
+    });
+
+    if (!product) {
+      return 'incomplete';
+    }
+
+    // Check if all required family attributes have values
+    if (product.family && product.family.familyAttributes.length > 0) {
+      const familyAttributeIds = product.family.familyAttributes.map(fa => fa.attributeId);
+      const productFamilyAttributes = product.attributes.filter(pa => 
+        pa.familyAttributeId !== null && familyAttributeIds.includes(pa.attributeId)
+      );
+      
+      if (productFamilyAttributes.length < product.family.familyAttributes.length) {
+        return 'incomplete';
+      }
+
+      // Check if any required family attribute has no value
+      const missingValues = productFamilyAttributes.some(pa => !pa.value || pa.value.trim() === '');
+      if (missingValues) {
+        return 'incomplete';
+      }
+    }
+
+    // Check if all required attribute group attributes have values
+    if (product.attributeGroup && product.attributeGroup.attributes.length > 0) {
+      const requiredAttributeIds = product.attributeGroup.attributes.map(aga => aga.attributeId);
+      const productRequiredAttributes = product.attributes.filter(pa => 
+        requiredAttributeIds.includes(pa.attributeId)
+      );
+      
+      if (productRequiredAttributes.length < product.attributeGroup.attributes.length) {
+        return 'incomplete';
+      }
+
+      // Check if any required attribute has no value
+      const missingValues = productRequiredAttributes.some(pa => !pa.value || pa.value.trim() === '');
+      if (missingValues) {
+        return 'incomplete';
+      }
+    }
+
+    // Check basic required fields
+    if (!product.name || !product.sku) {
+      return 'incomplete';
+    }
+
+    return 'complete';
   }
 
   private parseSubImages(subImagesStr: string): string[] {
@@ -551,6 +805,7 @@ export class CsvImportService {
     const skipColumns = new Set([
       'name',
       'sku',
+      'parentSku',
       'productLink',
       'imageUrl',
       'subImages',

@@ -53,6 +53,7 @@ export class ProductResponseDto {
   };
   variants?: ProductVariantSummaryDto[]; // All products that are variants of this product
   totalVariants?: number; // Count of variants
+  parentProduct?: ProductVariantSummaryDto; // Parent product if this is a variant
   attributes?: any[]; // List of attribute IDs or details
   assets?: any[]; // List of asset IDs or details
 

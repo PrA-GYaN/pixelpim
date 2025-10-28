@@ -543,6 +543,52 @@ export class AttributeService {
       this.logger.warn(`Failed to clear attribute cache: ${error.message}`);
     }
   }
+
+  async getAttributeSuggestions(productId: number, attributeId: number, query: string, userId: number): Promise<string[]> {
+    try {
+      this.logger.log(`Getting attribute suggestions for attribute ${attributeId}, query: ${query}, excluding product ${productId}, user: ${userId}`);
+
+      // Create case-insensitive regex for starts with
+      const regex = new RegExp(`^${query}`, 'i');
+
+      // Fetch products excluding the current one, that have the attribute
+      const products = await this.prisma.product.findMany({
+        where: {
+          userId,
+          id: { not: productId },
+          attributes: {
+            some: {
+              attributeId,
+              value: { not: null }
+            }
+          }
+        },
+        include: {
+          attributes: {
+            where: { attributeId },
+            select: { value: true }
+          }
+        }
+      });
+
+      // Extract and filter values
+      const suggestions = new Set<string>();
+      for (const product of products) {
+        for (const attr of product.attributes) {
+          if (attr.value && regex.test(attr.value)) {
+            suggestions.add(attr.value);
+          }
+        }
+      }
+
+      const result = Array.from(suggestions);
+      this.logger.log(`Found ${result.length} suggestions`);
+      return result;
+    } catch (error) {
+      this.logger.error(`Failed to get attribute suggestions: ${error.message}`, error.stack);
+      throw new BadRequestException('Failed to fetch attribute suggestions');
+    }
+  }
 }
 
 

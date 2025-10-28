@@ -84,4 +84,10 @@ export class CreateProductDto {
   @Transform(({ value }) => value === null || value === undefined ? value : parseInt(value))
   familyId?: number | null;
 
+  @IsOptional()
+  @IsString()
+  @Length(4, 40, { message: 'Parent SKU must be between 4 and 40 characters' })
+  @Transform(({ value }) => value?.trim())
+  parentSku?: string;
+
 }
