@@ -244,6 +244,12 @@ export class ProductService {
       await this.prisma.product.update({ where: { id: product.id }, data: { status } });
       this.logger.log(`Product ${product.id} created with initial status: ${status}`);
 
+      // If this product has a parent, inherit family and merge attributes
+      if (parentProductId) {
+        await this.inheritFamilyFromParent(product.id, parentProductId, userId);
+        await this.mergeCustomAttributes(product.id, parentProductId, userId);
+      }
+
       // Fetch updated product with status
       const result = await this.findOne(product.id, userId);
       this.logger.log(`Successfully created product with ID: ${result.id}`);
@@ -930,16 +936,18 @@ export class ProductService {
       if (parentProductId !== undefined) {
         updateData.parentProductId = parentProductId;
         
-        // If setting a parent (making this product a variant), inherit family and attributes
+        // If setting a parent (making this product a variant), inherit family and merge attributes
         if (parentProductId !== null) {
-          await this.inheritFromParentProduct(id, parentProductId, userId);
+          await this.inheritFamilyFromParent(id, parentProductId, userId);
+          await this.mergeCustomAttributes(id, parentProductId, userId);
         }
       } else if (updateProductDto.parentProductId !== undefined) {
         updateData.parentProductId = updateProductDto.parentProductId;
         
-        // If setting a parent (making this product a variant), inherit family and attributes
+        // If setting a parent (making this product a variant), inherit family and merge attributes
         if (updateProductDto.parentProductId !== null) {
-          await this.inheritFromParentProduct(id, updateProductDto.parentProductId, userId);
+          await this.inheritFamilyFromParent(id, updateProductDto.parentProductId, userId);
+          await this.mergeCustomAttributes(id, updateProductDto.parentProductId, userId);
         }
       }
 
@@ -948,6 +956,11 @@ export class ProductService {
         where: { id },
         data: updateData,
       });
+
+      // If family was changed, update all variants to inherit the new family
+      if (updateProductDto.familyId !== undefined) {
+        await this.updateVariantsFamilyAndAttributes(id, userId);
+      }
 
       // After updating attributes/assets, recalculate status
 
@@ -1289,6 +1302,9 @@ export class ProductService {
       const product = await this.findOne(id, userId);
 
       this.logger.log(`Deleting product: ${id} for user: ${userId}`);
+
+      // Unlink all variants before deleting the parent product
+      await this.unlinkVariantsOnDelete(id, userId);
 
       await this.prisma.product.delete({
         where: { id },
@@ -3082,5 +3098,263 @@ export class ProductService {
 
   async getExecutionStats(jobId: string, userId: number) {
     return this.importSchedulerService.getExecutionStats(jobId, userId);
+  }
+
+  /**
+   * Helper: Inherit family from parent product to variant
+   * When a product becomes a variant, it should inherit the parent's family
+   * even if it previously had a different family.
+   */
+  private async inheritFamilyFromParent(variantId: number, parentId: number, userId: number): Promise<void> {
+    try {
+      this.logger.log(`[inheritFamilyFromParent] Starting family inheritance for variant ${variantId} from parent ${parentId}`);
+
+      // Fetch parent product with family information
+      const parentProduct = await this.prisma.product.findFirst({
+        where: { id: parentId, userId },
+        select: { 
+          id: true, 
+          familyId: true,
+          parentProductId: true 
+        },
+      });
+
+      if (!parentProduct) {
+        throw new BadRequestException('Parent product not found or does not belong to you');
+      }
+
+      // Prevent variants from being parents
+      if (parentProduct.parentProductId) {
+        throw new BadRequestException('Cannot use a variant product as a parent. Variants cannot have their own variants.');
+      }
+
+      // If parent has a family, assign it to the variant (overriding any existing family)
+      if (parentProduct.familyId) {
+        await this.prisma.product.update({
+          where: { id: variantId },
+          data: { familyId: parentProduct.familyId },
+        });
+        this.logger.log(`[inheritFamilyFromParent] Variant ${variantId} now has family ${parentProduct.familyId} from parent`);
+      } else {
+        this.logger.log(`[inheritFamilyFromParent] Parent ${parentId} has no family, skipping family inheritance`);
+      }
+
+    } catch (error) {
+      this.logger.error(`[inheritFamilyFromParent] Failed to inherit family: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
+  /**
+   * Helper: Merge custom attributes from parent to variant
+   * Variant's existing attributes take priority over parent's attributes.
+   * If variant has an attribute with no value, use parent's value.
+   * If variant doesn't have an attribute, copy it from parent.
+   */
+  private async mergeCustomAttributes(variantId: number, parentId: number, userId: number): Promise<void> {
+    try {
+      this.logger.log(`[mergeCustomAttributes] Starting attribute merge for variant ${variantId} from parent ${parentId}`);
+
+      // Fetch parent product with attributes
+      const parentProduct = await this.prisma.product.findFirst({
+        where: { id: parentId, userId },
+        include: {
+          attributes: {
+            include: {
+              attribute: true,
+            },
+          },
+        },
+      });
+
+      if (!parentProduct) {
+        throw new BadRequestException('Parent product not found');
+      }
+
+      // Fetch variant product with attributes
+      const variantProduct = await this.prisma.product.findFirst({
+        where: { id: variantId, userId },
+        include: {
+          attributes: {
+            include: {
+              attribute: true,
+            },
+          },
+        },
+      });
+
+      if (!variantProduct) {
+        throw new NotFoundException('Variant product not found');
+      }
+
+      // Create a map of variant's existing attributes
+      const variantAttributeMap = new Map(
+        variantProduct.attributes.map(attr => [attr.attributeId, attr])
+      );
+
+      let attributesMerged = 0;
+      let attributesAdded = 0;
+      let attributesKept = 0;
+
+      // Process each parent attribute
+      for (const parentAttr of parentProduct.attributes) {
+        const variantAttr = variantAttributeMap.get(parentAttr.attributeId);
+
+        if (variantAttr) {
+          // Variant already has this attribute
+          if (!variantAttr.value || variantAttr.value.trim() === '') {
+            // Variant has attribute but no value - use parent's value
+            if (parentAttr.value && parentAttr.value.trim() !== '') {
+              await this.prisma.productAttribute.update({
+                where: {
+                  productId_attributeId: {
+                    productId: variantId,
+                    attributeId: parentAttr.attributeId,
+                  },
+                },
+                data: {
+                  value: parentAttr.value,
+                  familyAttributeId: parentAttr.familyAttributeId || variantAttr.familyAttributeId,
+                },
+              });
+              attributesMerged++;
+              this.logger.log(`[mergeCustomAttributes] Merged parent value for attribute ${parentAttr.attributeId} into variant ${variantId}`);
+            }
+          } else {
+            // Variant has attribute with value - keep variant's value (priority)
+            attributesKept++;
+            this.logger.log(`[mergeCustomAttributes] Kept variant's value for attribute ${parentAttr.attributeId} (variant priority)`);
+            
+            // Update familyAttributeId if parent has it and variant doesn't
+            if (parentAttr.familyAttributeId && !variantAttr.familyAttributeId) {
+              await this.prisma.productAttribute.update({
+                where: {
+                  productId_attributeId: {
+                    productId: variantId,
+                    attributeId: parentAttr.attributeId,
+                  },
+                },
+                data: {
+                  familyAttributeId: parentAttr.familyAttributeId,
+                },
+              });
+            }
+          }
+        } else {
+          // Variant doesn't have this attribute - copy from parent
+          await this.prisma.productAttribute.create({
+            data: {
+              productId: variantId,
+              attributeId: parentAttr.attributeId,
+              familyAttributeId: parentAttr.familyAttributeId,
+              value: parentAttr.value,
+            },
+          });
+          attributesAdded++;
+          this.logger.log(`[mergeCustomAttributes] Added new attribute ${parentAttr.attributeId} from parent to variant ${variantId}`);
+        }
+      }
+
+      this.logger.log(
+        `[mergeCustomAttributes] Completed for variant ${variantId}: ` +
+        `${attributesAdded} added, ${attributesMerged} merged, ${attributesKept} kept (variant priority)`
+      );
+
+      // Recalculate variant status after attribute merge
+      const status = await this.calculateProductStatus(variantId);
+      await this.prisma.product.update({
+        where: { id: variantId },
+        data: { status },
+      });
+      this.logger.log(`[mergeCustomAttributes] Updated variant ${variantId} status to ${status}`);
+
+    } catch (error) {
+      this.logger.error(`[mergeCustomAttributes] Failed to merge attributes: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
+  /**
+   * Helper: Unlink all variants when parent product is deleted
+   * Sets parentProductId to null for all variants of the deleted product.
+   * This makes them standalone products instead of orphaned variants.
+   */
+  private async unlinkVariantsOnDelete(parentId: number, userId: number): Promise<void> {
+    try {
+      this.logger.log(`[unlinkVariantsOnDelete] Unlinking variants for parent product ${parentId}`);
+
+      // Find all variants of this parent
+      const variants = await this.prisma.product.findMany({
+        where: {
+          parentProductId: parentId,
+          userId,
+        },
+        select: { id: true, sku: true },
+      });
+
+      if (variants.length === 0) {
+        this.logger.log(`[unlinkVariantsOnDelete] No variants found for parent ${parentId}`);
+        return;
+      }
+
+      // Unlink all variants by setting parentProductId to null
+      const result = await this.prisma.product.updateMany({
+        where: {
+          parentProductId: parentId,
+          userId,
+        },
+        data: {
+          parentProductId: null,
+        },
+      });
+
+      this.logger.log(
+        `[unlinkVariantsOnDelete] Successfully unlinked ${result.count} variants from parent ${parentId}. ` +
+        `Variants are now standalone products: ${variants.map(v => v.sku).join(', ')}`
+      );
+
+    } catch (error) {
+      this.logger.error(`[unlinkVariantsOnDelete] Failed to unlink variants: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
+  /**
+   * Helper: Update all variants when parent's family changes
+   * This ensures all variants stay synchronized with their parent's family
+   */
+  private async updateVariantsFamilyAndAttributes(parentId: number, userId: number): Promise<void> {
+    try {
+      this.logger.log(`[updateVariantsFamilyAndAttributes] Updating all variants for parent ${parentId}`);
+
+      // Find all variants of this parent
+      const variants = await this.prisma.product.findMany({
+        where: {
+          parentProductId: parentId,
+          userId,
+        },
+        select: { id: true, sku: true },
+      });
+
+      if (variants.length === 0) {
+        this.logger.log(`[updateVariantsFamilyAndAttributes] No variants found for parent ${parentId}`);
+        return;
+      }
+
+      // Update each variant's family and merge attributes
+      for (const variant of variants) {
+        await this.inheritFamilyFromParent(variant.id, parentId, userId);
+        await this.mergeCustomAttributes(variant.id, parentId, userId);
+      }
+
+      this.logger.log(
+        `[updateVariantsFamilyAndAttributes] Successfully updated ${variants.length} variants: ` +
+        `${variants.map(v => v.sku).join(', ')}`
+      );
+
+    } catch (error) {
+      this.logger.error(`[updateVariantsFamilyAndAttributes] Failed to update variants: ${error.message}`, error.stack);
+      throw error;
+    }
   }
 }
