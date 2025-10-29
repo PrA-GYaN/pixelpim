@@ -18,7 +18,7 @@ export class WooCommerceService extends BaseIntegrationService {
   ) {
     super(prisma, configService);
     // Initialize WooCommerce connection
-    this.connect();
+    // this.connect();
   }
 
   async connect(): Promise<void> 
