@@ -18,7 +18,7 @@ export class WooCommerceService extends BaseIntegrationService {
   ) {
     super(prisma, configService);
     // Initialize WooCommerce connection
-    // this.connect();
+    this.connect();
   }
 
   async connect(): Promise<void> 
@@ -100,7 +100,7 @@ export class WooCommerceService extends BaseIntegrationService {
         throw new BadRequestException(`Product ${productId} is missing SKU`);
       }
 
-      const wooProductData = this.transformProductToWooCommerce(product);
+      const wooProductData = await this.transformProductToWooCommerce(product);
       const existingProduct = await this.findWooCommerceProductBySku(product.sku);
 
       let wooProductId: number;
@@ -423,61 +423,208 @@ export class WooCommerceService extends BaseIntegrationService {
     return { success: true, productId };
   }
 
-  private transformProductToWooCommerce(product: any): any {
-    const images: Array<{ src: string; alt: string }> = [];
+  private async transformProductToWooCommerce(product: any): Promise<any> {
+    // Helper function to sanitize HTML
+    const sanitizeHtml = (html: string): string => {
+      if (!html) return '';
+      return html
+        .replace(/<script[^>]*>.*?<\/script>/gi, '')
+        .replace(/<iframe[^>]*>.*?<\/iframe>/gi, '')
+        .replace(/javascript:/gi, '')
+        .replace(/on\w+\s*=/gi, '');
+    };
 
+    // Helper function to find attribute by name pattern
+    const findAttribute = (patterns: string[]): any => {
+      return product.attributes?.find((attr: any) =>
+        patterns.some(pattern => 
+          attr.attribute.name.toLowerCase().includes(pattern.toLowerCase())
+        )
+      );
+    };
+
+    // Helper function to extract numeric value
+    const extractNumeric = (value: string): string => {
+      if (!value) return '';
+      return value.replace(/[^\d.]/g, '');
+    };
+
+    // 1. Build images array
+    const images: Array<{ src: string; alt: string }> = [];
     if (product.imageUrl) {
       images.push({ src: product.imageUrl, alt: product.name });
     }
 
     if (product.subImages && product.subImages.length > 0) {
       product.subImages.forEach((url: string, index: number) => {
-        images.push({ src: url, alt: `${product.name} - Image ${index + 1}` });
+        images.push({ src: url, alt: `${product.name} - Gallery ${index + 1}` });
       });
     }
 
-    if (product.assets && product.assets.length > 0) {
-      product.assets.forEach((assetRelation: any) => {
-        if (assetRelation.asset && assetRelation.asset.filePath) {
-          images.push({
-            src: assetRelation.asset.filePath,
-            alt: assetRelation.asset.name,
-          });
-        }
-      });
+    // 2. Extract pricing from attributes
+    const regularPriceAttr = findAttribute(['regular_price', 'price', 'regular price']);
+    const salePriceAttr = findAttribute(['sale_price', 'sale price', 'discount price']);
+    const saleStartDateAttr = findAttribute(['sale_start_date', 'sale start', 'discount start']);
+    const saleEndDateAttr = findAttribute(['sale_end_date', 'sale end', 'discount end']);
+
+    const regularPrice = regularPriceAttr ? extractNumeric(regularPriceAttr.value) : '';
+    const salePrice = salePriceAttr ? extractNumeric(salePriceAttr.value) : '';
+
+    // 3. Extract weight and dimensions from attributes
+    const weightAttr = findAttribute(['weight']);
+    const lengthAttr = findAttribute(['length', 'dimension_length']);
+    const widthAttr = findAttribute(['width', 'dimension_width']);
+    const heightAttr = findAttribute(['height', 'dimension_height']);
+
+    const dimensions: any = {};
+    if (lengthAttr?.value) dimensions.length = extractNumeric(lengthAttr.value);
+    if (widthAttr?.value) dimensions.width = extractNumeric(widthAttr.value);
+    if (heightAttr?.value) dimensions.height = extractNumeric(heightAttr.value);
+
+    // 4. Extract stock status
+    const stockStatusAttr = findAttribute(['stock_status', 'stock status', 'availability']);
+    let stockStatus = 'instock';
+    if (stockStatusAttr?.value) {
+      const value = stockStatusAttr.value.toLowerCase();
+      if (value.includes('out') || value.includes('unavailable')) {
+        stockStatus = 'outofstock';
+      } else if (value.includes('backorder')) {
+        stockStatus = 'onbackorder';
+      }
     }
 
-    let description = product.productLink 
-      ? `<p>Product Link: <a href="${product.productLink}">${product.productLink}</a></p>` 
-      : '';
+    // 5. Define mapped attribute names (these will NOT appear in WooCommerce attributes)
+    const mappedAttributeNames = [
+      'regular_price', 'price', 'regular price',
+      'sale_price', 'sale price', 'discount price',
+      'sale_start_date', 'sale start', 'discount start',
+      'sale_end_date', 'sale end', 'discount end',
+      'weight', 'length', 'width', 'height',
+      'dimension_length', 'dimension_width', 'dimension_height',
+      'stock_status', 'stock status', 'availability',
+      'description', 'desc', 'long description'
+    ];
+
+    // 6. Build WooCommerce attributes array
+    // All non-mapped attributes should be created as WooCommerce attributes
+    const wooAttributes: Array<{ name: string; options: string[]; visible: boolean; variation: boolean }> = [];
 
     if (product.attributes && product.attributes.length > 0) {
-      description += '<h3>Attributes:</h3><ul>';
-      product.attributes.forEach((attr: any) => {
-        if (attr.value) {
-          description += `<li><strong>${attr.attribute.name}:</strong> ${attr.value}</li>`;
+      for (const attr of product.attributes) {
+        const attrName = attr.attribute.name.toLowerCase();
+        const isMapped = mappedAttributeNames.some(name => attrName.includes(name.toLowerCase()));
+        
+        if (!isMapped && attr.value) {
+          // Parse array values
+          let options: string[] = [];
+          
+          try {
+            // Check if value is a JSON array string
+            if (typeof attr.value === 'string' && attr.value.trim().startsWith('[')) {
+              const parsed = JSON.parse(attr.value);
+              options = Array.isArray(parsed) ? parsed : [attr.value];
+            } else {
+              options = [attr.value];
+            }
+          } catch (e) {
+            // If parsing fails, treat as single value
+            options = [attr.value];
+          }
+
+          // Check if this is a variation attribute (color, size, material, etc.)
+          const variationPatterns = ['color', 'colour', 'size', 'material', 'style'];
+          const isVariation = variationPatterns.some(pattern => attrName.includes(pattern));
+          
+          // Ensure attribute exists in WooCommerce
+          await this.ensureWooCommerceAttribute(attr.attribute.name, options);
+          
+          wooAttributes.push({
+            name: attr.attribute.name,
+            options: options,
+            visible: true,
+            variation: isVariation
+          });
+        }
+      }
+    }
+
+    // 7. Build description HTML - ONLY from description attribute, NOT from other attributes
+    let description = '';
+
+    // Add description from attributes
+    const descriptionAttr = findAttribute(['description', 'desc', 'long description']);
+    if (descriptionAttr?.value) {
+      description += sanitizeHtml(`<div class="product-description">${descriptionAttr.value}</div>`);
+    }
+
+    // Add assets as media in description
+    if (product.assets && product.assets.length > 0) {
+      description += '<h3>Additional Media:</h3><div class="product-media">';
+      product.assets.forEach((assetRelation: any) => {
+        if (assetRelation.asset) {
+          const asset = assetRelation.asset;
+          const isImage = asset.mimeType?.startsWith('image/');
+          
+          if (isImage && asset.filePath) {
+            description += sanitizeHtml(`<img src="${asset.filePath}" alt="${asset.name}" style="max-width: 100%; height: auto; margin: 10px 0;" />`);
+          } else if (asset.filePath) {
+            description += sanitizeHtml(`<p><a href="${asset.filePath}" download="${asset.fileName}">${asset.name}</a></p>`);
+          }
         }
       });
-      description += '</ul>';
+      description += '</div>';
     }
 
-    let price = '0';
-    const priceAttr = product.attributes?.find((attr: any) =>
-      attr.attribute.name.toLowerCase().includes('price')
-    );
-    if (priceAttr && priceAttr.value) {
-      price = priceAttr.value.replace(/[^\d.]/g, '');
+    // 8. Build categories - ensure they exist in WooCommerce
+    const categories: Array<{ id: number }> = [];
+    if (product.category) {
+      const categoryId = await this.ensureWooCommerceCategory(product.category.name);
+      categories.push({ id: categoryId });
     }
 
-    return {
+    // 9. Extract tags if available
+    const tagsAttr = findAttribute(['tags', 'product tags']);
+    const tags: Array<{ name: string }> = [];
+    if (tagsAttr?.value) {
+      const tagValues = tagsAttr.value.split(',').map((tag: string) => tag.trim());
+      tagValues.forEach((tag: string) => {
+        if (tag) tags.push({ name: tag });
+      });
+    }
+
+    // 10. Determine product status
+    let productStatus = 'draft';
+    const statusAttr = findAttribute(['status', 'publish status']);
+    if (statusAttr?.value) {
+      const value = statusAttr.value.toLowerCase();
+      productStatus = value.includes('publish') ? 'publish' : 'draft';
+    } else if (product.status) {
+      productStatus = product.status === 'complete' ? 'publish' : 'draft';
+    }
+
+    // 11. Build final WooCommerce product object
+    const wooProduct: any = {
       name: product.name,
       sku: product.sku,
-      description,
-      regular_price: price,
-      images,
-      categories: product.category ? [{ name: product.category.name }] : [],
-      status: product.status === 'incomplete' ? 'draft' : 'publish',
+      type: 'simple',
+      status: productStatus,
+      description: sanitizeHtml(description) || '', // Empty string if no description
     };
+
+    // Add optional fields only if they have values
+    if (regularPrice) wooProduct.regular_price = regularPrice;
+    if (salePrice) wooProduct.sale_price = salePrice;
+    if (saleStartDateAttr?.value) wooProduct.date_on_sale_from = saleStartDateAttr.value;
+    if (saleEndDateAttr?.value) wooProduct.date_on_sale_to = saleEndDateAttr.value;
+    if (weightAttr?.value) wooProduct.weight = extractNumeric(weightAttr.value);
+    if (Object.keys(dimensions).length > 0) wooProduct.dimensions = dimensions;
+    wooProduct.stock_status = stockStatus;
+    if (images.length > 0) wooProduct.images = images;
+    if (categories.length > 0) wooProduct.categories = categories;
+    if (tags.length > 0) wooProduct.tags = tags;
+    if (wooAttributes.length > 0) wooProduct.attributes = wooAttributes;
+
+    return wooProduct;
   }
 
   private async findWooCommerceProductBySku(sku: string): Promise<any | null> {
@@ -546,6 +693,120 @@ export class WooCommerceService extends BaseIntegrationService {
     } catch (error) {
       this.logger.error('Error getting WooCommerce product count:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Ensure a category exists in WooCommerce, create if it doesn't
+   * @param categoryName The category name
+   * @returns The WooCommerce category ID
+   */
+  private async ensureWooCommerceCategory(categoryName: string): Promise<number> {
+    try {
+      // Search for existing category
+      const response = await this.wooCommerce.get('products/categories', { 
+        search: categoryName,
+        per_page: 100 
+      });
+      
+      const categories = response.data;
+      const existingCategory = categories.find(
+        (cat: any) => cat.name.toLowerCase() === categoryName.toLowerCase()
+      );
+
+      if (existingCategory) {
+        this.logger.log(`Category "${categoryName}" already exists with ID: ${existingCategory.id}`);
+        return existingCategory.id;
+      }
+
+      // Create new category
+      this.logger.log(`Creating new category: "${categoryName}"`);
+      const createResponse = await this.wooCommerce.post('products/categories', {
+        name: categoryName
+      });
+
+      this.logger.log(`Created category "${categoryName}" with ID: ${createResponse.data.id}`);
+      return createResponse.data.id;
+    } catch (error) {
+      this.logger.error(`Error ensuring category "${categoryName}":`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Ensure an attribute exists in WooCommerce, create if it doesn't
+   * @param attributeName The attribute name
+   * @param options The attribute options (terms)
+   */
+  private async ensureWooCommerceAttribute(attributeName: string, options: string[]): Promise<void> {
+    try {
+      // Get all attributes
+      const response = await this.wooCommerce.get('products/attributes');
+      const attributes = response.data;
+      
+      // Find existing attribute (case-insensitive)
+      let attribute = attributes.find(
+        (attr: any) => attr.name.toLowerCase() === attributeName.toLowerCase()
+      );
+
+      // Create attribute if it doesn't exist
+      if (!attribute) {
+        this.logger.log(`Creating new attribute: "${attributeName}"`);
+        const createResponse = await this.wooCommerce.post('products/attributes', {
+          name: attributeName,
+          type: 'select',
+          order_by: 'menu_order',
+          has_archives: false
+        });
+        attribute = createResponse.data;
+        this.logger.log(`Created attribute "${attributeName}" with ID: ${attribute.id}`);
+      } else {
+        this.logger.log(`Attribute "${attributeName}" already exists with ID: ${attribute.id}`);
+      }
+
+      // Ensure all attribute terms (options) exist
+      if (options && options.length > 0) {
+        await this.ensureWooCommerceAttributeTerms(attribute.id, options);
+      }
+    } catch (error) {
+      this.logger.error(`Error ensuring attribute "${attributeName}":`, error);
+      // Don't throw - we'll still try to export the product
+      // WooCommerce might handle it as a custom attribute
+    }
+  }
+
+  /**
+   * Ensure attribute terms exist in WooCommerce, create if they don't
+   * @param attributeId The WooCommerce attribute ID
+   * @param terms The terms to ensure exist
+   */
+  private async ensureWooCommerceAttributeTerms(attributeId: number, terms: string[]): Promise<void> {
+    try {
+      // Get existing terms for this attribute
+      const response = await this.wooCommerce.get(`products/attributes/${attributeId}/terms`, {
+        per_page: 100
+      });
+      const existingTerms = response.data;
+
+      for (const termName of terms) {
+        if (!termName || termName.trim() === '') continue;
+
+        // Check if term already exists (case-insensitive)
+        const existingTerm = existingTerms.find(
+          (term: any) => term.name.toLowerCase() === termName.toLowerCase()
+        );
+
+        if (!existingTerm) {
+          // Create new term
+          this.logger.log(`Creating new term "${termName}" for attribute ID ${attributeId}`);
+          await this.wooCommerce.post(`products/attributes/${attributeId}/terms`, {
+            name: termName
+          });
+        }
+      }
+    } catch (error) {
+      this.logger.error(`Error ensuring attribute terms for attribute ${attributeId}:`, error);
+      // Don't throw - attribute might still work without pre-created terms
     }
   }
 }

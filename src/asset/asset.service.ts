@@ -5,12 +5,13 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateAssetDto, UpdateAssetDto } from './dto';
+import { CreateAssetDto, UpdateAssetDto, ExportAssetsDto, ExportType } from './dto';
 import {
   CloudinaryUtil,
   CloudinaryUploadResult,
 } from '../utils/cloudinary.util';
 import { PaginationUtils } from '../common';
+import { Builder } from 'xml2js';
 
 @Injectable()
 export class AssetService {
@@ -346,7 +347,198 @@ export class AssetService {
   }
 
   /**
-   * Export assets as JSON
+   * Export assets based on specified criteria
+   * @param userId - User ID
+   * @param exportDto - Export configuration
+   * @returns Exported data in requested format
+   */
+  async exportAssets(userId: number, exportDto: ExportAssetsDto) {
+    const { format, type, assetIds, assetGroupId, assetGroupIds, includeSubfolders } = exportDto;
+
+    // Build where condition based on export type
+    const whereCondition: any = { userId };
+
+    switch (type) {
+      case ExportType.ALL:
+        // No additional filters - export all assets
+        break;
+
+      case ExportType.SELECTED:
+        if (!assetIds || assetIds.length === 0) {
+          throw new BadRequestException('Asset IDs are required for selected export type');
+        }
+        whereCondition.id = { in: assetIds };
+        break;
+
+      case ExportType.FOLDER:
+        if (!assetGroupId) {
+          throw new BadRequestException('Asset group ID is required for folder export type');
+        }
+
+        if (includeSubfolders) {
+          // Get all descendant folders
+          const descendantIds = await this.getDescendantFolderIds(assetGroupId, userId);
+          whereCondition.assetGroupId = { in: [assetGroupId, ...descendantIds] };
+        } else {
+          whereCondition.assetGroupId = assetGroupId;
+        }
+        break;
+
+      case ExportType.MULTIPLE_FOLDERS:
+        if (!assetGroupIds || assetGroupIds.length === 0) {
+          throw new BadRequestException('Asset group IDs are required for multiple folders export type');
+        }
+
+        if (includeSubfolders) {
+          // Get all descendant folders for each selected folder
+          const allFolderIds = [...assetGroupIds];
+          for (const groupId of assetGroupIds) {
+            const descendantIds = await this.getDescendantFolderIds(groupId, userId);
+            allFolderIds.push(...descendantIds);
+          }
+          // Remove duplicates
+          const uniqueFolderIds = [...new Set(allFolderIds)];
+          whereCondition.assetGroupId = { in: uniqueFolderIds };
+        } else {
+          whereCondition.assetGroupId = { in: assetGroupIds };
+        }
+        break;
+
+      default:
+        throw new BadRequestException('Invalid export type');
+    }
+
+    // Fetch assets
+    const assets = await this.prisma.asset.findMany({
+      where: whereCondition,
+      select: {
+        id: true,
+        name: true,
+        filePath: true,
+        fileName: true,
+        mimeType: true,
+        size: true,
+        uploadDate: true,
+        createdAt: true,
+        updatedAt: true,
+        assetGroupId: true,
+        assetGroup: {
+          select: {
+            id: true,
+            groupName: true,
+            parentGroupId: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    if (assets.length === 0) {
+      throw new NotFoundException('No assets found matching the criteria');
+    }
+
+    // Transform assets to export format
+    const exportData = assets.map(asset => ({
+      id: asset.id.toString(),
+      name: asset.name,
+      url: asset.filePath,
+      fileName: asset.fileName,
+      mimeType: asset.mimeType,
+      size: asset.size.toString(),
+      formattedSize: CloudinaryUtil.formatFileSize(Number(asset.size)),
+      uploadDate: asset.uploadDate.toISOString(),
+      createdAt: asset.createdAt.toISOString(),
+      updatedAt: asset.updatedAt.toISOString(),
+      folder: asset.assetGroup ? {
+        id: asset.assetGroup.id.toString(),
+        name: asset.assetGroup.groupName,
+        parentId: asset.assetGroup.parentGroupId?.toString() || null,
+      } : null,
+    }));
+
+    // Return in requested format
+    if (format === 'xml') {
+      return this.convertToXml(exportData);
+    }
+
+    return {
+      totalAssets: exportData.length,
+      exportDate: new Date().toISOString(),
+      exportType: type,
+      assets: exportData,
+    };
+  }
+
+  /**
+   * Get all descendant folder IDs recursively
+   */
+  private async getDescendantFolderIds(parentGroupId: number, userId: number): Promise<number[]> {
+    const children = await this.prisma.assetGroup.findMany({
+      where: {
+        parentGroupId,
+        userId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    const childIds = children.map(child => child.id);
+    const descendantIds: number[] = [...childIds];
+
+    // Recursively get descendants of children
+    for (const childId of childIds) {
+      const nestedDescendants = await this.getDescendantFolderIds(childId, userId);
+      descendantIds.push(...nestedDescendants);
+    }
+
+    return descendantIds;
+  }
+
+  /**
+   * Convert asset data to XML format
+   */
+  private convertToXml(assets: any[]): string {
+    const builder = new Builder({
+      xmldec: { version: '1.0', encoding: 'UTF-8' },
+      renderOpts: { pretty: true, indent: '  ' },
+    });
+
+    const xmlData = {
+      assetExport: {
+        $: {
+          totalAssets: assets.length,
+          exportDate: new Date().toISOString(),
+        },
+        assets: {
+          asset: assets.map(asset => ({
+            id: asset.id,
+            name: asset.name,
+            url: asset.url,
+            fileName: asset.fileName,
+            mimeType: asset.mimeType,
+            size: asset.size,
+            formattedSize: asset.formattedSize,
+            uploadDate: asset.uploadDate,
+            createdAt: asset.createdAt,
+            updatedAt: asset.updatedAt,
+            folder: asset.folder ? {
+              id: asset.folder.id,
+              name: asset.folder.name,
+              parentId: asset.folder.parentId || '',
+            } : '',
+          })),
+        },
+      },
+    };
+
+    return builder.buildObject(xmlData);
+  }
+
+  /**
+   * Export assets as JSON (legacy method - kept for backward compatibility)
    * @param userId - User ID
    * @param assetGroupId - Optional: Filter by specific folder/group
    * @returns Array of assets in JSON format

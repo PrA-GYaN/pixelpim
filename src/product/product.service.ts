@@ -530,7 +530,7 @@ export class ProductService {
     search?: string,
     status?: string, 
     categoryId?: number | null, 
-    attributeId?: number, 
+    attributeIds?: number[], 
     attributeGroupId?: number | null, 
     familyId?: number | null,
     page: number = 1,
@@ -571,8 +571,33 @@ export class ProductService {
         whereCondition.categoryId = categoryId;
       }
 
-      if (attributeId) {
-        whereCondition.attributeId = attributeId;
+      // Handle attribute filtering - if product has ANY of the selected attributes
+      // OR if the product's family has ANY of the selected attributes
+      if (attributeIds && attributeIds.length > 0) {
+        whereCondition.OR = [
+          // Direct product attributes
+          {
+            attributes: {
+              some: {
+                attributeId: {
+                  in: attributeIds,
+                },
+              },
+            },
+          },
+          // Family attributes
+          {
+            family: {
+              familyAttributes: {
+                some: {
+                  attributeId: {
+                    in: attributeIds,
+                  },
+                },
+              },
+            },
+          },
+        ];
       }
 
       if (attributeGroupId !== undefined) {

@@ -70,7 +70,7 @@ export class ProductController {
     @Query('search') search?: string,
     @Query('status') status?: string,
     @Query('categoryId') categoryId?: string,
-    @Query('attributeId') attributeId?: string,
+    @Query('attributeIds') attributeIds?: string,
     @Query('attributeGroupId') attributeGroupId?: string,
     @Query('familyId') familyId?: string,
     @Query('page') page?: string,
@@ -81,7 +81,15 @@ export class ProductController {
     this.logger.log(`User ${user.id} fetching products`);
     
     const categoryIdInt = categoryId === 'null' ? null : categoryId ? parseInt(categoryId) : undefined;
-    const attributeIdInt = attributeId ? parseInt(attributeId) : undefined;
+    
+    // Parse attributeIds from comma-separated string to array of numbers
+    let attributeIdsArray: number[] | undefined = undefined;
+    if (attributeIds) {
+      attributeIdsArray = attributeIds.split(',')
+        .map(id => parseInt(id.trim()))
+        .filter(id => !isNaN(id));
+    }
+    
     const attributeGroupIdInt = attributeGroupId === 'null' ? null : attributeGroupId ? parseInt(attributeGroupId) : undefined;
     const familyIdInt = familyId === 'null' ? null : familyId ? parseInt(familyId) : undefined;
     const pageNum = page ? parseInt(page) : 1;
@@ -93,7 +101,7 @@ export class ProductController {
       search,
       status, 
       categoryIdInt, 
-      attributeIdInt, 
+      attributeIdsArray, 
       attributeGroupIdInt, 
       familyIdInt,
       pageNum,

@@ -13,10 +13,11 @@ import {
   UploadedFile,
   ParseIntPipe,
   Query,
+  Header,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { AssetService } from './asset.service';
-import { CreateAssetDto, UpdateAssetDto } from './dto';
+import { CreateAssetDto, UpdateAssetDto, ExportAssetsDto } from './dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PaginatedResponse } from '../common';
 import { FileUploadUtil } from '../utils/file-upload.util';
@@ -147,5 +148,32 @@ export class AssetController {
     const userId = req.user.id;
     const groupId = assetGroupId ? parseInt(assetGroupId, 10) : undefined;
     return this.assetService.exportAsJson(userId, groupId);
+  }
+
+  @Post('export')
+  async exportAssets(
+    @Body() exportDto: ExportAssetsDto,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    const userId = req.user.id;
+    const result = await this.assetService.exportAssets(userId, exportDto);
+
+    // Set appropriate content type and headers based on format
+    if (exportDto.format === 'xml') {
+      res.setHeader('Content-Type', 'application/xml');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="assets-export-${Date.now()}.xml"`,
+      );
+      return res.send(result);
+    } else {
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="assets-export-${Date.now()}.json"`,
+      );
+      return res.json(result);
+    }
   }
 }
