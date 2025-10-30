@@ -548,42 +548,35 @@ export class AttributeService {
     try {
       this.logger.log(`Getting attribute suggestions for attribute ${attributeId}, query: ${query}, excluding product ${productId}, user: ${userId}`);
 
-      // Create case-insensitive regex for starts with
-      const regex = new RegExp(`^${query}`, 'i');
-
-      // Fetch products excluding the current one, that have the attribute
-      const products = await this.prisma.product.findMany({
+      // Optimize: Use direct database query with indexing support
+      // This approach leverages Prisma's query optimization and database indexes
+      const productAttributes = await this.prisma.productAttribute.findMany({
         where: {
-          userId,
-          id: { not: productId },
-          attributes: {
-            some: {
-              attributeId,
-              value: { not: null }
-            }
-          }
+          attributeId,
+          value: {
+            not: null,
+            startsWith: query, // More efficient than regex for prefix matching
+            mode: 'insensitive', // Case-insensitive search
+          },
+          product: {
+            userId,
+            id: { not: productId },
+          },
         },
-        include: {
-          attributes: {
-            where: { attributeId },
-            select: { value: true }
-          }
-        }
+        select: {
+          value: true,
+        },
+        distinct: ['value'], // Get unique values only
+        take: 20, // Limit results for performance
       });
 
-      // Extract and filter values
-      const suggestions = new Set<string>();
-      for (const product of products) {
-        for (const attr of product.attributes) {
-          if (attr.value && regex.test(attr.value)) {
-            suggestions.add(attr.value);
-          }
-        }
-      }
+      // Extract unique values
+      const suggestions = productAttributes
+        .map(attr => attr.value)
+        .filter((value): value is string => value !== null && value.trim() !== '');
 
-      const result = Array.from(suggestions);
-      this.logger.log(`Found ${result.length} suggestions`);
-      return result;
+      this.logger.log(`Found ${suggestions.length} suggestions`);
+      return suggestions;
     } catch (error) {
       this.logger.error(`Failed to get attribute suggestions: ${error.message}`, error.stack);
       throw new BadRequestException('Failed to fetch attribute suggestions');

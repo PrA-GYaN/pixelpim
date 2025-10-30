@@ -149,6 +149,24 @@ export class AttributeController {
     }
   }
 
+  @Get('attribute-suggestions')
+  async getAttributeSuggestions(
+    @Query('productId', ParseIntPipe) productId: number,
+    @Query('attributeId', ParseIntPipe) attributeId: number,
+    @Query('query') query: string,
+    @User() user: any,
+  ) {
+    try {
+      if (!query || query.length < 2) {
+        return { suggestions: [] };
+      }
+
+      return await this.attributeService.getAttributeSuggestions(productId, attributeId, query, user.id);
+    } catch (error) {
+      return this.handleError(error, 'fetching attribute suggestions');
+    }
+  }
+
   @Get(':id')
   async findOne(@Param('id', ParseIntPipe) id: number, @User() user: any) {
     try {
@@ -179,24 +197,6 @@ export class AttributeController {
       return await this.attributeService.remove(id, user.id);
     } catch (error) {
       return this.handleError(error, 'deleting');
-    }
-  }
-
-  @Get('attribute-suggestions')
-  async getAttributeSuggestions(
-    @Query('productId', ParseIntPipe) productId: number,
-    @Query('attributeId', ParseIntPipe) attributeId: number,
-    @Query('query') query: string,
-    @User() user: any,
-  ) {
-    try {
-      if (!query || query.length < 3) {
-        throw new BadRequestException('Query must be at least 3 characters long');
-      }
-
-      return await this.attributeService.getAttributeSuggestions(productId, attributeId, query, user.id);
-    } catch (error) {
-      return this.handleError(error, 'fetching attribute suggestions');
     }
   }
 }
