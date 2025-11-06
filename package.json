@@ -20,6 +20,7 @@
     "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {
+    "@amazon-sp-api-release/amazon-sp-api-sdk-js": "^1.6.0",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.2",
     "@nestjs/core": "^11.0.1",
@@ -28,6 +29,7 @@
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^11.1.6",
     "@nestjs/schedule": "^6.0.1",
+    "@nestjs/serve-static": "^5.0.4",
     "@nestjs/swagger": "^11.2.0",
     "@prisma/client": "^6.13.0",
     "@types/bcryptjs": "^2.4.6",
@@ -37,7 +39,6 @@
     "@types/passport-local": "^1.0.38",
     "@types/xml2js": "^0.4.14",
     "@woocommerce/woocommerce-rest-api": "^1.0.2",
-    "amazon-sp-api": "^1.1.7",
     "archiver": "^7.0.1",
     "axios": "^1.11.0",
     "bcryptjs": "^3.0.2",
