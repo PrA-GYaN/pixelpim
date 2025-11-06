@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { IntegrationController } from './integration.controller';
 import { IntegrationService } from './integration.service';
+import { IntegrationLogController } from './integration-log.controller';
+import { IntegrationLogService } from './integration-log.service';
 import { WooCommerceController } from './woocommerce/woocommerce.controller';
 import { WooCommerceService } from './woocommerce/woocommerce.service';
 import { AmazonController } from './amazon/amazon.controller';
@@ -12,17 +14,20 @@ import { PrismaModule } from '../prisma/prisma.module';
   imports: [PrismaModule],
   controllers: [
     IntegrationController,
+    IntegrationLogController,
     WooCommerceController,
     AmazonController,
   ],
   providers: [
     IntegrationService,
+    IntegrationLogService,
     WooCommerceService,
     AmazonService,
     IntegrationFactory,
   ],
   exports: [
     IntegrationService,
+    IntegrationLogService,
     WooCommerceService,
     AmazonService,
     IntegrationFactory,

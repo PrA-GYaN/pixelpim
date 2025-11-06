@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ServeStaticModule } from '@nestjs/serve-static';
+import * as path from 'path';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
@@ -20,6 +22,10 @@ import { IntegrationModule } from './integration/integration.module';
     ConfigModule.forRoot({
       isGlobal: true, // Makes the ConfigModule available globally
       envFilePath: '.env', // Specify the .env file path
+    }),
+    ServeStaticModule.forRoot({
+      rootPath: path.join(process.cwd(), 'uploads'),
+      serveRoot: '/uploads',
     }),
     PrismaModule, 
     AuthModule, 

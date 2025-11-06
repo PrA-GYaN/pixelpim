@@ -12,10 +12,96 @@ import {
 } from '../utils/cloudinary.util';
 import { PaginationUtils } from '../common';
 import { Builder } from 'xml2js';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 
 @Injectable()
 export class AssetService {
   constructor(private prisma: PrismaService) {}
+  
+  /**
+   * Build the local directory path for storing assets
+   * Creates folder structure: uploads/{userId}_{username}/{groupPath}/
+   */
+  private async buildLocalDirectoryPath(userId: number, assetGroupId?: number): Promise<string> {
+    // Get user details
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true },
+    });
+
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    // Create user folder name
+    const username = user.email.replace(/[^a-zA-Z0-9]/g, '_');
+    const userFolder = `${userId}_${username}`;
+    let dirPath = path.join(process.cwd(), 'uploads', userFolder);
+
+    // If asset group is specified, build the full path including subfolders
+    if (assetGroupId) {
+      const groupPath = await this.buildAssetGroupPath(assetGroupId, userId);
+      dirPath = path.join(dirPath, groupPath);
+    }
+
+    return dirPath;
+  }
+
+  /**
+   * Convert local file path to URL for serving
+   */
+  private async convertLocalPathToUrl(localPath: string, userId: number): Promise<string> {
+    // Get user details
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true },
+    });
+
+    if (!user) {
+      return localPath; // fallback
+    }
+
+    const username = user.email.replace(/[^a-zA-Z0-9]/g, '_');
+    const userFolder = `${userId}_${username}`;
+    const uploadsPath = path.join(process.cwd(), 'uploads', userFolder);
+
+    // Get relative path from user folder
+    const relativePath = path.relative(uploadsPath, localPath);
+
+    return `/uploads/${userFolder}/${relativePath.replace(/\\/g, '/')}`;
+  }
+
+  /**
+   * Build the asset group path including parent folders
+   */
+  private async buildAssetGroupPath(assetGroupId: number, userId: number): Promise<string> {
+    const groups: string[] = [];
+    let currentGroupId: number | null = assetGroupId;
+
+    while (currentGroupId) {
+      const group = await this.prisma.assetGroup.findFirst({
+        where: {
+          id: currentGroupId,
+          userId,
+        },
+        select: {
+          id: true,
+          groupName: true,
+          parentGroupId: true,
+        },
+      });
+
+      if (!group) {
+        throw new NotFoundException('Asset group not found');
+      }
+
+      groups.unshift(group.groupName);
+      currentGroupId = group.parentGroupId;
+    }
+
+    return path.join(...groups);
+  }
   // Utility to recursively convert BigInt values to strings while preserving dates
   private static convertBigIntToString(obj: any): any {
     if (typeof obj === 'bigint') {
@@ -57,6 +143,20 @@ export class AssetService {
       file.originalname,
     );
 
+    // Get user details for folder creation
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, fullname: true },
+    });
+
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    // Create user folder name: userid_username (using email as username)
+    const username = user.email.replace(/[^a-zA-Z0-9]/g, '_');
+    const userFolder = `${userId}_${username}`;
+
     // Check if asset with same name already exists in the same folder
     const existingAsset = await this.prisma.asset.findFirst({
       where: {
@@ -70,7 +170,23 @@ export class AssetService {
       throw new BadRequestException('Asset with this name already exists in this folder');
     }
 
-    // Upload to Cloudinary
+    // Build local directory path
+    const localDirPath = await this.buildLocalDirectoryPath(userId, createAssetDto.assetGroupId);
+
+    // Ensure directory exists
+    await fs.mkdir(localDirPath, { recursive: true });
+
+    // Generate unique filename to avoid conflicts
+    const fileExtension = path.extname(file.originalname);
+    const baseName = path.basename(file.originalname, fileExtension);
+    const timestamp = Date.now();
+    const uniqueFileName = `${baseName}_${timestamp}${fileExtension}`;
+    const localFilePath = path.join(localDirPath, uniqueFileName);
+
+    // Save file locally
+    await fs.writeFile(localFilePath, file.buffer);
+
+    // Upload to Cloudinary (keep existing functionality)
     const uploadOptions = CloudinaryUtil.getAssetUploadOptions();
     const cloudinaryResult: CloudinaryUploadResult =
       await CloudinaryUtil.uploadFile(file, uploadOptions);
@@ -90,14 +206,14 @@ export class AssetService {
       }
     }
 
-    // Store secure_url in filePath
+    // Store local path in filePath
     const asset = await this.prisma.asset.create({
       data: {
         name: createAssetDto.name,
-        fileName: cloudinaryResult.original_filename || file.originalname,
-        filePath: cloudinaryResult.secure_url, // ✅ Store full URL
+        fileName: uniqueFileName,
+        filePath: localFilePath, // Store local path
         mimeType: file.mimetype,
-        size: cloudinaryResult.bytes,
+        size: BigInt(file.size),
         userId,
         assetGroupId: createAssetDto.assetGroupId,
       },
@@ -114,7 +230,7 @@ export class AssetService {
     return {
       ...AssetService.convertBigIntToString(asset),
       size: Number(asset.size),
-      url: asset.filePath, // ✅ Return full URL
+      url: `/uploads/${userFolder}/${path.relative(path.join(process.cwd(), 'uploads', userFolder), localFilePath)}`, // Relative URL for serving
       formattedSize: CloudinaryUtil.formatFileSize(Number(asset.size)),
     };
   }
@@ -206,7 +322,7 @@ export class AssetService {
     const transformedAssets = assets.map((asset) => ({
       ...AssetService.convertBigIntToString(asset),
       size: Number(asset.size),
-      url: asset.filePath, // ✅ Use filePath as URL
+      url: this.convertLocalPathToUrl(asset.filePath, asset.userId),
       formattedSize: CloudinaryUtil.formatFileSize(Number(asset.size)),
     }));
 
@@ -233,7 +349,7 @@ export class AssetService {
     return {
       ...AssetService.convertBigIntToString(asset),
       size: Number(asset.size),
-      url: asset.filePath, // ✅ Use filePath as URL
+      url: await this.convertLocalPathToUrl(asset.filePath, asset.userId),
       formattedSize: CloudinaryUtil.formatFileSize(Number(asset.size)),
     };
   }
@@ -303,7 +419,7 @@ export class AssetService {
     return {
       ...AssetService.convertBigIntToString(updatedAsset),
       size: Number(updatedAsset.size),
-      url: updatedAsset.filePath,
+      url: await this.convertLocalPathToUrl(updatedAsset.filePath, updatedAsset.userId),
       formattedSize: CloudinaryUtil.formatFileSize(Number(updatedAsset.size)),
     };
   }
@@ -311,7 +427,14 @@ export class AssetService {
   async remove(id: number, userId: number) {
     const asset = await this.findOne(id, userId);
 
-    // Delete file from Cloudinary using public_id
+    // Delete local file
+    try {
+      await fs.unlink(asset.filePath);
+    } catch (error) {
+      console.error('Error deleting local file:', error);
+    }
+
+    // Delete file from Cloudinary using public_id (keep existing functionality)
     try {
       const publicId = CloudinaryUtil.extractPublicId(asset.filePath);
       await CloudinaryUtil.deleteFile(publicId);
@@ -440,10 +563,10 @@ export class AssetService {
     }
 
     // Transform assets to export format
-    const exportData = assets.map(asset => ({
+    const exportData = await Promise.all(assets.map(async (asset) => ({
       id: asset.id.toString(),
       name: asset.name,
-      url: asset.filePath,
+      url: await this.convertLocalPathToUrl(asset.filePath, userId),
       fileName: asset.fileName,
       mimeType: asset.mimeType,
       size: asset.size.toString(),
@@ -456,7 +579,7 @@ export class AssetService {
         name: asset.assetGroup.groupName,
         parentId: asset.assetGroup.parentGroupId?.toString() || null,
       } : null,
-    }));
+    })));
 
     // Return in requested format
     if (format === 'xml') {
@@ -574,10 +697,10 @@ export class AssetService {
     });
 
     // Transform assets to clean JSON format
-    const exportData = assets.map(asset => ({
+    const exportData = await Promise.all(assets.map(async (asset) => ({
       id: asset.id.toString(),
       name: asset.name,
-      url: asset.filePath,
+      url: await this.convertLocalPathToUrl(asset.filePath, userId),
       fileName: asset.fileName,
       mimeType: asset.mimeType,
       size: asset.size.toString(),
@@ -586,7 +709,7 @@ export class AssetService {
         id: asset.assetGroup.id,
         name: asset.assetGroup.groupName,
       } : null,
-    }));
+    })));
 
     return exportData;
   }
