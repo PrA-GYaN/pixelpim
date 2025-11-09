@@ -206,12 +206,12 @@ export class AssetService {
       }
     }
 
-    // Store local path in filePath
+    // Store Cloudinary URL in filePath
     const asset = await this.prisma.asset.create({
       data: {
         name: createAssetDto.name,
         fileName: uniqueFileName,
-        filePath: localFilePath, // Store local path
+        filePath: cloudinaryResult.secure_url, // Store Cloudinary URL
         mimeType: file.mimetype,
         size: BigInt(file.size),
         userId,
@@ -230,7 +230,7 @@ export class AssetService {
     return {
       ...AssetService.convertBigIntToString(asset),
       size: Number(asset.size),
-      url: `/uploads/${userFolder}/${path.relative(path.join(process.cwd(), 'uploads', userFolder), localFilePath)}`, // Relative URL for serving
+      url: asset.filePath, // Cloudinary URL
       formattedSize: CloudinaryUtil.formatFileSize(Number(asset.size)),
     };
   }
@@ -322,7 +322,7 @@ export class AssetService {
     const transformedAssets = assets.map((asset) => ({
       ...AssetService.convertBigIntToString(asset),
       size: Number(asset.size),
-      url: this.convertLocalPathToUrl(asset.filePath, asset.userId),
+      url: asset.filePath, // Cloudinary URL
       formattedSize: CloudinaryUtil.formatFileSize(Number(asset.size)),
     }));
 
@@ -349,7 +349,7 @@ export class AssetService {
     return {
       ...AssetService.convertBigIntToString(asset),
       size: Number(asset.size),
-      url: await this.convertLocalPathToUrl(asset.filePath, asset.userId),
+      url: asset.filePath, // Cloudinary URL
       formattedSize: CloudinaryUtil.formatFileSize(Number(asset.size)),
     };
   }
@@ -419,7 +419,7 @@ export class AssetService {
     return {
       ...AssetService.convertBigIntToString(updatedAsset),
       size: Number(updatedAsset.size),
-      url: await this.convertLocalPathToUrl(updatedAsset.filePath, updatedAsset.userId),
+      url: updatedAsset.filePath, // Cloudinary URL
       formattedSize: CloudinaryUtil.formatFileSize(Number(updatedAsset.size)),
     };
   }
@@ -427,14 +427,16 @@ export class AssetService {
   async remove(id: number, userId: number) {
     const asset = await this.findOne(id, userId);
 
-    // Delete local file
+    // Delete local file - reconstruct local path
     try {
-      await fs.unlink(asset.filePath);
+      const localDirPath = await this.buildLocalDirectoryPath(asset.userId, asset.assetGroupId);
+      const localFilePath = path.join(localDirPath, asset.fileName);
+      await fs.unlink(localFilePath);
     } catch (error) {
       console.error('Error deleting local file:', error);
     }
 
-    // Delete file from Cloudinary using public_id (keep existing functionality)
+    // Delete file from Cloudinary using public_id from Cloudinary URL
     try {
       const publicId = CloudinaryUtil.extractPublicId(asset.filePath);
       await CloudinaryUtil.deleteFile(publicId);
@@ -566,7 +568,7 @@ export class AssetService {
     const exportData = await Promise.all(assets.map(async (asset) => ({
       id: asset.id.toString(),
       name: asset.name,
-      url: await this.convertLocalPathToUrl(asset.filePath, userId),
+      url: asset.filePath, // Cloudinary URL
       fileName: asset.fileName,
       mimeType: asset.mimeType,
       size: asset.size.toString(),
@@ -700,7 +702,7 @@ export class AssetService {
     const exportData = await Promise.all(assets.map(async (asset) => ({
       id: asset.id.toString(),
       name: asset.name,
-      url: await this.convertLocalPathToUrl(asset.filePath, userId),
+      url: asset.filePath, // Cloudinary URL
       fileName: asset.fileName,
       mimeType: asset.mimeType,
       size: asset.size.toString(),
