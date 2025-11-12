@@ -15,6 +15,8 @@ model User {
   password        String?
   googleId        String?          @unique
   provider        String           @default("local")
+  apiKey          String?          @unique
+  secretKey       String?
   createdAt       DateTime         @default(now())
 
   attributes         Attribute[]         @relation("UserAttributes")
@@ -28,6 +30,8 @@ model User {
   scheduledImports   ScheduledImport[]   @relation("UserScheduledImports")
   importExecutionLogs ImportExecutionLog[] @relation("UserImportExecutionLogs")
   integrationLogs     IntegrationLog[]    @relation("UserIntegrationLogs")
+  integrationCredentials UserIntegrationCredentials[] @relation("UserIntegrationCredentials")
+  webhooks           Webhook[]           @relation("UserWebhooks")
 }
 
 model Otp {
@@ -323,4 +327,47 @@ model IntegrationLog {
   @@index([userId, integrationType])
   @@index([timestamp])
   @@index([externalProductId, integrationType])
+}
+
+model UserIntegrationCredentials {
+  id            Int      @id @default(autoincrement())
+  userId        Int
+  integrationType String  // 'woocommerce', 'amazon'
+  credentials   Json     // Encrypted credentials storage
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user          User     @relation("UserIntegrationCredentials", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, integrationType])
+}
+
+model Webhook {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  url       String
+  events    String[] // array of strings like ["product.created", "product.updated"]
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User     @relation("UserWebhooks", fields: [userId], references: [id], onDelete: Cascade)
+  deliveries WebhookDelivery[]
+
+  @@unique([userId, url])
+}
+
+model WebhookDelivery {
+  id        Int      @id @default(autoincrement())
+  webhookId Int
+  event     String
+  payload   Json
+  status    String   // success, failed
+  response  String?  // response body or error
+  deliveredAt DateTime @default(now())
+
+  webhook   Webhook  @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId, deliveredAt])
 }

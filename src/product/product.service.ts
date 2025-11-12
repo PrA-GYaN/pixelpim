@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException, Logger, forwardRef, Inject } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
+import { WebhookService } from '../webhook/webhook.service';
+import { WebhookFormatterService } from '../webhook/webhook-formatter.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { UpdateProductAttributesDto } from './dto/update-product-attribute.dto';
@@ -24,6 +26,8 @@ export class ProductService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationService: NotificationService,
+    private readonly webhookService: WebhookService,
+    private readonly webhookFormatterService: WebhookFormatterService,
     @Inject(forwardRef(() => CsvImportService))
     private readonly csvImportService: CsvImportService,
     @Inject(forwardRef(() => ImportSchedulerService))
@@ -256,6 +260,13 @@ export class ProductService {
       
       // Log notification
       await this.notificationService.logProductCreation(userId, result.name, result.id);
+      
+      // Trigger webhooks
+      const webhooks = await this.webhookService.getActiveWebhooksForEvent(userId, 'product.created');
+      for (const webhook of webhooks) {
+        const payload = this.webhookFormatterService.formatProductCreated(result);
+        this.webhookService.deliverWebhook(webhook.id, 'product.created', payload);
+      }
       
       return {
         ...result,
@@ -512,6 +523,16 @@ export class ProductService {
         await this.notificationService.logProductCreation(userId, result.name, result.id);
       } else {
         await this.notificationService.logProductUpdate(userId, result.name, result.id);
+      }
+      
+      // Trigger webhooks
+      const event = wasCreated ? 'product.created' : 'product.updated';
+      const webhooks = await this.webhookService.getActiveWebhooksForEvent(userId, event);
+      for (const webhook of webhooks) {
+        const payload = wasCreated
+          ? this.webhookFormatterService.formatProductCreated(result)
+          : this.webhookFormatterService.formatProductUpdated(result);
+        this.webhookService.deliverWebhook(webhook.id, event, payload);
       }
       
       return {
@@ -1222,6 +1243,13 @@ export class ProductService {
       
       // Log notification
       await this.notificationService.logProductUpdate(userId, result.name, result.id);
+      
+      // Trigger webhooks
+      const webhooks = await this.webhookService.getActiveWebhooksForEvent(userId, 'product.updated');
+      for (const webhook of webhooks) {
+        const payload = this.webhookFormatterService.formatProductUpdated(result);
+        this.webhookService.deliverWebhook(webhook.id, 'product.updated', payload);
+      }
       
       return {
         ...result,

@@ -9,87 +9,135 @@ import * as crypto from 'crypto';
 @Injectable()
 export class WooCommerceService extends BaseIntegrationService {
   protected integrationType = IntegrationType.WOOCOMMERCE;
-  private wooCommerce: WooCommerceRestApi;
+  private wooCommerce: WooCommerceRestApi | null = null;
   private webhookSecret: string | undefined;
+  private currentUserId: number | null = null;
 
   constructor(
     protected prisma: PrismaService,
     protected configService: ConfigService,
   ) {
     super(prisma, configService);
-    // Initialize WooCommerce connection
-    // this.connect();
+    // Remove automatic connection - will connect per user now
   }
 
-  async connect(): Promise<void> 
-  {
-      const wcUrl = this.configService.get<string>('WC_API_URL');
-      const wcKey = this.configService.get<string>('WC_CONSUMER_KEY');
-      const wcSecret = this.configService.get<string>('WC_CONSUMER_SECRET');
-      this.webhookSecret = this.configService.get<string>('WC_WEBHOOK_SECRET');
+  /**
+   * Legacy connect method - not used with per-user credentials
+   * Each operation now connects with user-specific credentials
+   */
+  async connect(): Promise<void> {
+    throw new Error('WooCommerceService requires per-user credentials. Use connectWithCredentials(userId) instead.');
+  }
 
-      this.logger.log(
-        `WooCommerce config values - URL: "${wcUrl}", Key: "${wcKey?.substring(0, 10)}...", Secret: "${wcSecret?.substring(0, 10)}..."`
-      );
+  /**
+   * Get WooCommerce credentials for a specific user
+   */
+  private async getUserCredentials(userId: number): Promise<{
+    apiUrl: string;
+    consumerKey: string;
+    consumerSecret: string;
+    webhookSecret?: string;
+  }> {
+    const credentials = await this.prisma.userIntegrationCredentials.findUnique({
+      where: {
+        userId_integrationType: {
+          userId,
+          integrationType: 'woocommerce',
+        },
+      },
+    });
 
-      if (!wcUrl || !wcKey || !wcSecret) {
-        this.logger.error('WooCommerce credentials not configured in .env');
-        throw new Error('WooCommerce credentials not configured');
-      }
-
-      // Clean up the base URL
-      let baseUrl = wcUrl.trim().replace(/\/wp-json.*$/, '');
-      if (!baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
-        const isLocal = baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1') || baseUrl.includes('.local');
-        baseUrl = isLocal ? `http://${baseUrl}` : `https://${baseUrl}`;
-      }
-
-      try {
-        const isHttps = baseUrl.startsWith('https://');
-
-        this.wooCommerce = new WooCommerceRestApi({
-          url: baseUrl,
-          consumerKey: wcKey,
-          consumerSecret: wcSecret,
-          version: 'wc/v3',
-          queryStringAuth: !isHttps, // true for HTTP, false for HTTPS
-        });
-
-        this.logger.log('WooCommerce REST API client initialized successfully');
-        this.logger.log(`  - URL: ${baseUrl}`);
-        this.logger.log(`  - Version: wc/v3`);
-        this.logger.log(`  - Protocol: ${isHttps ? 'HTTPS (OAuth1.0a)' : 'HTTP (Query String Auth)'}`);
-
-        // Test connection immediately
-        try {
-          const response = await this.wooCommerce.get('system_status');
-          this.logger.log(`WooCommerce API reachable ✅ WP Version: ${response.data.environment.wp_version}, WooCommerce: ${response.data.environment.version}`);
-        } catch (error: any) {
-          if (error.response) {
-            this.logger.error(`WooCommerce API Error (${error.response.status}): ${error.response.data?.message || 'Unknown error'}`);
-            if (error.response.status === 401) {
-              this.logger.warn('Check your WC_CONSUMER_KEY / WC_CONSUMER_SECRET permissions (Read/Write) and ensure the key is active.');
-            } else if (error.response.status === 404) {
-              this.logger.warn('Check WC_API_URL and ensure WooCommerce REST API is enabled.');
-            } else if (error.response.status === 500) {
-              this.logger.warn('Internal server error. Verify WooCommerce is active and there are no plugin conflicts.');
-            }
-          } else if (error.request) {
-            this.logger.error('No response from WooCommerce API. Check network, firewall, or URL accessibility.');
-          } else {
-            this.logger.error('Unexpected error while testing WooCommerce connection:', error.message);
-          }
-          throw new Error('WooCommerce connection test failed');
-        }
-      } catch (error) {
-        this.logger.error('Failed to initialize or connect to WooCommerce:', error);
-        throw error;
-      }
+    if (!credentials || !credentials.isActive) {
+      throw new BadRequestException('WooCommerce credentials not configured for this user');
     }
+
+    const creds = credentials.credentials as any;
+    if (!creds.apiUrl || !creds.consumerKey || !creds.consumerSecret) {
+      throw new BadRequestException('Incomplete WooCommerce credentials configuration');
+    }
+
+    return {
+      apiUrl: creds.apiUrl,
+      consumerKey: creds.consumerKey,
+      consumerSecret: creds.consumerSecret,
+      webhookSecret: creds.webhookSecret,
+    };
+  }
+
+  /**
+   * Connect to WooCommerce with user-specific credentials
+   */
+  private async connectWithCredentials(userId: number): Promise<void> {
+    // If already connected for this user, reuse the connection
+    if (this.wooCommerce && this.currentUserId === userId) {
+      return;
+    }
+
+    const { apiUrl, consumerKey, consumerSecret, webhookSecret } = await this.getUserCredentials(userId);
+
+    this.webhookSecret = webhookSecret;
+    this.currentUserId = userId;
+
+    this.logger.log(
+      `WooCommerce config for user ${userId} - URL: "${apiUrl}", Key: "${consumerKey?.substring(0, 10)}..."`
+    );
+
+    // Clean up the base URL
+    let baseUrl = apiUrl.trim().replace(/\/wp-json.*$/, '');
+    if (!baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
+      const isLocal = baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1') || baseUrl.includes('.local');
+      baseUrl = isLocal ? `http://${baseUrl}` : `https://${baseUrl}`;
+    }
+
+    try {
+      const isHttps = baseUrl.startsWith('https://');
+
+      this.wooCommerce = new WooCommerceRestApi({
+        url: baseUrl,
+        consumerKey,
+        consumerSecret,
+        version: 'wc/v3',
+        queryStringAuth: !isHttps, // true for HTTP, false for HTTPS
+      });
+
+      this.logger.log('WooCommerce REST API client initialized successfully');
+      this.logger.log(`  - URL: ${baseUrl}`);
+      this.logger.log(`  - Version: wc/v3`);
+      this.logger.log(`  - Protocol: ${isHttps ? 'HTTPS (OAuth1.0a)' : 'HTTP (Query String Auth)'}`);
+
+      // Test connection immediately
+      try {
+        const response = await this.wooCommerce.get('system_status');
+        this.logger.log(`WooCommerce API reachable ✅ WP Version: ${response.data.environment.wp_version}, WooCommerce: ${response.data.environment.version}`);
+      } catch (error: any) {
+        if (error.response) {
+          this.logger.error(`WooCommerce API Error (${error.response.status}): ${error.response.data?.message || 'Unknown error'}`);
+          if (error.response.status === 401) {
+            this.logger.warn('Check your WooCommerce consumer key/secret permissions (Read/Write) and ensure the key is active.');
+          } else if (error.response.status === 404) {
+            this.logger.warn('Check WooCommerce API URL and ensure WooCommerce REST API is enabled.');
+          } else if (error.response.status === 500) {
+            this.logger.warn('Internal server error. Verify WooCommerce is active and there are no plugin conflicts.');
+          }
+        } else if (error.request) {
+          this.logger.error('No response from WooCommerce API. Check network, firewall, or URL accessibility.');
+        } else {
+          this.logger.error('Unexpected error while testing WooCommerce connection:', error.message);
+        }
+        throw new Error('WooCommerce connection test failed');
+      }
+    } catch (error) {
+      this.logger.error('Failed to initialize or connect to WooCommerce:', error);
+      throw error;
+    }
+  }
 
 
   async exportProduct(productId: number, userId: number): Promise<ProductSyncResult> {
     try {
+      // Ensure connection with user's credentials
+      await this.connectWithCredentials(userId);
+
       const product = await this.fetchProductWithRelations(productId, userId);
 
       if (!product) {
@@ -159,6 +207,9 @@ export class WooCommerceService extends BaseIntegrationService {
 
   async deleteProduct(productId: number, userId: number): Promise<ProductSyncResult> {
     try {
+      // Ensure connection with user's credentials
+      await this.connectWithCredentials(userId);
+
       const product = await this.fetchProductWithRelations(productId, userId);
       if (!product) {
         throw new BadRequestException(`Product with ID ${productId} not found`);
@@ -197,6 +248,9 @@ export class WooCommerceService extends BaseIntegrationService {
 
   async pullUpdates(userId: number): Promise<any> {
     try {
+      // Ensure connection with user's credentials
+      await this.connectWithCredentials(userId);
+
       const products = await this.getAllWooCommerceProducts();
       const updates: Array<{ productId: number; action: string }> = [];
 
@@ -229,25 +283,37 @@ export class WooCommerceService extends BaseIntegrationService {
     }
   }
 
-  validateWebhookSignature(headers: any, body: any): boolean {
-    if (!this.webhookSecret) {
-      this.logger.warn('WC_WEBHOOK_SECRET not configured, skipping signature validation');
-      return true;
-    }
-
-    const signature = headers['x-wc-webhook-signature'];
-    if (!signature) {
-      this.logger.warn('No webhook signature found in headers');
+  async validateWebhookSignature(headers: any, body: any, userId?: number): Promise<boolean> {
+    if (!userId) {
+      this.logger.warn('User ID not provided for webhook signature validation');
       return false;
     }
 
-    const payload = typeof body === 'string' ? body : JSON.stringify(body);
-    const hash = crypto
-      .createHmac('sha256', this.webhookSecret)
-      .update(payload)
-      .digest('base64');
+    try {
+      const { webhookSecret } = await this.getUserCredentials(userId);
+      
+      if (!webhookSecret) {
+        this.logger.warn('Webhook secret not configured for user, skipping signature validation');
+        return true;
+      }
 
-    return hash === signature;
+      const signature = headers['x-wc-webhook-signature'];
+      if (!signature) {
+        this.logger.warn('No webhook signature found in headers');
+        return false;
+      }
+
+      const payload = typeof body === 'string' ? body : JSON.stringify(body);
+      const hash = crypto
+        .createHmac('sha256', webhookSecret)
+        .update(payload)
+        .digest('base64');
+
+      return hash === signature;
+    } catch (error) {
+      this.logger.error('Error validating webhook signature:', error);
+      return false;
+    }
   }
 
   async handleWebhook(data: any, userId?: number): Promise<any> {
@@ -631,7 +697,7 @@ export class WooCommerceService extends BaseIntegrationService {
     try {
       this.logger.log(`Searching for WooCommerce product with SKU: ${sku}`);
       
-      const response = await this.wooCommerce.get('products', { sku });
+      const response = await this.wooCommerce!.get('products', { sku });
       const products = response.data;
       
       return products.length > 0 ? products[0] : null;
@@ -643,7 +709,7 @@ export class WooCommerceService extends BaseIntegrationService {
 
   private async createWooCommerceProduct(productData: any): Promise<any> {
     try {
-      const response = await this.wooCommerce.post('products', productData);
+      const response = await this.wooCommerce!.post('products', productData);
       return response.data;
     } catch (error) {
       this.logger.error('Error creating WooCommerce product:', error);
@@ -653,7 +719,7 @@ export class WooCommerceService extends BaseIntegrationService {
 
   private async updateWooCommerceProduct(productId: number, productData: any): Promise<any> {
     try {
-      const response = await this.wooCommerce.put(`products/${productId}`, productData);
+      const response = await this.wooCommerce!.put(`products/${productId}`, productData);
       return response.data;
     } catch (error) {
       this.logger.error(`Error updating WooCommerce product ${productId}:`, error);
@@ -663,7 +729,7 @@ export class WooCommerceService extends BaseIntegrationService {
 
   private async deleteWooCommerceProduct(productId: number): Promise<any> {
     try {
-      const response = await this.wooCommerce.delete(`products/${productId}`, { force: true });
+      const response = await this.wooCommerce!.delete(`products/${productId}`, { force: true });
       return response.data;
     } catch (error) {
       this.logger.error(`Error deleting WooCommerce product ${productId}:`, error);
@@ -673,7 +739,7 @@ export class WooCommerceService extends BaseIntegrationService {
 
   private async getAllWooCommerceProducts(): Promise<any[]> {
     try {
-      const response = await this.wooCommerce.get('products', { per_page: 100 });
+      const response = await this.wooCommerce!.get('products', { per_page: 100 });
       return response.data;
     } catch (error) {
       this.logger.error('Error fetching WooCommerce products:', error);
@@ -683,6 +749,11 @@ export class WooCommerceService extends BaseIntegrationService {
 
   async getWooCommerceProductCount(): Promise<number> {
     try {
+      // Ensure connection - this method might be called without prior connection
+      if (!this.wooCommerce) {
+        throw new Error('WooCommerce not connected. Please configure credentials first.');
+      }
+
       // The modern SDK doesn't have a separate count endpoint
       // We'll use the X-WP-Total header from a products request
       const response = await this.wooCommerce.get('products', { per_page: 1 });
@@ -704,7 +775,7 @@ export class WooCommerceService extends BaseIntegrationService {
   private async ensureWooCommerceCategory(categoryName: string): Promise<number> {
     try {
       // Search for existing category
-      const response = await this.wooCommerce.get('products/categories', { 
+      const response = await this.wooCommerce!.get('products/categories', { 
         search: categoryName,
         per_page: 100 
       });
@@ -721,7 +792,7 @@ export class WooCommerceService extends BaseIntegrationService {
 
       // Create new category
       this.logger.log(`Creating new category: "${categoryName}"`);
-      const createResponse = await this.wooCommerce.post('products/categories', {
+      const createResponse = await this.wooCommerce!.post('products/categories', {
         name: categoryName
       });
 
@@ -741,7 +812,7 @@ export class WooCommerceService extends BaseIntegrationService {
   private async ensureWooCommerceAttribute(attributeName: string, options: string[]): Promise<void> {
     try {
       // Get all attributes
-      const response = await this.wooCommerce.get('products/attributes');
+      const response = await this.wooCommerce!.get('products/attributes');
       const attributes = response.data;
       
       // Find existing attribute (case-insensitive)
@@ -752,7 +823,7 @@ export class WooCommerceService extends BaseIntegrationService {
       // Create attribute if it doesn't exist
       if (!attribute) {
         this.logger.log(`Creating new attribute: "${attributeName}"`);
-        const createResponse = await this.wooCommerce.post('products/attributes', {
+        const createResponse = await this.wooCommerce!.post('products/attributes', {
           name: attributeName,
           type: 'select',
           order_by: 'menu_order',
@@ -783,7 +854,7 @@ export class WooCommerceService extends BaseIntegrationService {
   private async ensureWooCommerceAttributeTerms(attributeId: number, terms: string[]): Promise<void> {
     try {
       // Get existing terms for this attribute
-      const response = await this.wooCommerce.get(`products/attributes/${attributeId}/terms`, {
+      const response = await this.wooCommerce!.get(`products/attributes/${attributeId}/terms`, {
         per_page: 100
       });
       const existingTerms = response.data;
@@ -799,7 +870,7 @@ export class WooCommerceService extends BaseIntegrationService {
         if (!existingTerm) {
           // Create new term
           this.logger.log(`Creating new term "${termName}" for attribute ID ${attributeId}`);
-          await this.wooCommerce.post(`products/attributes/${attributeId}/terms`, {
+          await this.wooCommerce!.post(`products/attributes/${attributeId}/terms`, {
             name: termName
           });
         }

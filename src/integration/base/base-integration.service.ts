@@ -68,7 +68,7 @@ export abstract class BaseIntegrationService {
   /**
    * Validate webhook signature
    */
-  abstract validateWebhookSignature(headers: any, body: any): boolean;
+  abstract validateWebhookSignature(headers: any, body: any, userId?: number): Promise<boolean>;
 
   /**
    * Record integration log entry

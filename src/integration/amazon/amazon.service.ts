@@ -101,6 +101,7 @@ export class AmazonService extends BaseIntegrationService {
   private region: string;
   private sellerId: string;
   private marketplaceId: string;
+  private currentUserId: number | null = null;
   private attributeCache = new Map<string, AttributeCache>();
   
   // SDK classes loaded dynamically
@@ -115,8 +116,113 @@ export class AmazonService extends BaseIntegrationService {
     protected configService: ConfigService,
   ) {
     super(prisma, configService);
-    // Load SDK and connect asynchronously
+    // Load SDK asynchronously
     this.initializeAsync();
+  }
+
+  /**
+   * Legacy connect method - not used with per-user credentials
+   * Each operation now connects with user-specific credentials
+   */
+  async connect(): Promise<void> {
+    throw new Error('AmazonService requires per-user credentials. Use connectWithCredentials(userId) instead.');
+  }
+
+  /**
+   * Get Amazon credentials for a specific user
+   */
+  private async getUserCredentials(userId: number): Promise<{
+    clientId: string;
+    clientSecret: string;
+    refreshToken: string;
+    region: string;
+    sellerId: string;
+    webhookSecret?: string;
+  }> {
+    const credentials = await this.prisma.userIntegrationCredentials.findUnique({
+      where: {
+        userId_integrationType: {
+          userId,
+          integrationType: 'amazon',
+        },
+      },
+    });
+
+    if (!credentials || !credentials.isActive) {
+      throw new BadRequestException('Amazon credentials not configured for this user');
+    }
+
+    const creds = credentials.credentials as any;
+    if (!creds.clientId || !creds.clientSecret || !creds.refreshToken) {
+      throw new BadRequestException('Incomplete Amazon credentials configuration');
+    }
+
+    return {
+      clientId: creds.clientId,
+      clientSecret: creds.clientSecret,
+      refreshToken: creds.refreshToken,
+      region: creds.region || DEFAULT_REGION,
+      sellerId: creds.sellerId || '',
+      webhookSecret: creds.webhookSecret,
+    };
+  }
+
+  /**
+   * Connect to Amazon SP-API with user-specific credentials
+   */
+  private async connectWithCredentials(userId: number): Promise<void> {
+    // If already connected for this user, reuse the connection
+    if (this.auth && this.fbaInventoryClient && this.feedsClient && this.listingsClient && this.currentUserId === userId) {
+      return;
+    }
+
+    // Ensure SDK is loaded
+    if (!this.sdkLoaded) {
+      await this.loadAmazonSDK();
+    }
+
+    const { clientId, clientSecret, refreshToken, region, sellerId, webhookSecret } = await this.getUserCredentials(userId);
+
+    this.webhookSecret = webhookSecret;
+    this.region = region;
+    this.sellerId = sellerId;
+    this.currentUserId = userId;
+
+    this.logger.log(`Amazon config for user ${userId} - Region: ${region}, Seller ID: ${sellerId?.substring(0, 10)}...`);
+
+    try {
+      // Initialize authentication
+      this.auth = new this.SellingPartnerApiAuthClass(
+        clientId,
+        clientSecret,
+        refreshToken,
+        null // scope (null for seller API, required for grantless operations)
+      );
+
+      // Determine marketplace ID based on region
+      this.marketplaceId = MARKETPLACE_MAP[this.region] || MARKETPLACE_MAP[DEFAULT_REGION];
+
+      // Get the correct SP-API endpoint based on region
+      const spApiEndpoint = this.getSpApiEndpoint(this.region);
+
+      // Initialize API clients
+      const fbaInventoryApiClient = new this.FbaInventoryApiClientClass.ApiClient(spApiEndpoint);
+      fbaInventoryApiClient.applyXAmzAccessTokenToRequest(await this.auth.getAccessToken());
+      this.fbaInventoryClient = new this.FbaInventoryApiClientClass.FbaInventoryApi(fbaInventoryApiClient);
+
+      const feedsApiClient = new this.FeedsApiClientClass.ApiClient(spApiEndpoint);
+      feedsApiClient.applyXAmzAccessTokenToRequest(await this.auth.getAccessToken());
+      this.feedsClient = new this.FeedsApiClientClass.FeedsApi(feedsApiClient);
+
+      const listingsApiClient = new this.ListingsApiClientClass.ApiClient(spApiEndpoint);
+      listingsApiClient.applyXAmzAccessTokenToRequest(await this.auth.getAccessToken());
+      this.listingsClient = new this.ListingsApiClientClass.ListingsApi(listingsApiClient);
+
+      this.logger.log('✅ Amazon SP-API initialized successfully for user');
+    } catch (error) {
+      this.logger.error('❌ Failed to initialize Amazon SP-API for user:', error);
+      throw error;
+    }
   }
 
   /**
@@ -125,7 +231,8 @@ export class AmazonService extends BaseIntegrationService {
   private async initializeAsync(): Promise<void> {
     try {
       await this.loadAmazonSDK();
-      await this.connect();
+      // Note: Not calling connect() anymore since we use per-user credentials
+      // await this.connectWithGlobalCredentials();
     } catch (error) {
       this.logger.error('Failed to initialize Amazon service:', error);
       // Don't throw - allow service to be created but mark as not connected
@@ -182,7 +289,7 @@ export class AmazonService extends BaseIntegrationService {
   }
 
   /**
-   * Connect to Amazon SP-API (Production or Local Mock Server)
+   * Connect to Amazon SP-API (Production or Local Mock Server) - LEGACY METHOD
    * 
    * @param useLocal - Set to true to connect to local mock server, false for production
    * 
@@ -197,7 +304,7 @@ export class AmazonService extends BaseIntegrationService {
    * - Does not require real Amazon credentials
    * - Set AMZ_USE_LOCAL=true in .env to enable
    */
-  async connect(useLocal?: boolean): Promise<void> {
+  async connectWithGlobalCredentials(useLocal?: boolean): Promise<void> {
     // Ensure SDK is loaded before connecting
     if (!this.sdkLoaded) {
       await this.loadAmazonSDK();
@@ -350,6 +457,9 @@ export class AmazonService extends BaseIntegrationService {
 
   async exportProduct(productId: number, userId: number, useExtended: boolean = true): Promise<ProductSyncResult> {
     try {
+      // Ensure connection with user's credentials
+      await this.connectWithCredentials(userId);
+
       const product = await this.fetchProductWithRelations(productId, userId);
       this.validateProduct(product, productId);
 
@@ -405,6 +515,9 @@ export class AmazonService extends BaseIntegrationService {
 
   async deleteProduct(productId: number, userId: number): Promise<ProductSyncResult> {
     try {
+      // Ensure connection with user's credentials
+      await this.connectWithCredentials(userId);
+
       const product = await this.fetchProductWithRelations(productId, userId);
       this.validateProduct(product, productId);
 
@@ -430,6 +543,9 @@ export class AmazonService extends BaseIntegrationService {
 
   async pullUpdates(userId: number): Promise<any> {
     try {
+      // Ensure connection with user's credentials
+      await this.connectWithCredentials(userId);
+
       const inventory = await this.getAmazonInventory();
       const updates = await this.syncInventoryItems(inventory, userId);
 
@@ -476,26 +592,47 @@ export class AmazonService extends BaseIntegrationService {
     return updates;
   }
 
-  validateWebhookSignature(headers: any, body: any): boolean {
-    if (!this.webhookSecret) {
-      this.logger.warn('AMZ_WEBHOOK_SECRET not configured, skipping signature validation');
-      return true;
-    }
-
-    const signature = headers['x-amz-sns-signature'];
-    if (!signature) {
-      this.logger.warn('No Amazon webhook signature found in headers');
+  async validateWebhookSignature(headers: any, body: any, userId?: number): Promise<boolean> {
+    if (!userId) {
+      this.logger.warn('User ID not provided for webhook signature validation');
       return false;
     }
 
-    // Amazon SNS signature validation
-    const payload = typeof body === 'string' ? body : JSON.stringify(body);
-    const expectedSignature = crypto
-      .createHmac('sha256', this.webhookSecret)
-      .update(payload)
-      .digest('base64');
+    try {
+      const credentials = await this.prisma.userIntegrationCredentials.findUnique({
+        where: {
+          userId_integrationType: {
+            userId,
+            integrationType: 'amazon',
+          },
+        },
+      });
 
-    return signature === expectedSignature;
+      const webhookSecret = (credentials?.credentials as any)?.webhookSecret;
+
+      if (!webhookSecret) {
+        this.logger.warn('Webhook secret not configured for user, skipping signature validation');
+        return true;
+      }
+
+      const signature = headers['x-amz-sns-signature'];
+      if (!signature) {
+        this.logger.warn('No Amazon webhook signature found in headers');
+        return false;
+      }
+
+      // Amazon SNS signature validation
+      const payload = typeof body === 'string' ? body : JSON.stringify(body);
+      const expectedSignature = crypto
+        .createHmac('sha256', webhookSecret)
+        .update(payload)
+        .digest('base64');
+
+      return signature === expectedSignature;
+    } catch (error) {
+      this.logger.error('Error validating Amazon webhook signature:', error);
+      return false;
+    }
   }
 
   async handleWebhook(data: any, userId?: number): Promise<any> {
