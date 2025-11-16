@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, IsUrl, IsInt, IsIn, IsArray, ValidateNested, Length } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsUrl, IsInt, IsIn, IsArray, ValidateNested, Length, IsBoolean } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 
 export class ProductAttributeValueDto {
@@ -89,5 +89,10 @@ export class CreateProductDto {
   @Length(4, 40, { message: 'Parent SKU must be between 4 and 40 characters' })
   @Transform(({ value }) => value?.trim())
   parentSku?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) => value === true || value === 'true')
+  updateExisting?: boolean;
 
 }

@@ -38,6 +38,28 @@ export class ProductService {
     try {
       this.logger.log(`Creating product: ${createProductDto.name} for user: ${userId}`);
 
+      // Check if product with same SKU already exists
+      const existingProduct = await this.prisma.product.findUnique({
+        where: {
+          sku_userId: {
+            sku: createProductDto.sku,
+            userId,
+          },
+        },
+      });
+
+      // Handle SKU conflict based on updateExisting flag
+      if (existingProduct) {
+        if (createProductDto.updateExisting) {
+          // Update the existing product instead of creating a new one
+          this.logger.log(`Product with SKU "${createProductDto.sku}" already exists. Updating existing product (ID: ${existingProduct.id})`);
+          return this.update(existingProduct.id, createProductDto, userId);
+        } else {
+          // Throw error if updateExisting is false
+          throw new ConflictException(`A product with SKU "${createProductDto.sku}" already exists`);
+        }
+      }
+
       // Handle parentSku - convert to parentProductId
       let parentProductId: number | undefined;
       if (createProductDto.parentSku) {
