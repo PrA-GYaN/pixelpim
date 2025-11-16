@@ -979,6 +979,17 @@ export class ProductService {
       this.logger.log(`Updating product: ${id} for user: ${userId}`);
       this.logger.debug(`Update data: ${JSON.stringify(updateProductDto)}`);
 
+      // Handle updateExisting flag: when true, treat missing attribute fields as empty arrays
+      // This ensures complete replacement behavior for Excel imports
+      if (updateProductDto.updateExisting) {
+        if (updateProductDto.attributesWithValues === undefined) {
+          updateProductDto.attributesWithValues = [];
+        }
+        if (updateProductDto.familyAttributesWithValues === undefined) {
+          updateProductDto.familyAttributesWithValues = [];
+        }
+      }
+
       // Handle parentSku - convert to parentProductId
       let parentProductId: number | null | undefined;
       if (updateProductDto.parentSku !== undefined) {
