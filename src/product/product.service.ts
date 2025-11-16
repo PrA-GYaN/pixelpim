@@ -404,9 +404,12 @@ export class ProductService {
 
       // Handle attributes - for upsert, we need to manage ProductAttribute entries
       if (filteredAttributes && filteredAttributes.length > 0) {
-        // First, get existing ProductAttribute entries for this product
+        // First, get existing non-family ProductAttribute entries for this product
         const existingProductAttributes = await this.prisma.productAttribute.findMany({
-          where: { productId: product.id },
+          where: { 
+            productId: product.id,
+            familyAttributeId: null // Only get non-family attributes
+          },
           select: { attributeId: true },
         });
         const existingAttributeIds = existingProductAttributes.map(pa => pa.attributeId);
@@ -415,12 +418,13 @@ export class ProductService {
         const attributesToAdd = filteredAttributes.filter(attrId => !existingAttributeIds.includes(attrId));
         const attributesToRemove = existingAttributeIds.filter(attrId => !filteredAttributes.includes(attrId));
 
-        // Remove attributes that are no longer in the list
+        // Remove non-family attributes that are no longer in the list
         if (attributesToRemove.length > 0) {
           await this.prisma.productAttribute.deleteMany({
             where: {
               productId: product.id,
               attributeId: { in: attributesToRemove },
+              familyAttributeId: null // Only delete non-family attributes
             },
           });
         }
@@ -433,8 +437,13 @@ export class ProductService {
           });
         }
       } else {
-        // If no attributes provided, remove all existing ProductAttribute entries
-        await this.prisma.productAttribute.deleteMany({ where: { productId: product.id } });
+        // If no attributes provided, remove all existing non-family ProductAttribute entries
+        await this.prisma.productAttribute.deleteMany({ 
+          where: { 
+            productId: product.id,
+            familyAttributeId: null // Only delete non-family attributes
+          } 
+        });
       }
 
       // Handle attributes with values if provided
@@ -459,6 +468,30 @@ export class ProductService {
           filteredAttributesWithValues = createProductDto.attributesWithValues.filter(
             av => !familyAttributeIds.includes(av.attributeId)
           );
+        }
+
+        // First, delete existing non-family ProductAttribute entries that aren't in the new list
+        const currentProductAttributes = await this.prisma.productAttribute.findMany({
+          where: { 
+            productId: product.id,
+            familyAttributeId: null // Only get non-family attributes
+          },
+          select: { attributeId: true },
+        });
+        
+        const newAttributeIds = filteredAttributesWithValues.map(av => av.attributeId);
+        const attributesToDelete = currentProductAttributes
+          .filter(pa => !newAttributeIds.includes(pa.attributeId))
+          .map(pa => pa.attributeId);
+
+        if (attributesToDelete.length > 0) {
+          await this.prisma.productAttribute.deleteMany({
+            where: {
+              productId: product.id,
+              attributeId: { in: attributesToDelete },
+              familyAttributeId: null // Only delete non-family attributes
+            },
+          });
         }
 
         // Upsert ProductAttribute entries with values
@@ -503,6 +536,30 @@ export class ProductService {
           if (!familyAttributeMap.has(attributeId)) {
             throw new BadRequestException(`Attribute ${attributeId} is not part of the selected family`);
           }
+        }
+
+        // First, delete existing family ProductAttribute entries that aren't in the new list
+        const currentFamilyAttributes = await this.prisma.productAttribute.findMany({
+          where: { 
+            productId: product.id,
+            familyAttributeId: { not: null }
+          },
+          select: { attributeId: true },
+        });
+        
+        const newFamilyAttributeIds = createProductDto.familyAttributesWithValues.map(av => av.attributeId);
+        const familyAttributesToDelete = currentFamilyAttributes
+          .filter(pa => !newFamilyAttributeIds.includes(pa.attributeId))
+          .map(pa => pa.attributeId);
+
+        if (familyAttributesToDelete.length > 0) {
+          await this.prisma.productAttribute.deleteMany({
+            where: {
+              productId: product.id,
+              attributeId: { in: familyAttributesToDelete },
+              familyAttributeId: { not: null }
+            },
+          });
         }
 
         // Upsert ProductAttribute entries for family attributes with values
@@ -1060,7 +1117,13 @@ export class ProductService {
           filteredAttributes = newFilteredAttributes;
         }
 
-        await this.prisma.productAttribute.deleteMany({ where: { productId: id } });
+        // Delete only non-family attributes before recreating
+        await this.prisma.productAttribute.deleteMany({ 
+          where: { 
+            productId: id,
+            familyAttributeId: null // Only delete non-family attributes
+          } 
+        });
         if (filteredAttributes.length > 0) {
           await this.prisma.productAttribute.createMany({
             data: filteredAttributes.map(attributeId => ({ productId: id, attributeId })),
@@ -1105,9 +1168,12 @@ export class ProductService {
             );
           }
 
-          // First, delete existing ProductAttribute entries that aren't in the new list
+          // First, delete existing non-family ProductAttribute entries that aren't in the new list
           const currentProductAttributes = await this.prisma.productAttribute.findMany({
-            where: { productId: id },
+            where: { 
+              productId: id,
+              familyAttributeId: null // Only get non-family attributes
+            },
             select: { attributeId: true },
           });
           
@@ -1121,6 +1187,7 @@ export class ProductService {
               where: {
                 productId: id,
                 attributeId: { in: attributesToDelete },
+                familyAttributeId: null // Only delete non-family attributes
               },
             });
           }
@@ -1145,8 +1212,13 @@ export class ProductService {
             });
           }
         } else {
-          // If empty array provided, delete all ProductAttribute entries
-          await this.prisma.productAttribute.deleteMany({ where: { productId: id } });
+          // If empty array provided, delete all non-family ProductAttribute entries
+          await this.prisma.productAttribute.deleteMany({ 
+            where: { 
+              productId: id,
+              familyAttributeId: null // Only delete non-family attributes
+            } 
+          });
         }
       }
 
