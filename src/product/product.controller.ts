@@ -15,9 +15,11 @@ import {
   UseInterceptors,
   ClassSerializerInterceptor,
   NotFoundException,
+  Sse,
 } from '@nestjs/common';
 import { ProductService } from './product.service';
 import { CreateProductDto } from './dto/create-product.dto';
+import { BulkDeleteDto } from './dto/bulk-delete.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { UpdateProductAttributesDto } from './dto/update-product-attribute.dto';
 import { ProductResponseDto } from './dto/product-response.dto';
@@ -40,6 +42,9 @@ import type { User } from '../../generated/prisma';
 // import { MarketplaceTemplateService } from './services/marketplace-template.service';
 // import { MarketplaceExportService } from './services/marketplace-export.service';
 import { CsvImportService } from './services/csv-import.service';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { UploadedFile } from '@nestjs/common';
+import { ImportProductsDto, ImportProductsResponseDto } from './dto/import-products.dto';
 // import { ImportSchedulerService } from './services/import-scheduler.service';
 
 @Controller('products')
@@ -225,6 +230,19 @@ export class ProductController {
     return this.productService.remove(id, user.id);
   }
 
+  @Post('bulk-delete')
+  @HttpCode(HttpStatus.OK)
+  async bulkDelete(
+    @Body() body: BulkDeleteDto,
+    @GetUser() user: User,
+  ): Promise<{ message: string; deletedCount: number }> {
+    this.logger.log(`User ${user.id} bulk deleting products`);
+
+    const deletedCount = await this.productService.bulkRemove(body.ids ?? [], user.id, body.filters);
+
+    return { message: `Deleted ${deletedCount} product(s)`, deletedCount };
+  }
+
   // Product Variant Management Endpoints
 
   @Post(':parentId/variants')
@@ -356,6 +374,48 @@ export class ProductController {
     return this.csvImportService.importFromCsv(importDto.csvUrl, user.id);
   }
 
+  // Excel (XLSX) Import
+  @Post('import')
+  @HttpCode(HttpStatus.OK)
+  @UseInterceptors(FileInterceptor('file'))
+  async importFromExcel(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() importDto: ImportProductsDto,
+    @GetUser() user: User,
+  ): Promise<ImportProductsResponseDto> {
+    this.logger.log(`User ${user.id} importing products from Excel`);
+
+    return this.productService.importProductsFromExcel(file, importDto.mapping, user.id);
+  }
+
+  @Sse('import/progress/:sessionId')
+  importProgress(
+    @Param('sessionId') sessionId: string,
+    @GetUser() user: User,
+  ) {
+    this.logger.log(`User ${user.id} subscribing to import progress for session ${sessionId}`);
+    return this.productService.getImportProgressStream(sessionId, user.id);
+  }
+
+  @Post('import-with-progress')
+  @HttpCode(HttpStatus.OK)
+  @UseInterceptors(FileInterceptor('file'))
+  async importFromExcelWithProgress(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() importDto: ImportProductsDto,
+    @GetUser() user: User,
+  ): Promise<{ sessionId: string }> {
+    this.logger.log(`User ${user.id} importing products from Excel with progress tracking`);
+
+    const sessionId = this.productService.generateSessionId();
+    // Start import in background
+    this.productService.importProductsFromExcelWithProgress(file, importDto.mapping, user.id, sessionId).catch(err => {
+      this.logger.error(`Error in background import for session ${sessionId}:`, err);
+    });
+
+    return { sessionId };
+  }
+
   // CSV Import Scheduling Endpoints
 
   @Post('import/schedule')
@@ -474,5 +534,45 @@ export class ProductController {
     this.logger.log(`User ${user.id} fetching execution stats for job: ${jobId}`);
     
     return this.productService.getExecutionStats(jobId, user.id);
+  }
+
+  // Soft Delete Endpoints
+
+  @Get('deleted')
+  async getSoftDeletedProducts(
+    @GetUser() user: User,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    this.logger.log(`User ${user.id} fetching soft-deleted products`);
+    
+    const pageNum = page ? parseInt(page) : 1;
+    const limitNum = limit ? parseInt(limit) : 10;
+    
+    return this.productService.getSoftDeletedProducts(user.id, pageNum, limitNum);
+  }
+
+  @Post(':id/restore')
+  @HttpCode(HttpStatus.OK)
+  async restoreProduct(
+    @Param('id', ParseIntPipe) id: number,
+    @GetUser() user: User,
+    @Query('restoreVariants') restoreVariants?: string,
+  ) {
+    this.logger.log(`User ${user.id} restoring soft-deleted product: ${id}`);
+    
+    const shouldRestoreVariants = restoreVariants === 'true';
+    return this.productService.restoreProduct(id, user.id, shouldRestoreVariants);
+  }
+
+  @Delete(':id/permanent')
+  @HttpCode(HttpStatus.OK)
+  async permanentlyDeleteProduct(
+    @Param('id', ParseIntPipe) id: number,
+    @GetUser() user: User,
+  ) {
+    this.logger.log(`User ${user.id} permanently deleting product: ${id}`);
+    
+    return this.productService.permanentlyDeleteProduct(id, user.id);
   }
 }

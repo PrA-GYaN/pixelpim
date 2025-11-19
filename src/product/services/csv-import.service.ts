@@ -7,6 +7,7 @@ import * as http from 'http';
 import { Readable } from 'stream';
 import { ProductService } from '../product.service';
 import { AttributeType } from '../../types/attribute-type.enum';
+import { Prisma } from '@prisma/client';
 
 // Type definitions
 interface CsvRow {
@@ -354,12 +355,11 @@ export class CsvImportService {
     const parentSku = row.parentSku!.trim();
 
     // Find or create the parent product
-    let parentProduct = await this.prisma.product.findUnique({
+    let parentProduct = await this.prisma.product.findFirst({
       where: {
-        sku_userId: {
-          sku: parentSku,
-          userId,
-        },
+        sku: parentSku,
+        userId,
+        isDeleted: false,
       },
       include: {
         family: true,
@@ -406,12 +406,11 @@ export class CsvImportService {
     const attributeValuePairs = await this.parseAndCreateAttributes(row, userId);
 
     // Check if variant with this SKU already exists
-    const existingVariant = await this.prisma.product.findUnique({
+    const existingVariant = await this.prisma.product.findFirst({
       where: {
-        sku_userId: {
-          sku: row.sku!.trim(),
-          userId,
-        },
+        sku: row.sku!.trim(),
+        userId,
+        isDeleted: false,
       },
     });
 
@@ -489,8 +488,8 @@ export class CsvImportService {
       });
 
       // Copy parent attributes to variant if no custom attributes provided
-      if (attributeValuePairs.length === 0 && parentProduct.attributes && parentProduct.attributes.length > 0) {
-        const attributesToCopy = parentProduct.attributes.map(attr => ({
+      if (attributeValuePairs.length === 0 && 'attributes' in parentProduct && parentProduct.attributes && Array.isArray(parentProduct.attributes) && parentProduct.attributes.length > 0) {
+        const attributesToCopy = (parentProduct.attributes as any[]).map(attr => ({
           productId: variant.id,
           attributeId: attr.attributeId,
           familyAttributeId: attr.familyAttributeId,

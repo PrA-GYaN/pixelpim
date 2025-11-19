@@ -153,6 +153,8 @@ model Product {
   familyId         Int?
   parentProductId  Int?
   userId           Int
+  deletedAt        DateTime?
+  isDeleted        Boolean         @default(false)
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 
@@ -171,6 +173,7 @@ model Product {
 
   @@unique([sku, userId])
   @@unique([name, userId])
+  @@index([userId, isDeleted])
 }
 
 
@@ -217,6 +220,8 @@ model Asset {
   size         BigInt
   userId       Int
   assetGroupId Int?
+  deletedAt    DateTime?
+  isDeleted    Boolean     @default(false)
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
 
@@ -226,6 +231,7 @@ model Asset {
 
   // Allow same name in different folders (Windows Explorer behavior)
   @@unique([name, userId, assetGroupId])
+  @@index([userId, isDeleted])
 }
 
 model ProductAttribute {

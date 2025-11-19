@@ -157,12 +157,13 @@ export class AssetService {
     const username = user.email.replace(/[^a-zA-Z0-9]/g, '_');
     const userFolder = `${userId}_${username}`;
 
-    // Check if asset with same name already exists in the same folder
+    // Check if asset with same name already exists in the same folder (excluding soft-deleted)
     const existingAsset = await this.prisma.asset.findFirst({
       where: {
         name: createAssetDto.name,
         userId,
         assetGroupId: createAssetDto.assetGroupId ?? null,
+        isDeleted: false,
       },
     });
 
@@ -241,8 +242,14 @@ export class AssetService {
     page: number = 1,
     limit: number = 10,
     filters: any = {},
+    includeDeleted: boolean = false,
   ) {
     const whereCondition: any = { userId };
+    
+    // Exclude soft-deleted assets by default
+    if (!includeDeleted) {
+      whereCondition.isDeleted = false;
+    }
     
     // Group filter
     if (assetGroupId !== undefined) {
@@ -334,9 +341,16 @@ export class AssetService {
     );
   }
 
-  async findOne(id: number, userId: number) {
+  async findOne(id: number, userId: number, includeDeleted: boolean = false) {
+    const whereCondition: any = { id, userId };
+    
+    // Exclude soft-deleted assets by default
+    if (!includeDeleted) {
+      whereCondition.isDeleted = false;
+    }
+
     const asset = await this.prisma.asset.findFirst({
-      where: { id, userId },
+      where: whereCondition,
       include: {
         assetGroup: true,
       },
@@ -425,34 +439,8 @@ export class AssetService {
   }
 
   async remove(id: number, userId: number) {
-    const asset = await this.findOne(id, userId);
-
-    // Delete local file - reconstruct local path
-    try {
-      const localDirPath = await this.buildLocalDirectoryPath(asset.userId, asset.assetGroupId);
-      const localFilePath = path.join(localDirPath, asset.fileName);
-      await fs.unlink(localFilePath);
-    } catch (error) {
-      console.error('Error deleting local file:', error);
-    }
-
-    // Delete file from Cloudinary using public_id from Cloudinary URL
-    try {
-      const publicId = CloudinaryUtil.extractPublicId(asset.filePath);
-      await CloudinaryUtil.deleteFile(publicId);
-    } catch (error) {
-      console.error('Error deleting file from Cloudinary:', error);
-    }
-
-    await this.prisma.asset.delete({
-      where: { id },
-    });
-
-    if (asset.assetGroupId) {
-      await this.updateAssetGroupSize(asset.assetGroupId);
-    }
-
-    return { message: 'Asset deleted successfully' };
+    // Use soft delete instead of hard delete
+    return this.softDeleteAsset(id, userId);
   }
 
   private async updateAssetGroupSize(assetGroupId: number) {
@@ -714,5 +702,201 @@ export class AssetService {
     })));
 
     return exportData;
+  }
+
+  // ============================================================
+  // SOFT DELETE METHODS
+  // ============================================================
+
+  /**
+   * Soft delete an asset by setting deletedAt and isDeleted flags
+   * @param id - Asset ID
+   * @param userId - User ID
+   * @returns Promise<{ message: string; asset: any }>
+   */
+  async softDeleteAsset(id: number, userId: number): Promise<{ message: string; asset: any }> {
+    const asset = await this.prisma.asset.findFirst({
+      where: { 
+        id, 
+        userId,
+        isDeleted: false 
+      },
+    });
+
+    if (!asset) {
+      throw new NotFoundException('Asset not found or already deleted');
+    }
+
+    // Soft delete the asset
+    const deletedAsset = await this.prisma.asset.update({
+      where: { id },
+      data: {
+        deletedAt: new Date(),
+        isDeleted: true,
+      },
+    });
+
+    // Update group size if asset was in a group
+    if (asset.assetGroupId) {
+      await this.updateAssetGroupSize(asset.assetGroupId);
+    }
+
+    return { 
+      message: 'Asset successfully soft deleted',
+      asset: AssetService.convertBigIntToString(deletedAsset)
+    };
+  }
+
+  /**
+   * Restore a soft-deleted asset
+   * @param id - Asset ID
+   * @param userId - User ID
+   * @returns Promise<{ message: string; asset: any }>
+   */
+  async restoreAsset(id: number, userId: number): Promise<{ message: string; asset: any }> {
+    const asset = await this.prisma.asset.findFirst({
+      where: { 
+        id, 
+        userId,
+        isDeleted: true 
+      },
+    });
+
+    if (!asset) {
+      throw new NotFoundException('Soft-deleted asset not found');
+    }
+
+    // Check for name conflicts before restoring
+    const existingAsset = await this.prisma.asset.findFirst({
+      where: {
+        name: asset.name,
+        userId,
+        assetGroupId: asset.assetGroupId,
+        isDeleted: false,
+      },
+    });
+
+    if (existingAsset) {
+      throw new ConflictException(`Cannot restore: An asset with name "${asset.name}" already exists in this folder`);
+    }
+
+    // Restore the asset
+    const restoredAsset = await this.prisma.asset.update({
+      where: { id },
+      data: {
+        deletedAt: null,
+        isDeleted: false,
+      },
+    });
+
+    // Update group size if asset is in a group
+    if (asset.assetGroupId) {
+      await this.updateAssetGroupSize(asset.assetGroupId);
+    }
+
+    return { 
+      message: 'Asset successfully restored',
+      asset: {
+        ...AssetService.convertBigIntToString(restoredAsset),
+        size: Number(restoredAsset.size),
+        url: restoredAsset.filePath,
+        formattedSize: CloudinaryUtil.formatFileSize(Number(restoredAsset.size)),
+      }
+    };
+  }
+
+  /**
+   * Get soft-deleted assets for a user
+   * @param userId - User ID
+   * @param page - Page number
+   * @param limit - Items per page
+   * @returns Promise<PaginatedResponse<any>>
+   */
+  async getSoftDeletedAssets(
+    userId: number,
+    page: number = 1,
+    limit: number = 10
+  ) {
+    const whereCondition: any = { 
+      userId,
+      isDeleted: true 
+    };
+
+    const paginationOptions = PaginationUtils.createPrismaOptions(page, limit);
+
+    const [assets, total] = await Promise.all([
+      this.prisma.asset.findMany({
+        where: whereCondition,
+        ...paginationOptions,
+        include: {
+          assetGroup: true,
+        },
+        orderBy: { deletedAt: 'desc' },
+      }),
+      this.prisma.asset.count({ where: whereCondition }),
+    ]);
+
+    const transformedAssets = assets.map((asset) => ({
+      ...AssetService.convertBigIntToString(asset),
+      size: Number(asset.size),
+      url: asset.filePath,
+      formattedSize: CloudinaryUtil.formatFileSize(Number(asset.size)),
+    }));
+
+    return PaginationUtils.createPaginatedResponse(
+      transformedAssets,
+      total,
+      page,
+      limit,
+    );
+  }
+
+  /**
+   * Permanently delete a soft-deleted asset (hard delete)
+   * @param id - Asset ID
+   * @param userId - User ID
+   * @returns Promise<{ message: string }>
+   */
+  async permanentlyDeleteAsset(id: number, userId: number): Promise<{ message: string }> {
+    const asset = await this.prisma.asset.findFirst({
+      where: { 
+        id, 
+        userId,
+        isDeleted: true 
+      },
+    });
+
+    if (!asset) {
+      throw new NotFoundException('Soft-deleted asset not found');
+    }
+
+    // Delete local file
+    try {
+      const localDirPath = await this.buildLocalDirectoryPath(asset.userId, asset.assetGroupId ?? undefined);
+      const localFilePath = path.join(localDirPath, asset.fileName);
+      await fs.unlink(localFilePath);
+    } catch (error) {
+      console.error('Error deleting local file:', error);
+    }
+
+    // Delete file from Cloudinary
+    try {
+      const publicId = CloudinaryUtil.extractPublicId(asset.filePath);
+      await CloudinaryUtil.deleteFile(publicId);
+    } catch (error) {
+      console.error('Error deleting file from Cloudinary:', error);
+    }
+
+    // Permanently delete
+    await this.prisma.asset.delete({
+      where: { id },
+    });
+
+    // Update group size if asset was in a group
+    if (asset.assetGroupId) {
+      await this.updateAssetGroupSize(asset.assetGroupId);
+    }
+
+    return { message: 'Asset permanently deleted' };
   }
 }

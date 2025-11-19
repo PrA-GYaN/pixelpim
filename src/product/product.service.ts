@@ -4,24 +4,93 @@ import { NotificationService } from '../notification/notification.service';
 import { WebhookService } from '../webhook/webhook.service';
 import { WebhookFormatterService } from '../webhook/webhook-formatter.service';
 import { CreateProductDto } from './dto/create-product.dto';
+import { ImportProductsResponseDto, ImportProgressDto } from './dto/import-products.dto';
+import { parseExcel } from '../utils/excel-parser';
+import type { Express } from 'express';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { UpdateProductAttributesDto } from './dto/update-product-attribute.dto';
 import { ProductResponseDto } from './dto/product-response.dto';
 import { AddVariantDto, RemoveVariantDto, ProductVariantResponseDto, GetProductVariantsDto } from './dto/product-variant.dto';
 import { ExportProductDto, ExportProductResponseDto, ProductAttribute, ExportFormat, AttributeSelectionDto } from './dto/export-product.dto';
-// import { MarketplaceExportDto, MarketplaceExportResponseDto, MarketplaceType } from './dto/marketplace-export.dto';
 import { ScheduleImportDto, UpdateScheduledImportDto, ImportJobResponseDto } from './dto/schedule-import.dto';
 import { CsvImportService } from './services/csv-import.service';
 import { ImportSchedulerService } from './services/import-scheduler.service';
-// import { MarketplaceTemplateService } from './services/marketplace-template.service';
-// import { MarketplaceExportService } from './services/marketplace-export.service';
 import { PaginatedResponse, PaginationUtils } from '../common';
-// import type { Product } from '../../generated/prisma';
 import { getUserFriendlyType } from '../types/user-attribute-type.enum';
+import { Subject, Observable, interval } from 'rxjs';
+import { map, takeWhile } from 'rxjs/operators';
+import { randomBytes } from 'crypto';
 
 @Injectable()
 export class ProductService {
   private readonly logger = new Logger(ProductService.name);
+
+  // Common Prisma include configurations
+  private readonly PRODUCT_INCLUDE_FULL = {
+    category: {
+      select: {
+        id: true,
+        name: true,
+        description: true,
+      },
+    },
+    attributeGroup: {
+      select: {
+        id: true,
+        name: true,
+        description: true,
+      },
+    },
+    family: {
+      select: {
+        id: true,
+        name: true,
+        familyAttributes: {
+          include: {
+            attribute: {
+              select: {
+                id: true,
+                name: true,
+                type: true,
+                defaultValue: true,
+              },
+            },
+          },
+        },
+      },
+    },
+    attributes: {
+      select: {
+        value: true,
+        familyAttributeId: true,
+        attribute: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            defaultValue: true,
+          },
+        },
+      },
+    },
+    variants: {
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        imageUrl: true,
+        status: true,
+      },
+    },
+  };
+
+  // Cache for family attribute IDs to reduce database queries
+  private familyAttributeCache = new Map<number, { data: number[]; timestamp: number }>();
+  private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+  // Progress tracking for imports
+  private progressStreams = new Map<string, Subject<ImportProgressDto>>();
+  private progressData = new Map<string, ImportProgressDto>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -34,19 +103,361 @@ export class ProductService {
     private readonly importSchedulerService: ImportSchedulerService,
   ) {}
 
+  // How long to retain the last progress snapshot after completion so clients
+  // that reload shortly after finishing can still reconnect and view the final
+  // summary. This avoids progress UI disappearing immediately on reload.
+  private readonly PROGRESS_RETENTION_MS = 5 * 60 * 1000; // 5 minutes
+
+  // Generate a unique session ID for import tracking
+  generateSessionId(): string {
+    return randomBytes(16).toString('hex');
+  }
+
+  // Get import progress stream for SSE
+  getImportProgressStream(sessionId: string, userId: number): Observable<MessageEvent> {
+    let stream = this.progressStreams.get(sessionId);
+    
+    if (!stream) {
+      stream = new Subject<ImportProgressDto>();
+      this.progressStreams.set(sessionId, stream);
+      // If we already have progress stored for this session, immediately emit it
+      // so new subscribers (e.g. after a page reload) will receive the current
+      // import progress without needing to wait for the next batch update.
+      const cached = this.progressData.get(sessionId);
+      if (cached) {
+        // Emit asynchronously so creation flow completes before pushing the event
+        setTimeout(() => stream!.next(cached), 0);
+      }
+    }
+
+    // Clean up after completion
+    return stream.pipe(
+      map((progress) => ({
+        data: progress,
+      } as MessageEvent)),
+      takeWhile((event: any) => event.data.status !== 'completed' && event.data.status !== 'error', true),
+    );
+  }
+
+  // Update progress for a session
+  private updateProgress(sessionId: string, progress: ImportProgressDto): void {
+    this.progressData.set(sessionId, progress);
+    const stream = this.progressStreams.get(sessionId);
+    if (stream) {
+      stream.next(progress);
+      
+      // Clean up on completion
+      if (progress.status === 'completed' || progress.status === 'error') {
+        setTimeout(() => {
+          try {
+            stream.complete();
+          } catch (e) {
+            this.logger.debug('Error completing progress stream', e);
+          }
+          // keep progressData for a short period so refreshed clients can fetch
+          // the summary and the progress bar won't disappear immediately on a
+          // page reload (improves UX). It will be removed after PROGRESS_RETENTION_MS.
+          const timer = setTimeout(() => {
+            this.progressStreams.delete(sessionId);
+            this.progressData.delete(sessionId);
+            clearTimeout(timer);
+          }, this.PROGRESS_RETENTION_MS);
+        }, 1000);
+      }
+    }
+  }
+
+  // Import with progress tracking
+  async importProductsFromExcelWithProgress(
+    file: Express.Multer.File, 
+    mappingJson: string, 
+    userId: number, 
+    sessionId: string
+  ): Promise<void> {
+    const failedRows: Array<{ row: number; error: string }> = [];
+
+    try {
+      if (!file || !file.buffer) {
+        throw new BadRequestException('Missing file upload');
+      }
+
+      let mapping: Record<string, string>;
+      try {
+        mapping = JSON.parse(mappingJson);
+      } catch (err) {
+        throw new BadRequestException('Invalid mapping JSON');
+      }
+
+      // Parse the Excel file
+      let parsed;
+      try {
+        parsed = await parseExcel(file.buffer);
+      } catch (error) {
+        this.logger.error('Failed to parse Excel file', error);
+        this.updateProgress(sessionId, {
+          processed: 0,
+          total: 0,
+          successCount: 0,
+          failedCount: 0,
+          percentage: 0,
+          status: 'error',
+          message: 'Failed to parse Excel file',
+        });
+        return;
+      }
+
+      const rows = parsed.rows || [];
+      const totalRows = rows.length;
+      this.logger.log(`Parsed ${totalRows} rows from Excel import`);
+
+      // Initialize progress
+      this.updateProgress(sessionId, {
+        processed: 0,
+        total: totalRows,
+        successCount: 0,
+        failedCount: 0,
+        percentage: 0,
+        status: 'processing',
+        message: 'Starting import...',
+      });
+
+      const BATCH_SIZE = 50; // Smaller batches for more frequent updates
+      let successCount = 0;
+      let processed = 0;
+
+      for (let start = 0; start < rows.length; start += BATCH_SIZE) {
+        const batch = rows.slice(start, start + BATCH_SIZE);
+        const batchPromises = batch.map(async (row, idx) => {
+          const rowNumber = start + idx + 2; // +2 because header is row 1
+
+          try {
+            const productDto = await this.mapRowToCreateProductDto(row, mapping, userId);
+
+            // Validate required fields
+            if (!productDto.sku) {
+              throw new BadRequestException('Missing SKU');
+            }
+            if (!productDto.name) {
+              throw new BadRequestException('Missing name');
+            }
+
+            await this.upsertProductFromCsv(productDto, userId);
+            return { success: true };
+          } catch (error) {
+            const message = error?.message || 'Unknown error';
+            this.logger.warn(`Failed to import Excel row ${rowNumber}: ${message}`);
+            failedRows.push({ row: rowNumber, error: message });
+            return { success: false };
+          }
+        });
+
+        const settled = await Promise.allSettled(batchPromises);
+        const batchSuccessCount = settled.filter(res => 
+          res.status === 'fulfilled' && res.value?.success
+        ).length;
+        
+        successCount += batchSuccessCount;
+        processed += batch.length;
+
+        // Update progress after each batch
+        const percentage = Math.round((processed / totalRows) * 100);
+        this.updateProgress(sessionId, {
+          processed,
+          total: totalRows,
+          successCount,
+          failedCount: failedRows.length,
+          percentage,
+          status: 'processing',
+          message: `Processing batch ${Math.ceil(start / BATCH_SIZE) + 1}...`,
+        });
+      }
+
+      // Final completion update
+      this.updateProgress(sessionId, {
+        processed: totalRows,
+        total: totalRows,
+        successCount,
+        failedCount: failedRows.length,
+        percentage: 100,
+        status: 'completed',
+        message: `Import completed: ${successCount} succeeded, ${failedRows.length} failed`,
+      });
+
+    } catch (error) {
+      this.logger.error('Import error:', error);
+      this.updateProgress(sessionId, {
+        processed: 0,
+        total: 0,
+        successCount: 0,
+        failedCount: 0,
+        percentage: 0,
+        status: 'error',
+        message: error?.message || 'Import failed',
+      });
+    }
+  }
+
+  // Import products from an uploaded Excel (.xlsx) file. Mapping is a JSON string mapping internal field names to
+  // header column names in the uploaded sheet.
+  async importProductsFromExcel(file: Express.Multer.File, mappingJson: string, userId: number): Promise<ImportProductsResponseDto> {
+    const failedRows: Array<{ row: number; error: string }> = [];
+
+    if (!file || !file.buffer) {
+      throw new BadRequestException('Missing file upload');
+    }
+
+    let mapping: Record<string, string>;
+    try {
+      mapping = JSON.parse(mappingJson);
+    } catch (err) {
+      throw new BadRequestException('Invalid mapping JSON');
+    }
+
+    // Parse the Excel file
+    let parsed;
+    try {
+      parsed = await parseExcel(file.buffer);
+    } catch (error) {
+      this.logger.error('Failed to parse Excel file', error);
+      throw new BadRequestException('Failed to parse Excel file');
+    }
+
+    const rows = parsed.rows || [];
+    const totalRows = rows.length;
+    this.logger.log(`Parsed ${totalRows} rows from Excel import`);
+
+    const BATCH_SIZE = 100;
+    let successCount = 0;
+
+    for (let start = 0; start < rows.length; start += BATCH_SIZE) {
+      const batch = rows.slice(start, start + BATCH_SIZE);
+      const batchPromises = batch.map(async (row, idx) => {
+        const rowNumber = start + idx + 2; // +2 because header is row 1
+
+        try {
+          const productDto = await this.mapRowToCreateProductDto(row, mapping, userId);
+
+          // Validate required fields
+          if (!productDto.sku) {
+            throw new BadRequestException('Missing SKU');
+          }
+          if (!productDto.name) {
+            throw new BadRequestException('Missing name');
+          }
+
+          await this.upsertProductFromCsv(productDto, userId);
+          return { success: true };
+        } catch (error) {
+          const message = error?.message || 'Unknown error';
+          this.logger.warn(`Failed to import Excel row ${rowNumber}: ${message}`);
+          failedRows.push({ row: rowNumber, error: message });
+          return { success: false };
+        }
+      });
+
+      const settled = await Promise.allSettled(batchPromises);
+      successCount += settled.filter(res => 
+        res.status === 'fulfilled' && res.value?.success
+      ).length;
+    }
+
+    return { totalRows, successCount, failedRows };
+  }
+
+  private async mapRowToCreateProductDto(row: Record<string, any>, mapping: Record<string, string>, userId: number): Promise<CreateProductDto> {
+    const productDto: any = {} as CreateProductDto;
+
+    // Standard fields that map to top-level product fields
+    const mapToField = (fieldName: string, setter: (val: any) => void) => {
+      const header = mapping[fieldName];
+      if (!header) return;
+      const val = row[header];
+      if (val === undefined || val === null) return;
+      setter(val);
+    };
+
+    mapToField('sku', v => productDto.sku = String(v).trim());
+    mapToField('name', v => productDto.name = String(v).trim());
+    mapToField('productLink', v => productDto.productLink = String(v).trim());
+    mapToField('imageUrl', v => productDto.imageUrl = String(v).trim());
+
+    // Map extras (any mapping key other than standard product fields will be treated as an attribute)
+    const attributeEntries: Array<{ attributeId?: number; attributeName?: string; value: string }> = [];
+
+    for (const [key, header] of Object.entries(mapping)) {
+      if (!header) continue;
+      if (['sku', 'name', 'productLink', 'imageUrl', 'subImages', 'category', 'family', 'parentSku'].includes(key)) continue;
+      const value = row[header];
+      if (value === undefined || value === null || String(value).trim() === '') continue;
+
+      // Use the mapping key as the attribute name (e.g., price, description)
+      attributeEntries.push({ attributeName: key, value: String(value).trim() });
+    }
+
+    // Convert attribute names to IDs using prisma; create attributes if missing
+    const attributesWithValues = [] as any[];
+    if (attributeEntries.length > 0) {
+      // Batch fetch all attributes at once
+      const attributeNames = attributeEntries.map(a => a.attributeName!);
+      const existingAttributes = await this.prisma.attribute.findMany({
+        where: { name: { in: attributeNames }, userId },
+      });
+      
+      const existingAttrMap = new Map(existingAttributes.map(a => [a.name, a]));
+      
+      // Process each attribute
+      for (const attr of attributeEntries) {
+        try {
+          let attribute = existingAttrMap.get(attr.attributeName!);
+          
+          if (!attribute) {
+            // Create missing attribute
+            attribute = await this.prisma.attribute.create({ 
+              data: { name: attr.attributeName!, type: 'STRING', userId } 
+            });
+            existingAttrMap.set(attribute.name, attribute);
+          }
+          
+          attributesWithValues.push({ attributeId: attribute.id, value: attr.value });
+        } catch (e) {
+          this.logger.warn(`Failed creating attribute ${attr.attributeName}: ${e.message}`);
+        }
+      }
+    }
+
+    if (attributesWithValues.length > 0) {
+      productDto.attributesWithValues = attributesWithValues;
+    }
+
+    return productDto;
+  }
+
   async create(createProductDto: CreateProductDto, userId: number): Promise<ProductResponseDto> {
     try {
       this.logger.log(`Creating product: ${createProductDto.name} for user: ${userId}`);
 
       // Check if product with same SKU already exists
-      const existingProduct = await this.prisma.product.findUnique({
+      const existingProductAny = await this.prisma.product.findFirst({
         where: {
-          sku_userId: {
-            sku: createProductDto.sku,
-            userId,
-          },
+          sku: createProductDto.sku,
+          userId,
         },
       });
+
+      // If found but soft-deleted, restore it (clear deletedAt and mark isDeleted false) then run update
+      if (existingProductAny && existingProductAny.isDeleted) {
+        this.logger.log(`Restoring soft-deleted product with SKU "${createProductDto.sku}" for user ${userId}.`);
+        await this.prisma.product.update({
+          where: { id: existingProductAny.id },
+          data: { isDeleted: false, deletedAt: null },
+        });
+
+        // After restore, call update to handle the rest of the creation logic (attributes, etc.)
+        return this.update(existingProductAny.id, createProductDto as any, userId);
+      }
+
+      // Check for existing non-deleted product (previous behavior)
+      const existingProduct = existingProductAny && !existingProductAny.isDeleted ? existingProductAny : null;
 
       // Handle SKU conflict based on updateExisting flag
       if (existingProduct) {
@@ -63,12 +474,11 @@ export class ProductService {
       // Handle parentSku - convert to parentProductId
       let parentProductId: number | undefined;
       if (createProductDto.parentSku) {
-        const parentProduct = await this.prisma.product.findUnique({
+        const parentProduct = await this.prisma.product.findFirst({
           where: {
-            sku_userId: {
-              sku: createProductDto.parentSku,
-              userId,
-            },
+            sku: createProductDto.parentSku,
+            userId,
+            isDeleted: false,
           },
           select: { id: true },
         });
@@ -124,43 +534,6 @@ export class ProductService {
           familyId: createProductDto.familyId,
           parentProductId: parentProductId,
           userId,
-        },
-        include: {
-          category: {
-            select: {
-              id: true,
-              name: true,
-              description: true,
-            },
-          },
-          attributeGroup: {
-            select: {
-              id: true,
-              name: true,
-              description: true,
-            },
-          },
-          family: {
-            select: {
-              id: true,
-              name: true,
-              familyAttributes: {
-                include: {
-                  attribute: true,
-                },
-              },
-            },
-          },
-          attributes: {
-            select: {
-              attributeId: true,
-            },
-          },
-          assets: {
-            select: {
-              assetId: true,
-            },
-          },
         },
       });
 
@@ -335,72 +708,72 @@ export class ProductService {
         filteredAttributes = newFilteredAttributes;
       }
 
-      // Use Prisma upsert for the product
-      const product = await this.prisma.product.upsert({
+      // Check whether a product with same SKU and user exists (restore soft-deleted if necessary)
+      let product_deleted = await this.prisma.product.findFirst({
         where: {
-          sku_userId: {
-            sku: createProductDto.sku,
-            userId,
-          },
-        },
-        update: {
-          name: createProductDto.name,
-          productLink: createProductDto.productLink,
-          imageUrl: createProductDto.imageUrl,
-          subImages: createProductDto.subImages || [],
-          categoryId: createProductDto.categoryId,
-          attributeGroupId: createProductDto.attributeGroupId,
-          familyId: createProductDto.familyId,
-        },
-        create: {
-          name: createProductDto.name,
           sku: createProductDto.sku,
-          productLink: createProductDto.productLink,
-          imageUrl: createProductDto.imageUrl,
-          subImages: createProductDto.subImages || [],
-          categoryId: createProductDto.categoryId,
-          attributeGroupId: createProductDto.attributeGroupId,
-          familyId: createProductDto.familyId,
           userId,
-        },
-        include: {
-          category: {
-            select: {
-              id: true,
-              name: true,
-              description: true,
-            },
-          },
-          attributeGroup: {
-            select: {
-              id: true,
-              name: true,
-              description: true,
-            },
-          },
-          family: {
-            select: {
-              id: true,
-              name: true,
-              familyAttributes: {
-                include: {
-                  attribute: true,
-                },
-              },
-            },
-          },
-          attributes: {
-            select: {
-              attributeId: true,
-            },
-          },
-          assets: {
-            select: {
-              assetId: true,
-            },
-          },
+          isDeleted: true,
         },
       });
+
+      let product = await this.prisma.product.findFirst({
+        where: {
+          sku: createProductDto.sku,
+          userId,
+        },
+      });
+
+      if (product_deleted && product_deleted.isDeleted) {
+        // Restore soft-deleted product and update fields
+        this.logger.log(`Restoring soft-deleted product with SKU "${createProductDto.sku}" for user ${userId} during upsert.`);
+        product = await this.prisma.product.update({
+          where: { id: product_deleted.id,
+            isDeleted: true
+          },
+          data: {
+            isDeleted: false,
+            deletedAt: null,
+            name: createProductDto.name,
+            productLink: createProductDto.productLink,
+            imageUrl: createProductDto.imageUrl,
+            subImages: createProductDto.subImages || [],
+            categoryId: createProductDto.categoryId,
+            attributeGroupId: createProductDto.attributeGroupId,
+            familyId: createProductDto.familyId,
+          },
+        });
+      } 
+      if (product) {
+        // Update existing product
+        product = await this.prisma.product.update({
+          where: { id: product.id },
+          data: {
+            name: createProductDto.name,
+            productLink: createProductDto.productLink,
+            imageUrl: createProductDto.imageUrl,
+            subImages: createProductDto.subImages || [],
+            categoryId: createProductDto.categoryId,
+            attributeGroupId: createProductDto.attributeGroupId,
+            familyId: createProductDto.familyId,
+          },
+        });
+      } else {
+        // Create new product
+        product = await this.prisma.product.create({
+          data: {
+            name: createProductDto.name,
+            sku: createProductDto.sku,
+            productLink: createProductDto.productLink,
+            imageUrl: createProductDto.imageUrl,
+            subImages: createProductDto.subImages || [],
+            categoryId: createProductDto.categoryId,
+            attributeGroupId: createProductDto.attributeGroupId,
+            familyId: createProductDto.familyId,
+            userId,
+          },
+        });
+      }
 
       // Handle attributes - for upsert, we need to manage ProductAttribute entries
       if (filteredAttributes && filteredAttributes.length > 0) {
@@ -636,7 +1009,8 @@ export class ProductService {
     page: number = 1,
     limit: number = 10,
     sortBy?: string,
-    sortOrder: 'asc' | 'desc' = 'desc'
+    sortOrder: 'asc' | 'desc' = 'desc',
+    includeDeleted: boolean = false
   ): Promise<PaginatedResponse<ProductResponseDto>> {
     try {
       this.logger.log(`Fetching products for user: ${userId}`);
@@ -645,6 +1019,11 @@ export class ProductService {
         userId,
         parentProductId: null, // Exclude variant products from main product list
       };
+
+      // Exclude soft-deleted products by default
+      if (!includeDeleted) {
+        whereCondition.isDeleted = false;
+      }
 
       if (search) {
         whereCondition.OR = [
@@ -717,63 +1096,7 @@ export class ProductService {
         this.prisma.product.findMany({
           where: whereCondition,
           ...paginationOptions,
-          include: {
-            category: {
-              select: {
-                id: true,
-                name: true,
-                description: true,
-              },
-            },
-            attributeGroup: {
-              select: {
-                id: true,
-                name: true,
-                description: true,
-              },
-            },
-            family: {
-              select: {
-                id: true,
-                name: true,
-                familyAttributes: {
-                  include: {
-                    attribute: {
-                      select: {
-                        id: true,
-                        name: true,
-                        type: true,
-                        defaultValue: true,
-                      },
-                    },
-                  },
-                },
-              },
-            },
-            attributes: {
-              select: {
-                value: true,
-                familyAttributeId: true,
-                attribute: {
-                  select: {
-                    id: true,
-                    name: true,
-                    type: true,
-                    defaultValue: true,
-                  },
-                },
-              },
-            },
-            variants: {
-              select: {
-                id: true,
-                name: true,
-                sku: true,
-                imageUrl: true,
-                status: true,
-              },
-            },
-          },
+          include: this.PRODUCT_INCLUDE_FULL,
           orderBy,
         }),
         this.prisma.product.count({ where: whereCondition }),
@@ -791,71 +1114,24 @@ export class ProductService {
     }
   }
 
-  async findOne(id: number, userId: number): Promise<ProductResponseDto> {
+  async findOne(id: number, userId: number, includeDeleted: boolean = false): Promise<ProductResponseDto> {
     try {
       this.logger.log(`Fetching product: ${id} for user: ${userId}`);
 
+      const whereCondition: any = {
+        id,
+        userId, // Ensure user owns the product
+      };
+
+      // Exclude soft-deleted products by default
+      if (!includeDeleted) {
+        whereCondition.isDeleted = false;
+      }
+
       const product = await this.prisma.product.findFirst({
-        where: {
-          id,
-          userId, // Ensure user owns the product
-        },
+        where: whereCondition,
         include: {
-          category: {
-            select: {
-              id: true,
-              name: true,
-              description: true,
-            },
-          },
-          attributeGroup: {
-            select: {
-              id: true,
-              name: true,
-              description: true,
-            },
-          },
-          family: {
-            select: {
-              id: true,
-              name: true,
-              familyAttributes: {
-                include: {
-                  attribute: {
-                    select: {
-                      id: true,
-                      name: true,
-                      type: true,
-                      defaultValue: true,
-                    },
-                  },
-                },
-              },
-            },
-          },
-          attributes: {
-            select: {
-              value: true,
-              familyAttributeId: true,
-              attribute: {
-                select: {
-                  id: true,
-                  name: true,
-                  type: true,
-                  defaultValue: true,
-                },
-              },
-            },
-          },
-          variants: {
-            select: {
-              id: true,
-              name: true,
-              sku: true,
-              imageUrl: true,
-              status: true,
-            },
-          },
+          ...this.PRODUCT_INCLUDE_FULL,
           parentProduct: {
             select: {
               id: true,
@@ -979,6 +1255,17 @@ export class ProductService {
       this.logger.log(`Updating product: ${id} for user: ${userId}`);
       this.logger.debug(`Update data: ${JSON.stringify(updateProductDto)}`);
 
+      // Handle updateExisting flag: when true, treat missing attribute fields as empty arrays
+      // This ensures complete replacement behavior for Excel imports
+      if (updateProductDto.updateExisting) {
+        if (updateProductDto.attributesWithValues === undefined) {
+          updateProductDto.attributesWithValues = [];
+        }
+        if (updateProductDto.familyAttributesWithValues === undefined) {
+          updateProductDto.familyAttributesWithValues = [];
+        }
+      }
+
       // Handle parentSku - convert to parentProductId
       let parentProductId: number | null | undefined;
       if (updateProductDto.parentSku !== undefined) {
@@ -986,12 +1273,11 @@ export class ProductService {
           // Explicitly setting to null to remove parent
           parentProductId = null;
         } else {
-          const parentProduct = await this.prisma.product.findUnique({
+          const parentProduct = await this.prisma.product.findFirst({
             where: {
-              sku_userId: {
-                sku: updateProductDto.parentSku,
-                userId,
-              },
+              sku: updateProductDto.parentSku,
+              userId,
+              isDeleted: false,
             },
             select: { id: true },
           });
@@ -1005,19 +1291,19 @@ export class ProductService {
         }
       }
 
-      // Validate category if being updated
+      // Validate all entities in parallel if being updated
+      const validations: Promise<void>[] = [];
       if (updateProductDto.categoryId !== undefined && updateProductDto.categoryId !== null) {
-        await this.validateCategory(updateProductDto.categoryId, userId);
+        validations.push(this.validateCategory(updateProductDto.categoryId, userId));
       }
-
-  // Validate attribute group if being updated
       if (updateProductDto.attributeGroupId !== undefined && updateProductDto.attributeGroupId !== null) {
-        await this.validateAttributeGroup(updateProductDto.attributeGroupId, userId);
+        validations.push(this.validateAttributeGroup(updateProductDto.attributeGroupId, userId));
       }
-
-      // Validate family if being updated
       if (updateProductDto.familyId !== undefined && updateProductDto.familyId !== null) {
-        await this.validateFamily(updateProductDto.familyId, userId);
+        validations.push(this.validateFamily(updateProductDto.familyId, userId));
+      }
+      if (validations.length > 0) {
+        await Promise.all(validations);
       }
 
       // Prepare update data
@@ -1445,24 +1731,9 @@ export class ProductService {
 
   async remove(id: number, userId: number): Promise<{ message: string }> {
     try {
-      // Verify ownership first and get the product name for notification
-      const product = await this.findOne(id, userId);
-
-      this.logger.log(`Deleting product: ${id} for user: ${userId}`);
-
-      // Unlink all variants before deleting the parent product
-      await this.unlinkVariantsOnDelete(id, userId);
-
-      await this.prisma.product.delete({
-        where: { id },
-      });
-
-      this.logger.log(`Successfully deleted product with ID: ${id}`);
-      
-      // Log notification
-      await this.notificationService.logProductDeletion(userId, product.name);
-      
-      return { message: 'Product successfully deleted' };
+      // Use soft delete instead of hard delete
+      const result = await this.softDeleteProduct(id, userId, false);
+      return { message: result.message };
     } catch (error) {
       if (error instanceof NotFoundException || error instanceof BadRequestException) {
         throw error;
@@ -1470,6 +1741,65 @@ export class ProductService {
 
       this.logger.error(`Failed to delete product ${id}: ${error.message}`, error.stack);
       throw new BadRequestException('Failed to delete product');
+    }
+  }
+
+  /**
+   * Bulk remove products, either by explicit ids or by filters.
+   * Returns number of deleted items.
+   */
+  async bulkRemove(ids: number[], userId: number, filters?: Record<string, any>): Promise<number> {
+    try {
+      this.logger.log(`Bulk removing products for user ${userId}. ids=${JSON.stringify(ids)} filters=${JSON.stringify(filters)}`);
+
+      let productIds: number[] = ids || [];
+
+      if ((!productIds || productIds.length === 0) && filters) {
+        // Build where condition using the same logic as findAll
+        const whereCondition: any = { userId, parentProductId: null, isDeleted: false };
+
+        if (filters.search) {
+          whereCondition.OR = [
+            { name: { contains: filters.search, mode: 'insensitive' } },
+            { sku: { contains: filters.search, mode: 'insensitive' } },
+          ];
+        }
+
+        if (filters.status) whereCondition.status = filters.status;
+        if (filters.categoryId) whereCondition.categoryId = filters.categoryId;
+        if (filters.familyId) whereCondition.familyId = filters.familyId;
+        if (filters.attributeIds && Array.isArray(filters.attributeIds) && filters.attributeIds.length > 0) {
+          whereCondition.OR = whereCondition.OR ?? [];
+          whereCondition.OR.push({ attributes: { some: { attributeId: { in: filters.attributeIds } } } });
+          whereCondition.OR.push({ family: { familyAttributes: { some: { attributeId: { in: filters.attributeIds } } } } });
+        }
+
+        // Get all matching ids
+        const matched = await this.prisma.product.findMany({ where: whereCondition, select: { id: true } });
+        productIds = matched.map(m => m.id);
+      }
+
+      if (!productIds || productIds.length === 0) return 0;
+
+      // Soft delete each product
+      let deletedCount = 0;
+      for (const id of productIds) {
+        try {
+          await this.softDeleteProduct(id, userId, false);
+          deletedCount += 1;
+        } catch (err) {
+          // Ignore per-item failures but log
+          this.logger.warn(`Failed to bulk-delete product ${id}: ${err?.message || err}`);
+        }
+      }
+
+      // Log bulk notification
+      await this.notificationService.logBulkOperation(userId, 'product' as any, 'bulk_deleted' as any, deletedCount, 'Products');
+
+      return deletedCount;
+    } catch (error) {
+      this.logger.error(`Failed to bulk delete products: ${error?.message || error}`);
+      throw new BadRequestException('Failed to bulk delete products');
     }
   }
 
@@ -1494,63 +1824,7 @@ export class ProductService {
         this.prisma.product.findMany({
           where: whereCondition,
           ...paginationOptions,
-          include: {
-            category: {
-              select: {
-                id: true,
-                name: true,
-                description: true,
-              },
-            },
-            attributes: {
-              select: {
-                value: true,
-                familyAttributeId: true,
-                attribute: {
-                  select: {
-                    id: true,
-                    name: true,
-                    type: true,
-                    defaultValue: true,
-                  },
-                },
-              },
-            },
-            attributeGroup: {
-              select: {
-                id: true,
-                name: true,
-                description: true,
-              },
-            },
-            family: {
-              select: {
-                id: true,
-                name: true,
-                familyAttributes: {
-                  include: {
-                    attribute: {
-                      select: {
-                        id: true,
-                        name: true,
-                        type: true,
-                        defaultValue: true,
-                      },
-                    },
-                  },
-                },
-              },
-            },
-            variants: {
-              select: {
-                id: true,
-                name: true,
-                sku: true,
-                imageUrl: true,
-                status: true,
-              },
-            },
-          },
+          include: this.PRODUCT_INCLUDE_FULL,
           orderBy,
         }),
         this.prisma.product.count({ where: whereCondition }),
@@ -1587,63 +1861,7 @@ export class ProductService {
         this.prisma.product.findMany({
           where: whereCondition,
           ...paginationOptions,
-          include: {
-            category: {
-              select: {
-                id: true,
-                name: true,
-                description: true,
-              },
-            },
-            attributes: {
-              select: {
-                value: true,
-                familyAttributeId: true,
-                attribute: {
-                  select: {
-                    id: true,
-                    name: true,
-                    type: true,
-                    defaultValue: true,
-                  },
-                },
-              },
-            },
-            attributeGroup: {
-              select: {
-                id: true,
-                name: true,
-                description: true,
-              },
-            },
-            family: {
-              select: {
-                id: true,
-                name: true,
-                familyAttributes: {
-                  include: {
-                    attribute: {
-                      select: {
-                        id: true,
-                        name: true,
-                        type: true,
-                        defaultValue: true,
-                      },
-                    },
-                  },
-                },
-              },
-            },
-            variants: {
-              select: {
-                id: true,
-                name: true,
-                sku: true,
-                imageUrl: true,
-                status: true,
-              },
-            },
-          },
+          include: this.PRODUCT_INCLUDE_FULL,
           orderBy: this.buildOrderBy(sortBy, sortOrder),
         }),
         this.prisma.product.count({ where: whereCondition }),
@@ -1680,63 +1898,7 @@ export class ProductService {
         this.prisma.product.findMany({
           where: whereCondition,
           ...paginationOptions,
-          include: {
-            category: {
-              select: {
-                id: true,
-                name: true,
-                description: true,
-              },
-            },
-            attributes: {
-              select: {
-                value: true,
-                familyAttributeId: true,
-                attribute: {
-                  select: {
-                    id: true,
-                    name: true,
-                    type: true,
-                    defaultValue: true,
-                  },
-                },
-              },
-            },
-            attributeGroup: {
-              select: {
-                id: true,
-                name: true,
-                description: true,
-              },
-            },
-            family: {
-              select: {
-                id: true,
-                name: true,
-                familyAttributes: {
-                  include: {
-                    attribute: {
-                      select: {
-                        id: true,
-                        name: true,
-                        type: true,
-                        defaultValue: true,
-                      },
-                    },
-                  },
-                },
-              },
-            },
-            variants: {
-              select: {
-                id: true,
-                name: true,
-                sku: true,
-                imageUrl: true,
-                status: true,
-              },
-            },
-          },
+          include: this.PRODUCT_INCLUDE_FULL,
           orderBy: this.buildOrderBy(sortBy, sortOrder),
         }),
         this.prisma.product.count({ where: whereCondition }),
@@ -1773,63 +1935,7 @@ export class ProductService {
         this.prisma.product.findMany({
           where: whereCondition,
           ...paginationOptions,
-          include: {
-            category: {
-              select: {
-                id: true,
-                name: true,
-                description: true,
-              },
-            },
-            attributes: {
-              select: {
-                value: true,
-                familyAttributeId: true,
-                attribute: {
-                  select: {
-                    id: true,
-                    name: true,
-                    type: true,
-                    defaultValue: true,
-                  },
-                },
-              },
-            },
-            attributeGroup: {
-              select: {
-                id: true,
-                name: true,
-                description: true,
-              },
-            },
-            family: {
-              select: {
-                id: true,
-                name: true,
-                familyAttributes: {
-                  include: {
-                    attribute: {
-                      select: {
-                        id: true,
-                        name: true,
-                        type: true,
-                        defaultValue: true,
-                      },
-                    },
-                  },
-                },
-              },
-            },
-            variants: {
-              select: {
-                id: true,
-                name: true,
-                sku: true,
-                imageUrl: true,
-                status: true,
-              },
-            },
-          },
+          include: this.PRODUCT_INCLUDE_FULL,
           orderBy: this.buildOrderBy(sortBy, sortOrder),
         }),
         this.prisma.product.count({ where: whereCondition }),
@@ -2629,14 +2735,29 @@ export class ProductService {
 
   /**
    * Get all attribute IDs from a family (both required and optional)
+   * Uses caching to reduce database queries
    */
   private async getFamilyAttributeIds(familyId: number): Promise<number[]> {
+    const now = Date.now();
+    const cached = this.familyAttributeCache.get(familyId);
+    
+    // Return cached data if valid
+    if (cached && (now - cached.timestamp) < this.CACHE_TTL) {
+      return cached.data;
+    }
+    
+    // Fetch from database
     const familyAttributes = await this.prisma.familyAttribute.findMany({
       where: { familyId },
       select: { attributeId: true },
     });
 
-    return familyAttributes.map(fa => fa.attributeId);
+    const attributeIds = familyAttributes.map(fa => fa.attributeId);
+    
+    // Update cache
+    this.familyAttributeCache.set(familyId, { data: attributeIds, timestamp: now });
+    
+    return attributeIds;
   }
 
   /**
@@ -3147,59 +3268,6 @@ export class ProductService {
   //   }
   // }
 
-  // /**
-  //  * Get template for specific marketplace
-  //  */
-  // async getMarketplaceTemplate(marketplaceType: MarketplaceType) {
-  //   try {
-  //     const template = this.marketplaceTemplateService.getMarketplaceTemplate(marketplaceType);
-  //     return {
-  //       ...template,
-  //       displayName: this.getMarketplaceDisplayName(marketplaceType),
-  //       requiredFields: this.marketplaceTemplateService.getMarketplaceFields(marketplaceType),
-  //       availableFields: Object.values(template.fieldMappings.map(f => ({
-  //         field: f.ecommerceField,
-  //         displayName: this.marketplaceTemplateService.getFieldDisplayName(f.ecommerceField),
-  //         sourceField: f.sourceField,
-  //         defaultValue: f.defaultValue
-  //       })))
-  //     };
-  //   } catch (error) {
-  //     this.logger.error(`Failed to get template for ${marketplaceType}: ${error.message}`, error.stack);
-  //     throw new BadRequestException(`Failed to get template for ${marketplaceType}`);
-  //   }
-  // }
-
-  // /**
-  //  * Export products to marketplace format
-  //  */
-  // async exportToMarketplace(exportDto: MarketplaceExportDto, userId: number): Promise<MarketplaceExportResponseDto> {
-  //   try {
-  //     return this.marketplaceExportService.exportToMarketplace(exportDto, userId);
-  //   } catch (error) {
-  //     this.logger.error(`Failed to export to marketplace: ${error.message}`, error.stack);
-  //     throw error;
-  //   }
-  // }
-
-  // /**
-  //  * Get human-readable marketplace display names
-  //  */
-  // private getMarketplaceDisplayName(marketplaceType: MarketplaceType): string {
-  //   const displayNames: Record<MarketplaceType, string> = {
-  //     [MarketplaceType.AMAZON]: 'Amazon Marketplace',
-  //     [MarketplaceType.ALIEXPRESS]: 'AliExpress',
-  //     [MarketplaceType.EBAY]: 'eBay',
-  //     [MarketplaceType.ETSY]: 'Etsy',
-  //     [MarketplaceType.SHOPIFY]: 'Shopify',
-  //     [MarketplaceType.WALMART]: 'Walmart Marketplace',
-  //     [MarketplaceType.FACEBOOK_MARKETPLACE]: 'Facebook Marketplace',
-  //     [MarketplaceType.GOOGLE_SHOPPING]: 'Google Shopping',
-  //     [MarketplaceType.CUSTOM]: 'Custom Template'
-  //   };
-    
-  //   return displayNames[marketplaceType] || marketplaceType;
-  // }
 
   // CSV Import Scheduling Methods
 
@@ -3502,6 +3570,256 @@ export class ProductService {
     } catch (error) {
       this.logger.error(`[updateVariantsFamilyAndAttributes] Failed to update variants: ${error.message}`, error.stack);
       throw error;
+    }
+  }
+
+  // ============================================================
+  // SOFT DELETE METHODS
+  // ============================================================
+
+  /**
+   * Soft delete a product by setting deletedAt and isDeleted flags
+   * @param id - Product ID
+   * @param userId - User ID
+   * @param softDeleteVariants - If true, also soft-delete variants (default: false)
+   * @returns Promise<{ message: string; product: ProductResponseDto }>
+   */
+  async softDeleteProduct(
+    id: number, 
+    userId: number, 
+    softDeleteVariants: boolean = false
+  ): Promise<{ message: string; product: any }> {
+    try {
+      this.logger.log(`Soft deleting product: ${id} for user: ${userId}`);
+
+      // Verify ownership and ensure not already deleted
+      const product = await this.prisma.product.findFirst({
+        where: { 
+          id, 
+          userId,
+          isDeleted: false 
+        },
+      });
+
+      if (!product) {
+        throw new NotFoundException(`Product with ID ${id} not found or already deleted`);
+      }
+
+      // Soft delete the product
+      const deletedProduct = await this.prisma.product.update({
+        where: { id },
+        data: {
+          deletedAt: new Date(),
+          isDeleted: true,
+        },
+      });
+
+      // Optionally soft-delete variants
+      if (softDeleteVariants) {
+        const variantCount = await this.prisma.product.updateMany({
+          where: {
+            parentProductId: id,
+            userId,
+            isDeleted: false,
+          },
+          data: {
+            deletedAt: new Date(),
+            isDeleted: true,
+          },
+        });
+
+        if (variantCount.count > 0) {
+          this.logger.log(`Soft deleted ${variantCount.count} variants for product ${id}`);
+        }
+      }
+
+      this.logger.log(`Successfully soft deleted product with ID: ${id}`);
+
+      // Log notification
+      await this.notificationService.logProductDeletion(userId, product.name);
+
+      return { 
+        message: 'Product successfully soft deleted',
+        product: deletedProduct 
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+        throw error;
+      }
+
+      this.logger.error(`Failed to soft delete product ${id}: ${error.message}`, error.stack);
+      throw new BadRequestException('Failed to soft delete product');
+    }
+  }
+
+  /**
+   * Restore a soft-deleted product
+   * @param id - Product ID
+   * @param userId - User ID
+   * @param restoreVariants - If true, also restore variants (default: false)
+   * @returns Promise<{ message: string; product: ProductResponseDto }>
+   */
+  async restoreProduct(
+    id: number, 
+    userId: number,
+    restoreVariants: boolean = false
+  ): Promise<{ message: string; product: ProductResponseDto }> {
+    try {
+      this.logger.log(`Restoring soft-deleted product: ${id} for user: ${userId}`);
+
+      // Find the soft-deleted product
+      const product = await this.prisma.product.findFirst({
+        where: { 
+          id, 
+          userId,
+          isDeleted: true 
+        },
+      });
+
+      if (!product) {
+        throw new NotFoundException(`Soft-deleted product with ID ${id} not found`);
+      }
+
+      // Check for SKU conflicts before restoring
+      const existingProduct = await this.prisma.product.findFirst({
+        where: {
+          sku: product.sku,
+          userId,
+          isDeleted: false,
+        },
+      });
+
+      if (existingProduct) {
+        throw new ConflictException(`Cannot restore: A product with SKU "${product.sku}" already exists`);
+      }
+
+      // Restore the product
+      await this.prisma.product.update({
+        where: { id },
+        data: {
+          deletedAt: null,
+          isDeleted: false,
+        },
+      });
+
+      // Optionally restore variants
+      if (restoreVariants) {
+        const variantCount = await this.prisma.product.updateMany({
+          where: {
+            parentProductId: id,
+            userId,
+            isDeleted: true,
+          },
+          data: {
+            deletedAt: null,
+            isDeleted: false,
+          },
+        });
+
+        if (variantCount.count > 0) {
+          this.logger.log(`Restored ${variantCount.count} variants for product ${id}`);
+        }
+      }
+
+      const restoredProduct = await this.findOne(id, userId);
+      this.logger.log(`Successfully restored product with ID: ${id}`);
+
+      // Log notification
+      await this.notificationService.logProductCreation(userId, product.name, product.id);
+
+      return { 
+        message: 'Product successfully restored',
+        product: restoredProduct 
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof ConflictException) {
+        throw error;
+      }
+
+      this.logger.error(`Failed to restore product ${id}: ${error.message}`, error.stack);
+      throw new BadRequestException('Failed to restore product');
+    }
+  }
+
+  /**
+   * Get soft-deleted products for a user
+   * @param userId - User ID
+   * @param page - Page number
+   * @param limit - Items per page
+   * @returns Promise<PaginatedResponse<ProductResponseDto>>
+   */
+  async getSoftDeletedProducts(
+    userId: number,
+    page: number = 1,
+    limit: number = 10
+  ): Promise<PaginatedResponse<any>> {
+    try {
+      this.logger.log(`Fetching soft-deleted products for user: ${userId}`);
+
+      const whereCondition = {
+        userId,
+        isDeleted: true,
+      };
+
+      const paginationOptions = PaginationUtils.createPrismaOptions(page, limit);
+
+      const [products, total] = await Promise.all([
+        this.prisma.product.findMany({
+          where: whereCondition,
+          ...paginationOptions,
+          orderBy: { deletedAt: 'desc' },
+        }),
+        this.prisma.product.count({ where: whereCondition }),
+      ]);
+
+      return PaginationUtils.createPaginatedResponse(products, total, page, limit);
+    } catch (error) {
+      this.logger.error(`Failed to fetch soft-deleted products: ${error.message}`, error.stack);
+      throw new BadRequestException('Failed to fetch soft-deleted products');
+    }
+  }
+
+  /**
+   * Permanently delete a soft-deleted product (hard delete)
+   * @param id - Product ID
+   * @param userId - User ID
+   * @returns Promise<{ message: string }>
+   */
+  async permanentlyDeleteProduct(id: number, userId: number): Promise<{ message: string }> {
+    try {
+      this.logger.log(`Permanently deleting product: ${id} for user: ${userId}`);
+
+      // Verify the product is soft-deleted
+      const product = await this.prisma.product.findFirst({
+        where: { 
+          id, 
+          userId,
+          isDeleted: true 
+        },
+      });
+
+      if (!product) {
+        throw new NotFoundException(`Soft-deleted product with ID ${id} not found`);
+      }
+
+      // Unlink variants before permanent deletion
+      await this.unlinkVariantsOnDelete(id, userId);
+
+      // Permanently delete
+      await this.prisma.product.delete({
+        where: { id },
+      });
+
+      this.logger.log(`Successfully permanently deleted product with ID: ${id}`);
+
+      return { message: 'Product permanently deleted' };
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+
+      this.logger.error(`Failed to permanently delete product ${id}: ${error.message}`, error.stack);
+      throw new BadRequestException('Failed to permanently delete product');
     }
   }
 }

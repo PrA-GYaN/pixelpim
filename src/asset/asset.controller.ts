@@ -176,4 +176,37 @@ export class AssetController {
       return res.json(result);
     }
   }
+
+  // Soft Delete Endpoints
+
+  @Get('deleted')
+  async getSoftDeletedAssets(
+    @Req() req: any,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const userId = req.user.id;
+    const pageNum = page ? parseInt(page) : 1;
+    const limitNum = limit ? parseInt(limit) : 10;
+    
+    return this.assetService.getSoftDeletedAssets(userId, pageNum, limitNum);
+  }
+
+  @Post(':id/restore')
+  async restoreAsset(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() req: any,
+  ) {
+    const userId = req.user.id;
+    return this.assetService.restoreAsset(id, userId);
+  }
+
+  @Delete(':id/permanent')
+  async permanentlyDeleteAsset(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() req: any,
+  ) {
+    const userId = req.user.id;
+    return this.assetService.permanentlyDeleteAsset(id, userId);
+  }
 }
