@@ -2,6 +2,8 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { parseExcel, ParsedHeader, AttributeDataType, convertValueToType } from '../../utils/excel-parser';
 import { CreateProductDto, ProductAttributeValueDto } from '../dto/create-product.dto';
+import { ImageUploadHelper } from '../../utils/image-upload.helper';
+import { AssetService } from '../../asset/asset.service';
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════════
@@ -49,7 +51,10 @@ export interface ImportContext {
 export class ExcelImportService {
   private readonly logger = new Logger(ExcelImportService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly assetService: AssetService,
+  ) {}
 
   /**
    * ═══════════════════════════════════════════════════════════════════════════════
@@ -277,7 +282,7 @@ export class ExcelImportService {
                            String(valueInFirstRow).trim() !== '';
 
             // Find header to get data type
-            const headerInfo = headers.find(h => h.cleanName === columnHeader);
+            const headerInfo = headers.find(h => h.name === columnHeader || h.cleanName === columnHeader);
             const dataType = headerInfo?.dataType || AttributeDataType.SHORT_TEXT;
 
             attributeDefs.push({
@@ -519,21 +524,20 @@ export class ExcelImportService {
         continue;
       }
 
+      // Find or create attribute (even if current row has no value)
+      // Get raw value first (needed for error reporting)
       const rawValue = row[columnHeader];
-      if (rawValue === null || rawValue === undefined || String(rawValue).trim() === '') {
-        continue;
-      }
-
-      // Find or create attribute
+      
       try {
         let attribute = await this.prisma.attribute.findFirst({
           where: { name: fieldName, userId },
         });
 
         if (!attribute) {
-          // Create attribute with inferred type
-          const headerInfo = headers.find(h => h.cleanName === columnHeader);
+          // Create attribute with type from header (explicit or inferred)
+          const headerInfo = headers.find(h => h.name === columnHeader || h.cleanName === columnHeader);
           const dataType = headerInfo?.dataType || AttributeDataType.SHORT_TEXT;
+          const typeSource = headerInfo?.typeSource || 'inferred';
           
           // Map to Prisma type
           const prismaType = this.mapDataTypeToPrisma(dataType);
@@ -546,11 +550,16 @@ export class ExcelImportService {
             },
           });
           
-          this.logger.log(`Created new attribute "${fieldName}" with type ${prismaType}`);
+          this.logger.log(`Created new attribute "${fieldName}" with type ${prismaType} (${typeSource})`);
+        }
+
+        // Only add value if present in this row
+        if (rawValue === null || rawValue === undefined || String(rawValue).trim() === '') {
+          continue;
         }
 
         // Get header info for type conversion
-        const headerInfo = headers.find(h => h.cleanName === columnHeader);
+        const headerInfo = headers.find(h => h.name === columnHeader || h.cleanName === columnHeader);
         const dataType = headerInfo?.dataType || AttributeDataType.SHORT_TEXT;
         
         const convertedValue = convertValueToType(rawValue, dataType);
@@ -579,6 +588,12 @@ export class ExcelImportService {
     // Set updateExisting flag for upsert behavior
     dto.updateExisting = true;
 
+    // STEP 5: Process image URLs (download external images and upload to assets)
+    // Only process if there are no critical errors (SKU, name)
+    if (errors.length === 0 || errors.every(e => e.field !== 'sku' && e.field !== 'name')) {
+      await this.processImagesForProduct(dto, rowNumber, userId);
+    }
+
     return {
       dto: dto as CreateProductDto,
       errors,
@@ -594,6 +609,85 @@ export class ExcelImportService {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Process image URLs for a product: download external images and upload to assets service.
+   * Updates dto.imageUrl and dto.subImages with uploaded asset URLs.
+   * 
+   * @param dto - The product DTO being created
+   * @param rowNumber - Row number for error reporting
+   * @param userId - User ID for asset ownership
+   * @param assetGroupId - Optional asset group ID to organize images
+   */
+  private async processImagesForProduct(
+    dto: Partial<CreateProductDto>,
+    rowNumber: number,
+    userId: number,
+    assetGroupId?: number
+  ): Promise<void> {
+    // Configuration from environment variables
+    const internalDomain = process.env.INTERNAL_DOMAIN || 'localhost';
+    // Keep original URLs when download fails (useful for Cloudflare-protected sites)
+    const keepOriginalOnFailure = process.env.KEEP_ORIGINAL_IMAGE_URL_ON_FAILURE === 'true' || true;
+
+    try {
+      // Process main imageUrl
+      if (dto.imageUrl && ImageUploadHelper.isValidImageUrl(dto.imageUrl)) {
+        this.logger.log(`Processing imageUrl for row ${rowNumber}: ${dto.imageUrl}`);
+        
+        // Asset upload disabled by commenting out the helper call. Keep original URL.
+        // To re-enable downloads, uncomment the following and remove this comment:
+        // const uploadedUrl = await ImageUploadHelper.processImageUrlForImport(
+        //   dto.imageUrl,
+        //   this.assetService,
+        //   userId,
+        //   internalDomain,
+        //   assetGroupId,
+        //   keepOriginalOnFailure
+        // );
+        // if (uploadedUrl) {
+        //   dto.imageUrl = uploadedUrl;
+        //   this.logger.log(`Updated imageUrl for row ${rowNumber}: ${uploadedUrl}`);
+        // } else {
+        //   this.logger.warn(`Failed to process imageUrl for row ${rowNumber}, keeping original: ${dto.imageUrl}`);
+        // }
+      }
+
+      // Process subImages array
+      if (dto.subImages && Array.isArray(dto.subImages) && dto.subImages.length > 0) {
+        this.logger.log(`Processing ${dto.subImages.length} subImages for row ${rowNumber}`);
+        
+        const validUrls = dto.subImages.filter(url => 
+          url && ImageUploadHelper.isValidImageUrl(url)
+        );
+
+        if (validUrls.length > 0) {
+          // Asset upload disabled by commenting out the helper call. Keep original subImages.
+          // To re-enable downloads, uncomment the following and remove this comment:
+          // const uploadedUrls = await ImageUploadHelper.downloadAndUploadMultipleImages(
+          //   validUrls,
+          //   this.assetService,
+          //   userId,
+          //   assetGroupId,
+          //   3 // Max 3 concurrent uploads
+          // );
+          // const successfulUrls = uploadedUrls.filter(url => url !== null).map(result => 
+          //   result.url || result.filePath || result.assetUrl
+          // );
+          // if (successfulUrls.length > 0) {
+          //   dto.subImages = successfulUrls;
+          //   this.logger.log(`Updated ${successfulUrls.length} subImages for row ${rowNumber}`);
+          // } else {
+          //   this.logger.warn(`All subImages failed to upload for row ${rowNumber}, keeping originals`);
+          // }
+        }
+      }
+    } catch (error) {
+      // Log error but don't fail the entire row import
+      this.logger.error(`Error processing images for row ${rowNumber}:`, error);
+      // Keep original URLs if processing fails
     }
   }
 

@@ -130,25 +130,53 @@ export enum AttributeDataType {
  * Returns: { cleanName, explicitType }
  */
 function extractTypeFromHeader(header: string): { cleanName: string; explicitType: AttributeDataType | null } {
-  const typePattern = /(.+?)\s*\[\s*(Short Text|Long Text|Number|Decimal|Date|Boolean)\s*\]\s*$/i;
+  // Match anything in brackets at the end of the header
+  const typePattern = /(.+?)\s*\[\s*(.+?)\s*\]\s*$/i;
   const match = header.match(typePattern);
   
   if (match) {
     const cleanName = match[1].trim();
-    const typeStr = match[2].toLowerCase();
+    const typeStr = match[2].toLowerCase().trim();
     
+    // More comprehensive type mapping with common variants and typos
     const typeMap: Record<string, AttributeDataType> = {
       'short text': AttributeDataType.SHORT_TEXT,
+      'shorttext': AttributeDataType.SHORT_TEXT,
+      'short': AttributeDataType.SHORT_TEXT,
+      'text': AttributeDataType.SHORT_TEXT,
+      'string': AttributeDataType.SHORT_TEXT,
+      
       'long text': AttributeDataType.LONG_TEXT,
+      'longtext': AttributeDataType.LONG_TEXT,
+      'long': AttributeDataType.LONG_TEXT,
+      'paragraph': AttributeDataType.LONG_TEXT,
+      'textarea': AttributeDataType.LONG_TEXT,
+      'multiline': AttributeDataType.LONG_TEXT,
+      
       'number': AttributeDataType.NUMBER,
+      'integer': AttributeDataType.NUMBER,
+      'int': AttributeDataType.NUMBER,
+      
       'decimal': AttributeDataType.DECIMAL,
+      'float': AttributeDataType.DECIMAL,
+      'double': AttributeDataType.DECIMAL,
+      'price': AttributeDataType.DECIMAL,
+      
       'date': AttributeDataType.DATE,
+      'datetime': AttributeDataType.DATE,
+      'timestamp': AttributeDataType.DATE,
+      
       'boolean': AttributeDataType.BOOLEAN,
+      'bool': AttributeDataType.BOOLEAN,
+      'checkbox': AttributeDataType.BOOLEAN,
+      'yes/no': AttributeDataType.BOOLEAN,
     };
+    
+    const explicitType = typeMap[typeStr] || null;
     
     return {
       cleanName,
-      explicitType: typeMap[typeStr] || null,
+      explicitType,
     };
   }
   

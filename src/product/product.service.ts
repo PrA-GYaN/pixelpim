@@ -791,6 +791,9 @@ export class ProductService {
       await this.prisma.product.update({ where: { id: product.id }, data: { status } });
       this.logger.log(`Product ${product.id} created with initial status: ${status}`);
 
+      // Auto-attach assets matching the product SKU
+      await this.autoAttachAssetsBySku(product.id, createProductDto.sku, userId);
+
       // If this product has a parent, inherit family and merge attributes
       if (parentProductId) {
         await this.inheritFamilyFromParent(product.id, parentProductId, userId);
@@ -1112,6 +1115,9 @@ export class ProductService {
       const status = await this.calculateProductStatus(product.id);
       await this.prisma.product.update({ where: { id: product.id }, data: { status } });
       this.logger.log(`Product ${product.id} upserted with status: ${status}`);
+
+      // Auto-attach assets matching the product SKU
+      await this.autoAttachAssetsBySku(product.id, createProductDto.sku, userId);
 
       // Fetch updated product with status
       const result = await this.findOne(product.id, userId);
@@ -1765,6 +1771,15 @@ export class ProductService {
   await this.prisma.product.update({ where: { id }, data: { status: newStatus } });
   this.logger.log(`Product ${id} status updated to: ${newStatus}`);
 
+      // Auto-attach assets matching the product SKU (use updated SKU if provided, otherwise fetch current SKU)
+      const currentProduct = await this.prisma.product.findUnique({
+        where: { id },
+        select: { sku: true },
+      });
+      if (currentProduct) {
+        await this.autoAttachAssetsBySku(id, currentProduct.sku, userId);
+      }
+
       // Fetch and return the updated product with relations
       const result = await this.findOne(id, userId);
       this.logger.log(`Successfully updated product with ID: ${id}`);
@@ -2272,6 +2287,101 @@ export class ProductService {
       attributes,
       assets,
     };
+  }
+
+  /**
+   * Auto-attach assets whose filename (without extension) matches the product SKU.
+   * This will attach the asset to the product and set it as the main image.
+   * @param productId - The product ID
+   * @param sku - The product SKU to match
+   * @param userId - The user ID
+   */
+  private async autoAttachAssetsBySku(productId: number, sku: string, userId: number): Promise<void> {
+    try {
+      // First check if product already has a main image - only proceed if empty
+      const product = await this.prisma.product.findUnique({
+        where: { id: productId },
+        select: { imageUrl: true },
+      });
+
+      if (product?.imageUrl && product.imageUrl.trim() !== '') {
+        this.logger.log(`Product ${productId} already has main image, skipping auto-attach`);
+        return;
+      }
+
+      this.logger.log(`Checking for assets matching SKU: ${sku}`);
+
+      // Find all assets for user (we need to check filename without extension)
+      const assets = await this.prisma.asset.findMany({
+        where: {
+          userId,
+          isDeleted: false,
+        },
+        orderBy: {
+          createdAt: 'desc', // Get most recent first
+        },
+      });
+
+      // Filter assets where name (without extension) matches SKU (case-insensitive)
+      // Only match image files
+      const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'];
+      const matchingAssets = assets.filter(asset => {
+        // Check if it's an image file by extension
+        const isImage = imageExtensions.some(ext => 
+          asset.fileName.toLowerCase().endsWith(ext)
+        );
+        
+        if (!isImage) return false;
+        // Extract asset name without extension
+        const nameWithoutExt = asset.name.replace(/\.[^/.]+$/, '');
+        const skuLower = sku.toLowerCase();
+        const nameLower = nameWithoutExt.toLowerCase();
+        
+        // Match if name equals SKU
+        return nameLower === skuLower;
+      });
+
+      if (matchingAssets.length === 0) {
+        this.logger.log(`No image assets found matching SKU: ${sku}`);
+        return;
+      }
+
+      // Get the first matching asset (already sorted by most recent)
+      const matchingAsset = matchingAssets[0];
+      
+      this.logger.log(`Found matching asset: ${matchingAsset.name} (ID: ${matchingAsset.id}) for SKU: ${sku}`);
+
+      // Check if asset is already attached to this product
+      const existingAttachment = await this.prisma.productAsset.findUnique({
+        where: {
+          productId_assetId: {
+            productId,
+            assetId: matchingAsset.id,
+          },
+        },
+      });
+
+      if (!existingAttachment) {
+        // Attach asset to product
+        await this.prisma.productAsset.create({
+          data: {
+            productId,
+            assetId: matchingAsset.id,
+          },
+        });
+        this.logger.log(`Attached asset ${matchingAsset.id} to product ${productId}`);
+      }
+
+      // Set the main imageUrl
+      await this.prisma.product.update({
+        where: { id: productId },
+        data: { imageUrl: matchingAsset.filePath },
+      });
+      this.logger.log(`Set main image for product ${productId} to asset ${matchingAsset.id}`);
+    } catch (error) {
+      // Log error but don't fail the product creation/update
+      this.logger.error(`Error auto-attaching assets for SKU ${sku}: ${error.message}`, error.stack);
+    }
   }
 
   private handleDatabaseError(error: any, operation: string): never {
