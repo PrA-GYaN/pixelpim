@@ -5,6 +5,7 @@ import { ProductController } from './product.controller';
 // import { MarketplaceExportService } from './services/marketplace-export.service';
 import { CsvImportService } from './services/csv-import.service';
 import { ImportSchedulerService } from './services/import-scheduler.service';
+import { ExcelImportService } from './services/excel-import.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { NotificationModule } from '../notification/notification.module';
 import { WebhookModule } from '../webhook/webhook.module';
@@ -17,6 +18,7 @@ import { ScheduleModule } from '@nestjs/schedule';
     ProductService,
     CsvImportService,
     ImportSchedulerService,
+    ExcelImportService,
   ],
   exports: [ProductService],
 })

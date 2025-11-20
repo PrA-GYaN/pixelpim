@@ -15,6 +15,7 @@ import { ExportProductDto, ExportProductResponseDto, ProductAttribute, ExportFor
 import { ScheduleImportDto, UpdateScheduledImportDto, ImportJobResponseDto } from './dto/schedule-import.dto';
 import { CsvImportService } from './services/csv-import.service';
 import { ImportSchedulerService } from './services/import-scheduler.service';
+import { ExcelImportService } from './services/excel-import.service';
 import { PaginatedResponse, PaginationUtils } from '../common';
 import { getUserFriendlyType } from '../types/user-attribute-type.enum';
 import { Subject, Observable, interval } from 'rxjs';
@@ -101,6 +102,8 @@ export class ProductService {
     private readonly csvImportService: CsvImportService,
     @Inject(forwardRef(() => ImportSchedulerService))
     private readonly importSchedulerService: ImportSchedulerService,
+    @Inject(forwardRef(() => ExcelImportService))
+    private readonly excelImportService: ExcelImportService,
   ) {}
 
   // How long to retain the last progress snapshot after completion so clients
@@ -181,19 +184,35 @@ export class ProductService {
         throw new BadRequestException('Missing file upload');
       }
 
-      let mapping: Record<string, string>;
-      try {
-        mapping = JSON.parse(mappingJson);
-      } catch (err) {
-        throw new BadRequestException('Invalid mapping JSON');
-      }
+      // Initialize progress
+      this.updateProgress(sessionId, {
+        processed: 0,
+        total: 0,
+        successCount: 0,
+        failedCount: 0,
+        percentage: 0,
+        status: 'processing',
+        message: 'Starting Excel import with comprehensive validation...',
+      });
 
-      // Parse the Excel file
-      let parsed;
+      // ═══════════════════════════════════════════════════════════════════════════
+      // STEP 1: Process Excel with comprehensive import service
+      // This handles:
+      // - Header processing with type inference
+      // - Family-level attribute definitions
+      // - Row-level validation
+      // - Domain model transformation
+      // ═══════════════════════════════════════════════════════════════════════════
+      
+      let importResult;
       try {
-        parsed = await parseExcel(file.buffer);
+        importResult = await this.excelImportService.processExcelImport(
+          file.buffer,
+          mappingJson,
+          userId
+        );
       } catch (error) {
-        this.logger.error('Failed to parse Excel file', error);
+        this.logger.error('Excel import service failed', error);
         this.updateProgress(sessionId, {
           processed: 0,
           total: 0,
@@ -201,34 +220,91 @@ export class ProductService {
           failedCount: 0,
           percentage: 0,
           status: 'error',
-          message: 'Failed to parse Excel file',
+          message: error?.message || 'Failed to process Excel file',
+        });
+        return;
+      }
+
+      const { totalRows, successCount: validatedCount, failedRows: validationFailures, familyDefinitions } = importResult;
+
+      this.logger.log(`Excel validation complete: ${validatedCount} valid rows, ${validationFailures.length} validation failures`);
+      
+      // Log family definitions if any
+      if (familyDefinitions && familyDefinitions.length > 0) {
+        this.logger.log('Family attribute definitions:');
+        familyDefinitions.forEach(def => {
+          this.logger.log(
+            `  - ${def.familyName}: ${def.attributes.length} attributes ` +
+            `(${def.attributes.filter(a => a.isRequired).length} required)`
+          );
+        });
+      }
+
+      // Add validation failures to failed rows
+      failedRows.push(...validationFailures);
+
+      // Update progress after validation
+      this.updateProgress(sessionId, {
+        processed: totalRows,
+        total: totalRows,
+        successCount: validatedCount,
+        failedCount: failedRows.length,
+        percentage: 50,
+        status: 'processing',
+        message: `Validation complete. Persisting ${validatedCount} valid products...`,
+      });
+
+      // ═══════════════════════════════════════════════════════════════════════════
+      // STEP 2: Re-parse Excel and persist validated rows
+      // (We need to re-parse to get the structured data for persistence)
+      // ═══════════════════════════════════════════════════════════════════════════
+      
+      let parsed;
+      try {
+        parsed = await parseExcel(file.buffer);
+      } catch (error) {
+        this.logger.error('Failed to re-parse Excel file for persistence', error);
+        this.updateProgress(sessionId, {
+          processed: totalRows,
+          total: totalRows,
+          successCount: 0,
+          failedCount: totalRows,
+          percentage: 100,
+          status: 'error',
+          message: 'Failed to parse Excel file for persistence',
         });
         return;
       }
 
       const rows = parsed.rows || [];
-      const totalRows = rows.length;
-      this.logger.log(`Parsed ${totalRows} rows from Excel import`);
+      let mapping: Record<string, string>;
+      try {
+        mapping = JSON.parse(mappingJson);
+      } catch (err) {
+        throw new BadRequestException('Invalid mapping JSON');
+      }
 
-      // Initialize progress
-      this.updateProgress(sessionId, {
-        processed: 0,
-        total: totalRows,
-        successCount: 0,
-        failedCount: 0,
-        percentage: 0,
-        status: 'processing',
-        message: 'Starting import...',
-      });
-
-      const BATCH_SIZE = 50; // Smaller batches for more frequent updates
+      // ═══════════════════════════════════════════════════════════════════════════
+      // STEP 3: Persist valid rows in batches
+      // Uses upsert logic for transactional persistence
+      // ═══════════════════════════════════════════════════════════════════════════
+      
+      const BATCH_SIZE = 50;
       let successCount = 0;
       let processed = 0;
 
-      for (let start = 0; start < rows.length; start += BATCH_SIZE) {
-        const batch = rows.slice(start, start + BATCH_SIZE);
+      // Filter out rows that failed validation
+      const validationFailureRows = new Set(validationFailures.map(f => f.row));
+      const validRowsToProcess = rows.filter((_, index) => {
+        const rowNumber = index + 2; // Excel row number
+        return !validationFailureRows.has(rowNumber);
+      });
+
+      for (let start = 0; start < validRowsToProcess.length; start += BATCH_SIZE) {
+        const batch = validRowsToProcess.slice(start, start + BATCH_SIZE);
         const batchPromises = batch.map(async (row, idx) => {
-          const rowNumber = start + idx + 2; // +2 because header is row 1
+          const originalIndex = rows.indexOf(row);
+          const rowNumber = originalIndex + 2; // +2 because header is row 1
 
           try {
             const productDto = await this.mapRowToCreateProductDto(row, mapping, userId);
@@ -241,11 +317,12 @@ export class ProductService {
               throw new BadRequestException('Missing name');
             }
 
+            // Use upsert for transactional insert/update
             await this.upsertProductFromCsv(productDto, userId);
             return { success: true };
           } catch (error) {
             const message = error?.message || 'Unknown error';
-            this.logger.warn(`Failed to import Excel row ${rowNumber}: ${message}`);
+            this.logger.warn(`Failed to persist row ${rowNumber}: ${message}`);
             failedRows.push({ row: rowNumber, error: message });
             return { success: false };
           }
@@ -260,15 +337,18 @@ export class ProductService {
         processed += batch.length;
 
         // Update progress after each batch
-        const percentage = Math.round((processed / totalRows) * 100);
+        const baseProgress = 50; // We're at 50% after validation
+        const persistProgress = Math.round((processed / validRowsToProcess.length) * 50);
+        const percentage = baseProgress + persistProgress;
+        
         this.updateProgress(sessionId, {
-          processed,
+          processed: processed + validationFailures.length, // Include validation failures in total
           total: totalRows,
           successCount,
           failedCount: failedRows.length,
           percentage,
           status: 'processing',
-          message: `Processing batch ${Math.ceil(start / BATCH_SIZE) + 1}...`,
+          message: `Persisting products: ${successCount}/${validRowsToProcess.length} successful...`,
         });
       }
 
@@ -299,6 +379,12 @@ export class ProductService {
 
   // Import products from an uploaded Excel (.xlsx) file. Mapping is a JSON string mapping internal field names to
   // header column names in the uploaded sheet.
+  // 
+  // This method uses the comprehensive Excel import service with:
+  // - Header type inference (explicit [Type] or auto-inferred)
+  // - Family-level attribute handling (required/optional based on first row)
+  // - Row-level validation with detailed error reporting
+  // - Automatic type conversion and domain model mapping
   async importProductsFromExcel(file: Express.Multer.File, mappingJson: string, userId: number): Promise<ImportProductsResponseDto> {
     const failedRows: Array<{ row: number; error: string }> = [];
 
@@ -306,15 +392,40 @@ export class ProductService {
       throw new BadRequestException('Missing file upload');
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // STEP 1: Process Excel with comprehensive import service
+    // ═══════════════════════════════════════════════════════════════════════════
+    let importResult;
+    try {
+      importResult = await this.excelImportService.processExcelImport(
+        file.buffer,
+        mappingJson,
+        userId
+      );
+    } catch (error) {
+      this.logger.error('Excel import service failed', error);
+      throw new BadRequestException(error?.message || 'Failed to process Excel file');
+    }
+
+    const { totalRows, successCount: validatedCount, failedRows: validationFailures, familyDefinitions } = importResult;
+
+    this.logger.log(`Excel validation complete: ${validatedCount} valid rows, ${validationFailures.length} validation failures`);
+    
+    // Add validation failures to failed rows
+    failedRows.push(...validationFailures);
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // STEP 2: Re-parse and persist validated rows
+    // ═══════════════════════════════════════════════════════════════════════════
+    let parsed;
     let mapping: Record<string, string>;
+    
     try {
       mapping = JSON.parse(mappingJson);
     } catch (err) {
       throw new BadRequestException('Invalid mapping JSON');
     }
 
-    // Parse the Excel file
-    let parsed;
     try {
       parsed = await parseExcel(file.buffer);
     } catch (error) {
@@ -323,16 +434,23 @@ export class ProductService {
     }
 
     const rows = parsed.rows || [];
-    const totalRows = rows.length;
     this.logger.log(`Parsed ${totalRows} rows from Excel import`);
 
     const BATCH_SIZE = 100;
     let successCount = 0;
 
-    for (let start = 0; start < rows.length; start += BATCH_SIZE) {
-      const batch = rows.slice(start, start + BATCH_SIZE);
+    // Filter out rows that failed validation
+    const validationFailureRows = new Set(validationFailures.map(f => f.row));
+    const validRowsToProcess = rows.filter((_, index) => {
+      const rowNumber = index + 2; // Excel row number
+      return !validationFailureRows.has(rowNumber);
+    });
+
+    for (let start = 0; start < validRowsToProcess.length; start += BATCH_SIZE) {
+      const batch = validRowsToProcess.slice(start, start + BATCH_SIZE);
       const batchPromises = batch.map(async (row, idx) => {
-        const rowNumber = start + idx + 2; // +2 because header is row 1
+        const originalIndex = rows.indexOf(row);
+        const rowNumber = originalIndex + 2; // +2 because header is row 1
 
         try {
           const productDto = await this.mapRowToCreateProductDto(row, mapping, userId);
