@@ -292,12 +292,57 @@ export async function parseExcel(buffer: Buffer | ArrayBuffer | Uint8Array): Pro
     }
   });
 
+  // Helper: normalize ExcelJS cell values into primitives (string/number/date/boolean/null)
+  function normalizeCellValue(cell: ExcelJS.Cell): any {
+    if (!cell) return null;
+    const val = cell.value;
+    if (val === null || val === undefined) return null;
+    if (val instanceof Date) return val;
+    if (typeof val === 'boolean') return val;
+    if (typeof val === 'number') return val;
+
+    if (typeof val === 'string') {
+      const s = val.trim();
+      return s === '' ? null : s;
+    }
+
+    // Value is an object with different shapes (hyperlink, richText, formula, etc.)
+    try {
+      // Hyperlink cell: { text, hyperlink }
+      if ((val as any).hyperlink) {
+        return (val as any).hyperlink;
+      }
+
+      // Text with formatting: { text }
+      if ((val as any).text) {
+        return String((val as any).text).trim();
+      }
+
+      // RichText: { richText: [{ text: 'a' }, { text: 'b' }] }
+      if ((val as any).richText && Array.isArray((val as any).richText)) {
+        return (val as any).richText.map((r: any) => String(r.text || '')).join('').trim() || null;
+      }
+
+      // Formula object: { formula, result }
+      if ((val as any).result !== undefined) {
+        return (val as any).result;
+      }
+
+      // Fallback: try JSON stringify, but prefer null over a noisy '[object Object]'
+      const str = JSON.stringify(val);
+      if (str === '{}' || str === 'null') return null;
+      return str;
+    } catch (err) {
+      return String(val);
+    }
+  }
+
   // STEP 2: Read first data row (row 2) for type inference
   const firstDataRow = worksheet.getRow(2);
   const firstRowValues: any[] = [];
   
   firstDataRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-    firstRowValues[colNumber - 1] = cell.value;
+    firstRowValues[colNumber - 1] = normalizeCellValue(cell);
   });
 
   // STEP 3: Build final headers with types (explicit or inferred)
@@ -336,7 +381,7 @@ export async function parseExcel(buffer: Buffer | ArrayBuffer | Uint8Array): Pro
       const headerInfo = headers[colNumber - 1];
       if (headerInfo) {
         // Use clean name (without type annotation) as key
-        rowObj[headerInfo.cleanName] = cell.value;
+        rowObj[headerInfo.cleanName] = normalizeCellValue(cell);
       }
     });
     

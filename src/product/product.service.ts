@@ -498,6 +498,36 @@ export class ProductService {
     mapToField('name', v => productDto.name = String(v).trim());
     mapToField('productLink', v => productDto.productLink = String(v).trim());
     mapToField('imageUrl', v => productDto.imageUrl = String(v).trim());
+    // subImages: accept JSON array, comma separated list, or single URL and convert to string array
+    mapToField('subImages', v => {
+      if (v === null || v === undefined) return;
+      try {
+        if (Array.isArray(v)) {
+          productDto.subImages = v.map(x => String(x).trim());
+          return;
+        }
+        const s = String(v).trim();
+        if (!s) return;
+        if (s.startsWith('[')) {
+          try {
+            const parsed = JSON.parse(s);
+            if (Array.isArray(parsed)) {
+              productDto.subImages = parsed.map(x => String(x).trim());
+            } else {
+              productDto.subImages = [String(s)];
+            }
+          } catch (err) {
+            productDto.subImages = s.split(',').map(x => x.trim());
+          }
+        } else if (s.includes(',')) {
+          productDto.subImages = s.split(',').map(x => x.trim());
+        } else {
+          productDto.subImages = [s];
+        }
+      } catch {
+        productDto.subImages = [String(v)];
+      }
+    });
 
     // Map extras (any mapping key other than standard product fields will be treated as an attribute)
     const attributeEntries: Array<{ attributeId?: number; attributeName?: string; value: string }> = [];
