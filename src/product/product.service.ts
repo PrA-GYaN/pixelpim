@@ -2345,13 +2345,11 @@ export class ProductService {
         where: {
           userId,
           isDeleted: false,
-          // Match assets where name (without extension) equals SKU
-          OR: imageExtensions.map(ext => ({
-            fileName: {
-              equals: `${sku}${ext}`,
-              mode: 'insensitive' as any,
-            },
-          })),
+          // Match assets where name starts with SKU (handles filenames with timestamps)
+          name: {
+            startsWith: sku,
+            mode: 'insensitive' as any,
+          },
         },
         orderBy: {
           createdAt: 'desc',
