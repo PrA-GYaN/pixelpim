@@ -529,13 +529,16 @@ export class ExcelImportService {
       const rawValue = row[columnHeader];
       
       try {
+        // Get header info to extract clean name and type
+        const headerInfo = headers.find(h => h.name === columnHeader || h.cleanName === columnHeader);
+        const cleanAttributeName = headerInfo?.cleanName || fieldName;
+        
         let attribute = await this.prisma.attribute.findFirst({
-          where: { name: fieldName, userId },
+          where: { name: cleanAttributeName, userId },
         });
 
         if (!attribute) {
           // Create attribute with type from header (explicit or inferred)
-          const headerInfo = headers.find(h => h.name === columnHeader || h.cleanName === columnHeader);
           const dataType = headerInfo?.dataType || AttributeDataType.SHORT_TEXT;
           const typeSource = headerInfo?.typeSource || 'inferred';
           
@@ -544,13 +547,13 @@ export class ExcelImportService {
           
           attribute = await this.prisma.attribute.create({
             data: {
-              name: fieldName,
+              name: cleanAttributeName,
               type: prismaType,
               userId,
             },
           });
           
-          this.logger.log(`Created new attribute "${fieldName}" with type ${prismaType} (${typeSource})`);
+          this.logger.log(`Created new attribute "${cleanAttributeName}" with type ${prismaType} (${typeSource})`);
         }
 
         // Only add value if present in this row
