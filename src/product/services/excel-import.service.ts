@@ -561,8 +561,7 @@ export class ExcelImportService {
           continue;
         }
 
-        // Get header info for type conversion
-        const headerInfo = headers.find(h => h.name === columnHeader || h.cleanName === columnHeader);
+        // Use header info for type conversion (already extracted above)
         const dataType = headerInfo?.dataType || AttributeDataType.SHORT_TEXT;
         
         const convertedValue = convertValueToType(rawValue, dataType);
