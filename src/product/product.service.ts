@@ -18,6 +18,7 @@ import { ImportSchedulerService } from './services/import-scheduler.service';
 import { ExcelImportService } from './services/excel-import.service';
 import { PaginatedResponse, PaginationUtils } from '../common';
 import { getUserFriendlyType } from '../types/user-attribute-type.enum';
+import { SkuPatternHelper } from '../utils/sku-pattern.helper';
 import { Subject, Observable, interval } from 'rxjs';
 import { map, takeWhile } from 'rxjs/operators';
 import { randomBytes } from 'crypto';
@@ -924,6 +925,29 @@ export class ProductService {
             userId,
           },
         });
+      }
+
+      // Process SKU patterns in imageUrl and subImages
+      // This will automatically attach assets matching SKU[Identifier] patterns
+      const processedImages = await this.processProductImagesWithSkuPatterns(
+        product.id,
+        product.imageUrl,
+        product.subImages,
+        product.sku,
+        userId
+      );
+
+      // Update product with processed image URLs if they changed
+      if (processedImages.imageUrl !== product.imageUrl || 
+          JSON.stringify(processedImages.subImages) !== JSON.stringify(product.subImages)) {
+        product = await this.prisma.product.update({
+          where: { id: product.id },
+          data: {
+            imageUrl: processedImages.imageUrl,
+            subImages: processedImages.subImages,
+          },
+        });
+        this.logger.log(`Updated product ${product.id} with processed SKU pattern images`);
       }
 
       // Handle attributes - for upsert, we need to manage ProductAttribute entries
@@ -2290,97 +2314,445 @@ export class ProductService {
   }
 
   /**
-   * Auto-attach assets whose filename (without extension) matches the product SKU.
-   * This will attach the asset to the product and set it as the main image.
+   * Auto-attach assets whose filename matches the product SKU pattern.
+   * Automatically finds and attaches assets from Digital Assets library based on SKU.
+   * 
+   * Matching patterns:
+   * 1. Exact match: Asset name = SKU (e.g., "PROD-123.jpg") → Main image only
+   * 2. SKU[Identifier]: Process SKU patterns in imageUrl/subImages for targeted attachment
+   * 
    * @param productId - The product ID
    * @param sku - The product SKU to match
    * @param userId - The user ID
    */
   private async autoAttachAssetsBySku(productId: number, sku: string, userId: number): Promise<void> {
     try {
-      // First check if product already has a main image - only proceed if empty
+      // Check if product already has a main image
       const product = await this.prisma.product.findUnique({
         where: { id: productId },
-        select: { imageUrl: true },
+        select: { imageUrl: true, subImages: true },
       });
 
-      if (product?.imageUrl && product.imageUrl.trim() !== '') {
-        this.logger.log(`Product ${productId} already has main image, skipping auto-attach`);
+      const hasMainImage = product?.imageUrl && product.imageUrl.trim() !== '';
+
+      this.logger.log(`Auto-attaching assets for SKU: ${sku} (hasMainImage: ${hasMainImage})`);
+
+      const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'];
+      
+      // OPTIMIZATION: Query only exact-match assets using SQL LIKE with case-insensitive matching
+      // This reduces the dataset significantly instead of fetching all assets
+      const exactMatchAssets = await this.prisma.asset.findMany({
+        where: {
+          userId,
+          isDeleted: false,
+          // Match assets where name (without extension) equals SKU
+          OR: imageExtensions.map(ext => ({
+            fileName: {
+              equals: `${sku}${ext}`,
+              mode: 'insensitive' as any,
+            },
+          })),
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+        take: 1, // We only need the first match
+      });
+
+      if (exactMatchAssets.length === 0) {
+        this.logger.log(`No exact match assets found for SKU: ${sku}. Checking for SKU[Identifier] patterns.`);
+        // Still scan for SKU[Identifier] patterns
+        await this.autoScanAndAttachSkuPatternAssets(productId, sku, userId);
         return;
       }
 
-      this.logger.log(`Checking for assets matching SKU: ${sku}`);
+      const mainImageAsset = exactMatchAssets[0];
+      this.logger.log(`Found exact match asset: ${mainImageAsset.name} (ID: ${mainImageAsset.id})`);
 
-      // Find all assets for user (we need to check filename without extension)
+      // OPTIMIZATION: Use upsert to avoid separate findUnique + create calls
+      await this.prisma.productAsset.upsert({
+        where: {
+          productId_assetId: {
+            productId,
+            assetId: mainImageAsset.id,
+          },
+        },
+        create: {
+          productId,
+          assetId: mainImageAsset.id,
+        },
+        update: {}, // No updates needed if already exists
+      });
+      this.logger.log(`Attached asset ${mainImageAsset.id} (${mainImageAsset.name}) to product ${productId}`);
+
+      // Set main image if not already set
+      if (!hasMainImage) {
+        await this.prisma.product.update({
+          where: { id: productId },
+          data: { imageUrl: mainImageAsset.filePath },
+        });
+        this.logger.log(`Set main image for product ${productId} to asset ${mainImageAsset.id} (${mainImageAsset.name})`);
+      }
+
+      // After setting main image, scan for SKU[Identifier] patterns automatically
+      await this.autoScanAndAttachSkuPatternAssets(productId, sku, userId);
+
+    } catch (error) {
+      // Log error but don't fail the product creation/update
+      this.logger.error(`Error auto-attaching assets for SKU ${sku}: ${error.message}`, error.stack);
+    }
+  }
+
+  /**
+   * Automatically scan Digital Assets for SKU[Identifier] pattern matches and attach them.
+   * This method finds assets whose names contain the SKU followed by [Identifier] pattern.
+   * 
+   * Asset naming in Digital Assets should follow: SKU[Identifier].ext
+   * Examples:
+   * - PROD-123[Detail1].jpg
+   * - PROD-123[Manual].pdf
+   * - PROD-123[Video].mp4
+   * 
+   * These assets will be automatically detected and attached without Excel configuration.
+   * 
+   * @param productId - The product ID
+   * @param sku - The product SKU
+   * @param userId - The user ID
+   */
+  private async autoScanAndAttachSkuPatternAssets(productId: number, sku: string, userId: number): Promise<void> {
+    try {
+      this.logger.log(`Auto-scanning for SKU[Identifier] pattern assets for SKU: ${sku}`);
+
+      // OPTIMIZATION: Use SQL LIKE pattern to filter assets that potentially match SKU[Identifier] pattern
+      // This significantly reduces the dataset returned from the database
+      const skuPattern = `${sku}[%`; // Matches "SKU[anything"
+      const assets = await this.prisma.asset.findMany({
+        where: {
+          userId,
+          isDeleted: false,
+          name: {
+            startsWith: sku,
+            mode: 'insensitive' as any,
+          },
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+      });
+
+      if (assets.length === 0) {
+        this.logger.log(`No assets found starting with SKU: ${sku}`);
+        return;
+      }
+
+      const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'];
+      const skuLower = sku.toLowerCase();
+      const assetsToAttach: number[] = [];
+      const subImagesToAdd: string[] = [];
+
+      // Scan each asset for SKU[Identifier] pattern in the asset name
+      for (const asset of assets) {
+        const nameWithoutExt = asset.name.replace(/\\.[^/.]+$/, '');
+        
+        // Check if this asset name contains a SKU[Identifier] pattern
+        const parsed = SkuPatternHelper.parseSkuPattern(nameWithoutExt);
+        
+        if (parsed && parsed.sku.toLowerCase() === skuLower) {
+          // This asset is named with our SKU in a pattern format!
+          const identifier = parsed.identifier;
+          this.logger.log(`Found SKU pattern asset: ${nameWithoutExt} (${sku}[${identifier}])`);
+          
+          const isImage = imageExtensions.some(ext => 
+            asset.fileName.toLowerCase().endsWith(ext)
+          );
+
+          // Add image assets to subImages array
+          if (isImage) {
+            subImagesToAdd.push(asset.filePath);
+          }
+
+          assetsToAttach.push(asset.id);
+        }
+      }
+
+      if (assetsToAttach.length === 0) {
+        this.logger.log(`Auto-scanning complete: no SKU[Identifier] pattern assets found for SKU: ${sku}`);
+        return;
+      }
+
+      // OPTIMIZATION: Batch check existing attachments and create new ones in bulk
+      // Get all existing attachments for this product
+      const existingAttachments = await this.prisma.productAsset.findMany({
+        where: {
+          productId,
+          assetId: { in: assetsToAttach },
+        },
+        select: { assetId: true },
+      });
+
+      const existingAssetIds = new Set(existingAttachments.map(a => a.assetId));
+      const newAttachments = assetsToAttach
+        .filter(assetId => !existingAssetIds.has(assetId))
+        .map(assetId => ({ productId, assetId }));
+
+      // OPTIMIZATION: Use createMany for batch insert (much faster than individual creates)
+      if (newAttachments.length > 0) {
+        await this.prisma.productAsset.createMany({
+          data: newAttachments,
+          skipDuplicates: true, // Extra safety to avoid conflicts
+        });
+        this.logger.log(`Batch-attached ${newAttachments.length} assets to product ${productId}`);
+      }
+
+      // Update product subImages if we found any image assets
+      if (subImagesToAdd.length > 0) {
+        const product = await this.prisma.product.findUnique({
+          where: { id: productId },
+          select: { subImages: true },
+        });
+
+        const existingSubImages = product?.subImages || [];
+        const updatedSubImages = [...existingSubImages, ...subImagesToAdd];
+
+        await this.prisma.product.update({
+          where: { id: productId },
+          data: { subImages: updatedSubImages },
+        });
+
+        this.logger.log(`Added ${subImagesToAdd.length} sub-images to product ${productId} via automatic SKU pattern scanning`);
+      }
+
+      this.logger.log(`Auto-scanning complete: attached ${assetsToAttach.length} assets to product ${productId} for SKU: ${sku}`);
+
+    } catch (error) {
+      this.logger.error(`Error auto-scanning SKU pattern assets for SKU ${sku}: ${error.message}`, error.stack);
+    }
+  }
+
+  /**
+   * Process subImages array and attach assets based on SKU[Identifier] patterns.
+   * This method handles values in the format SKU[Identifier] and automatically
+   * attaches the corresponding assets to the product.
+   * 
+   * @param productId - The product ID
+   * @param subImages - Array of subImage values (can include URLs and SKU patterns)
+   * @param userId - The user ID
+   * @returns Updated subImages array with asset URLs replacing SKU patterns
+   */
+  async processSubImagesWithSkuPatterns(
+    productId: number,
+    subImages: string[],
+    userId: number
+  ): Promise<string[]> {
+    if (!subImages || subImages.length === 0) {
+      return [];
+    }
+
+    try {
+      this.logger.log(`Processing ${subImages.length} subImages for product ${productId}`);
+
+      // Separate regular URLs from SKU patterns
+      const { regularValues, skuPatterns } = SkuPatternHelper.processValueArray(subImages);
+      
+      if (skuPatterns.length === 0) {
+        this.logger.log(`No SKU patterns found in subImages for product ${productId}`);
+        return subImages;
+      }
+
+      this.logger.log(`Found ${skuPatterns.length} SKU patterns in subImages: ${skuPatterns.map(p => p.originalValue).join(', ')}`);
+
+      // OPTIMIZATION: Get unique identifiers and query assets once
+      const identifiers = [...new Set(skuPatterns.map(p => p.identifier.toLowerCase()))];
+      
+      // Query assets matching any of the identifiers (case-insensitive)
       const assets = await this.prisma.asset.findMany({
         where: {
           userId,
           isDeleted: false,
         },
         orderBy: {
-          createdAt: 'desc', // Get most recent first
+          createdAt: 'desc',
         },
       });
 
-      // Filter assets where name (without extension) matches SKU (case-insensitive)
-      // Only match image files
-      const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'];
-      const matchingAssets = assets.filter(asset => {
-        // Check if it's an image file by extension
-        const isImage = imageExtensions.some(ext => 
-          asset.fileName.toLowerCase().endsWith(ext)
-        );
-        
-        if (!isImage) return false;
-        // Extract asset name without extension
+      // Build a map of identifier -> asset for quick lookup
+      const assetMap = new Map<string, any>();
+      for (const asset of assets) {
         const nameWithoutExt = asset.name.replace(/\.[^/.]+$/, '');
-        const skuLower = sku.toLowerCase();
         const nameLower = nameWithoutExt.toLowerCase();
-        
-        // Match if name equals SKU
-        return nameLower === skuLower;
-      });
-
-      if (matchingAssets.length === 0) {
-        this.logger.log(`No image assets found matching SKU: ${sku}`);
-        return;
+        if (identifiers.includes(nameLower) && !assetMap.has(nameLower)) {
+          assetMap.set(nameLower, asset);
+        }
       }
 
-      // Get the first matching asset (already sorted by most recent)
-      const matchingAsset = matchingAssets[0];
-      
-      this.logger.log(`Found matching asset: ${matchingAsset.name} (ID: ${matchingAsset.id}) for SKU: ${sku}`);
+      const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'];
+      const updatedSubImages: string[] = [...regularValues];
+      const assetsToAttach: number[] = [];
 
-      // Check if asset is already attached to this product
-      const existingAttachment = await this.prisma.productAsset.findUnique({
+      // Process each SKU pattern
+      for (const pattern of skuPatterns) {
+        const identifierLower = pattern.identifier.toLowerCase();
+        const matchingAsset = assetMap.get(identifierLower);
+
+        if (!matchingAsset) {
+          this.logger.warn(`No asset found matching identifier: ${pattern.identifier}`);
+          continue;
+        }
+
+        const isImage = imageExtensions.some(ext => 
+          matchingAsset.fileName.toLowerCase().endsWith(ext)
+        );
+        this.logger.log(`Found matching asset: ${matchingAsset.name} (ID: ${matchingAsset.id}, Type: ${isImage ? 'image' : 'other'}) for identifier: ${pattern.identifier}`);
+
+        // Add asset URL to subImages (only for image assets)
+        if (isImage) {
+          updatedSubImages.push(matchingAsset.filePath);
+        }
+        assetsToAttach.push(matchingAsset.id);
+      }
+
+      if (assetsToAttach.length === 0) {
+        this.logger.log(`No assets found for any SKU patterns`);
+        return updatedSubImages;
+      }
+
+      // OPTIMIZATION: Batch check existing attachments and create new ones
+      const existingAttachments = await this.prisma.productAsset.findMany({
         where: {
-          productId_assetId: {
-            productId,
-            assetId: matchingAsset.id,
-          },
+          productId,
+          assetId: { in: assetsToAttach },
         },
+        select: { assetId: true },
       });
 
-      if (!existingAttachment) {
-        // Attach asset to product
-        await this.prisma.productAsset.create({
-          data: {
-            productId,
-            assetId: matchingAsset.id,
-          },
+      const existingAssetIds = new Set(existingAttachments.map(a => a.assetId));
+      const newAttachments = assetsToAttach
+        .filter(assetId => !existingAssetIds.has(assetId))
+        .map(assetId => ({ productId, assetId }));
+
+      // Batch insert new attachments
+      if (newAttachments.length > 0) {
+        await this.prisma.productAsset.createMany({
+          data: newAttachments,
+          skipDuplicates: true,
         });
-        this.logger.log(`Attached asset ${matchingAsset.id} to product ${productId}`);
+        this.logger.log(`Batch-attached ${newAttachments.length} assets to product ${productId}`);
       }
 
-      // Set the main imageUrl
-      await this.prisma.product.update({
-        where: { id: productId },
-        data: { imageUrl: matchingAsset.filePath },
-      });
-      this.logger.log(`Set main image for product ${productId} to asset ${matchingAsset.id}`);
+      this.logger.log(`Processed ${skuPatterns.length} SKU patterns, attached ${assetsToAttach.length} total assets`);
+      return updatedSubImages;
+
     } catch (error) {
-      // Log error but don't fail the product creation/update
-      this.logger.error(`Error auto-attaching assets for SKU ${sku}: ${error.message}`, error.stack);
+      this.logger.error(`Error processing subImages with SKU patterns for product ${productId}: ${error.message}`, error.stack);
+      // Return original subImages on error
+      return subImages;
+    }
+  }
+
+  /**
+   * Process imageUrl and subImages for SKU patterns and attach assets.
+   * This is a bulk processing method that handles both main image and sub-images.
+   * 
+   * @param productId - The product ID
+   * @param imageUrl - Main image URL (can be SKU pattern or regular URL)
+   * @param subImages - Array of subImage values
+   * @param sku - Product SKU
+   * @param userId - The user ID
+   * @returns Object with updated imageUrl and subImages
+   */
+  async processProductImagesWithSkuPatterns(
+    productId: number,
+    imageUrl: string | null | undefined,
+    subImages: string[],
+    sku: string,
+    userId: number
+  ): Promise<{ imageUrl: string | null; subImages: string[] }> {
+    try {
+      let updatedImageUrl = imageUrl || null;
+      let updatedSubImages = subImages || [];
+
+      // Process main imageUrl if it contains a SKU pattern
+      if (imageUrl && SkuPatternHelper.hasSkuPattern(imageUrl)) {
+        const parsed = SkuPatternHelper.parseSkuPattern(imageUrl);
+        if (parsed) {
+          this.logger.log(`Processing SKU pattern in imageUrl: ${parsed.sku}[${parsed.identifier}]`);
+
+          // OPTIMIZATION: Query only the specific asset by identifier
+          const identifierLower = parsed.identifier.toLowerCase();
+          const assets = await this.prisma.asset.findMany({
+            where: {
+              userId,
+              isDeleted: false,
+            },
+            orderBy: {
+              createdAt: 'desc',
+            },
+            take: 100, // Limit to recent assets to reduce memory
+          });
+
+          const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'];
+          const matchingAsset = assets.find(asset => {
+            const nameWithoutExt = asset.name.replace(/\.[^/.]+$/, '');
+            return nameWithoutExt.toLowerCase() === identifierLower;
+          });
+
+          if (matchingAsset) {
+            const isImage = imageExtensions.some(ext => 
+              matchingAsset.fileName.toLowerCase().endsWith(ext)
+            );
+            
+            // Only set imageUrl if it's actually an image file
+            if (isImage) {
+              updatedImageUrl = matchingAsset.filePath;
+              this.logger.log(`Replaced imageUrl SKU pattern with asset ${matchingAsset.id} (image)`);
+            } else {
+              // Attach non-image assets but don't use them as imageUrl
+              this.logger.log(`Found asset ${matchingAsset.id} for imageUrl pattern, but it's not an image file (${matchingAsset.fileName}). Asset will be attached but not used as imageUrl.`);
+              updatedImageUrl = null;
+            }
+
+            // OPTIMIZATION: Use upsert instead of separate findUnique + create
+            await this.prisma.productAsset.upsert({
+              where: {
+                productId_assetId: {
+                  productId,
+                  assetId: matchingAsset.id,
+                },
+              },
+              create: {
+                productId,
+                assetId: matchingAsset.id,
+              },
+              update: {},
+            });
+            this.logger.log(`Attached asset ${matchingAsset.id} to product ${productId}`);
+          } else {
+            this.logger.warn(`No asset found for imageUrl pattern: ${imageUrl}`);
+            updatedImageUrl = null; // Clear invalid pattern
+          }
+        }
+      }
+
+      // Process subImages with SKU patterns (already optimized method)
+      if (updatedSubImages.length > 0) {
+        updatedSubImages = await this.processSubImagesWithSkuPatterns(
+          productId,
+          updatedSubImages,
+          userId
+        );
+      }
+
+      return {
+        imageUrl: updatedImageUrl,
+        subImages: updatedSubImages,
+      };
+
+    } catch (error) {
+      this.logger.error(`Error processing product images with SKU patterns: ${error.message}`, error.stack);
+      return {
+        imageUrl: imageUrl || null,
+        subImages: subImages || [],
+      };
     }
   }
 
