@@ -15,37 +15,60 @@ export class SkuPatternHelper {
   // Regex pattern to match SKU[Identifier]
   // Captures: SKU (any characters before bracket) and Identifier (content inside brackets)
   private static readonly SKU_PATTERN_REGEX = /^(.+?)\[([^\]]+)\]$/;
+  
+  // Regex pattern to match SKU with space/underscore followed by identifier
+  // Captures: SKU (characters before space/underscore) and Identifier (after space/underscore)
+  // Examples: "TPE-3 Asset2", "TPE-3_SubImage", "SKU Asset1"
+  private static readonly SKU_SPACE_PATTERN_REGEX = /^(.+?)[\s_](.+)$/;
 
   /**
-   * Parse a value that might contain SKU[Identifier] pattern
-   * @param value - The value to parse (e.g., "PROD123[SubImage1]")
+   * Parse a value that might contain SKU[Identifier] or SKU Identifier pattern
+   * @param value - The value to parse (e.g., "PROD123[SubImage1]" or "PROD123 Asset1")
+   * @param preferredSku - Optional SKU to validate against for space-based patterns
    * @returns Parsed result with sku and identifier, or null if no pattern match
    */
-  static parseSkuPattern(value: string | null | undefined): {
+  static parseSkuPattern(value: string | null | undefined, preferredSku?: string): {
     sku: string;
     identifier: string;
+    patternType: 'bracket' | 'space';
   } | null {
     if (!value || typeof value !== 'string') {
       return null;
     }
 
     const trimmedValue = value.trim();
-    const match = trimmedValue.match(this.SKU_PATTERN_REGEX);
+    
+    // First try bracket pattern SKU[Identifier]
+    const bracketMatch = trimmedValue.match(this.SKU_PATTERN_REGEX);
+    if (bracketMatch) {
+      const sku = bracketMatch[1].trim();
+      const identifier = bracketMatch[2].trim();
 
-    if (!match) {
-      return null;
+      // Validate that both parts are non-empty
+      if (!sku || !identifier) {
+        this.logger.warn(`Invalid SKU pattern: ${value} - both SKU and identifier must be non-empty`);
+        return null;
+      }
+
+      return { sku, identifier, patternType: 'bracket' };
+    }
+    
+    // Try space/underscore pattern if preferredSku is provided
+    // This helps validate that the first part actually matches the expected SKU
+    if (preferredSku) {
+      const spaceMatch = trimmedValue.match(this.SKU_SPACE_PATTERN_REGEX);
+      if (spaceMatch) {
+        const sku = spaceMatch[1].trim();
+        const identifier = spaceMatch[2].trim();
+        
+        // Validate that the SKU matches the expected SKU (case-insensitive)
+        if (sku.toLowerCase() === preferredSku.toLowerCase() && identifier) {
+          return { sku, identifier, patternType: 'space' };
+        }
+      }
     }
 
-    const sku = match[1].trim();
-    const identifier = match[2].trim();
-
-    // Validate that both parts are non-empty
-    if (!sku || !identifier) {
-      this.logger.warn(`Invalid SKU pattern: ${value} - both SKU and identifier must be non-empty`);
-      return null;
-    }
-
-    return { sku, identifier };
+    return null;
   }
 
   /**

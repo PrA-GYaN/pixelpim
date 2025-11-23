@@ -269,9 +269,13 @@ export class ExcelImportService {
             continue;
           }
 
-          // Check if this attribute exists in the family
+          // Get header info to extract clean name
+          const headerInfo = headers.find(h => h.name === columnHeader || h.cleanName === columnHeader);
+          const cleanAttributeName = headerInfo?.cleanName || fieldName;
+
+          // Check if this attribute exists in the family (compare using clean names)
           const familyAttr = family.familyAttributes.find(
-            fa => fa.attribute.name === fieldName
+            fa => fa.attribute.name === cleanAttributeName
           );
 
           if (familyAttr) {
@@ -282,7 +286,6 @@ export class ExcelImportService {
                            String(valueInFirstRow).trim() !== '';
 
             // Find header to get data type
-            const headerInfo = headers.find(h => h.name === columnHeader || h.cleanName === columnHeader);
             const dataType = headerInfo?.dataType || AttributeDataType.SHORT_TEXT;
 
             attributeDefs.push({
@@ -473,7 +476,17 @@ export class ExcelImportService {
     // Only validate family attributes if a valid family was assigned
     if (familyDef && dto.familyId) {
       for (const attrDef of familyDef.attributes) {
-        const header = mapping[attrDef.attributeName];
+        // Find the column header by matching clean attribute name
+        let header: string | undefined;
+        for (const [fieldName, columnHeader] of Object.entries(mapping)) {
+          const headerInfo = headers.find(h => h.name === columnHeader || h.cleanName === columnHeader);
+          const cleanAttributeName = headerInfo?.cleanName || fieldName;
+          if (cleanAttributeName === attrDef.attributeName) {
+            header = columnHeader;
+            break;
+          }
+        }
+        
         if (!header) continue;
 
         const rawValue = row[header];
@@ -519,8 +532,12 @@ export class ExcelImportService {
         continue;
       }
 
-      // Skip if this is a family attribute
-      if (familyDef && familyDef.attributes.some(a => a.attributeName === fieldName)) {
+      // Get header info to extract clean name and type
+      const headerInfo = headers.find(h => h.name === columnHeader || h.cleanName === columnHeader);
+      const cleanAttributeName = headerInfo?.cleanName || fieldName;
+
+      // Skip if this is a family attribute (compare using clean names)
+      if (familyDef && familyDef.attributes.some(a => a.attributeName === cleanAttributeName)) {
         continue;
       }
 
@@ -529,9 +546,6 @@ export class ExcelImportService {
       const rawValue = row[columnHeader];
       
       try {
-        // Get header info to extract clean name and type
-        const headerInfo = headers.find(h => h.name === columnHeader || h.cleanName === columnHeader);
-        const cleanAttributeName = headerInfo?.cleanName || fieldName;
         
         let attribute = await this.prisma.attribute.findFirst({
           where: { name: cleanAttributeName, userId },

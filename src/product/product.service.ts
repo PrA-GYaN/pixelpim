@@ -19,6 +19,7 @@ import { ExcelImportService } from './services/excel-import.service';
 import { PaginatedResponse, PaginationUtils } from '../common';
 import { getUserFriendlyType } from '../types/user-attribute-type.enum';
 import { SkuPatternHelper } from '../utils/sku-pattern.helper';
+import { ImageClassificationHelper, ImageClassificationType } from '../utils/image-classification.helper';
 import { Subject, Observable, interval } from 'rxjs';
 import { map, takeWhile } from 'rxjs/operators';
 import { randomBytes } from 'crypto';
@@ -225,7 +226,7 @@ export class ProductService {
         });
         return;
       }
-
+      console.log('importResult from excelImportService:', importResult);
       const { totalRows, successCount: validatedCount, failedRows: validationFailures, familyDefinitions } = importResult;
 
       this.logger.log(`Excel validation complete: ${validatedCount} valid rows, ${validationFailures.length} validation failures`);
@@ -362,6 +363,7 @@ export class ProductService {
         percentage: 100,
         status: 'completed',
         message: `Import completed: ${successCount} succeeded, ${failedRows.length} failed`,
+        failedRows: failedRows.slice(0, 100), // Include up to 100 errors
       });
 
     } catch (error) {
@@ -370,10 +372,11 @@ export class ProductService {
         processed: 0,
         total: 0,
         successCount: 0,
-        failedCount: 0,
+        failedCount: failedRows.length || 0,
         percentage: 0,
         status: 'error',
         message: error?.message || 'Import failed',
+        failedRows: failedRows.length > 0 ? failedRows.slice(0, 100) : [],
       });
     }
   }
@@ -485,7 +488,8 @@ export class ProductService {
 
   private async mapRowToCreateProductDto(row: Record<string, any>, mapping: Record<string, string>, userId: number): Promise<CreateProductDto> {
     const productDto: any = {} as CreateProductDto;
-
+    console.log('Mapping row to CreateProductDto:', row);
+    console.log('Using mapping:', mapping);
     // Standard fields that map to top-level product fields
     const mapToField = (fieldName: string, setter: (val: any) => void) => {
       const header = mapping[fieldName];
@@ -532,15 +536,23 @@ export class ProductService {
 
     // Map extras (any mapping key other than standard product fields will be treated as an attribute)
     const attributeEntries: Array<{ attributeId?: number; attributeName?: string; value: string }> = [];
-
     for (const [key, header] of Object.entries(mapping)) {
       if (!header) continue;
       if (['sku', 'name', 'productLink', 'imageUrl', 'subImages', 'category', 'family', 'parentSku'].includes(key)) continue;
-      const value = row[header];
+      console.log(`Processing mapping for key "${key}" to header "${header}"`);
+      
+      // Strip type suffix from header to match actual column name in row
+      // e.g., "ATTR1 [Paragraph]" -> "ATTR1"
+      const cleanHeader = header.replace(/\s*\[.*?\]\s*$/, '').trim();
+      const value = row[cleanHeader] !== undefined ? row[cleanHeader] : row[header];
+      
+      console.log(`Mapping attribute "${key}" from column "${header}" (clean: "${cleanHeader}") with raw value:`, value);
       if (value === undefined || value === null || String(value).trim() === '') continue;
 
-      // Use the mapping key as the attribute name (e.g., price, description)
-      attributeEntries.push({ attributeName: key, value: String(value).trim() });
+      // Extract clean attribute name (strip type suffix from key as well)
+      // e.g., "ATTR1 [Paragraph]" -> "ATTR1"
+      const cleanAttributeName = key.replace(/\s*\[.*?\]\s*$/, '').trim();
+      attributeEntries.push({ attributeName: cleanAttributeName, value: String(value).trim() });
     }
 
     // Convert attribute names to IDs using prisma; create attributes if missing
@@ -577,7 +589,7 @@ export class ProductService {
     if (attributesWithValues.length > 0) {
       productDto.attributesWithValues = attributesWithValues;
     }
-
+    console.log('Mapped row to CreateProductDto:', productDto);
     return productDto;
   }
 
@@ -2319,7 +2331,10 @@ export class ProductService {
    * 
    * Matching patterns:
    * 1. Exact match: Asset name = SKU (e.g., "PROD-123.jpg") → Main image only
-   * 2. SKU[Identifier]: Process SKU patterns in imageUrl/subImages for targeted attachment
+   * 2. Filename patterns: Uses ImageClassificationHelper to classify based on filename
+   *    - Main images: SKU.ext, SKU_image.ext, SKU-image.ext
+   *    - Sub images: SKU_SubImage.ext, SKU[SubImage].ext, etc.
+   *    - Assets: SKU_Assets.ext, SKU[Assets].ext, etc.
    * 
    * @param productId - The product ID
    * @param sku - The product SKU to match
@@ -2339,9 +2354,9 @@ export class ProductService {
 
       const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'];
       
-      // OPTIMIZATION: Query only exact-match assets using SQL LIKE with case-insensitive matching
-      // This reduces the dataset significantly instead of fetching all assets
-      const exactMatchAssets = await this.prisma.asset.findMany({
+      // OPTIMIZATION: Query assets that start with SKU
+      // Then filter for exact match (SKU only, no suffix) vs pattern match (SKU + identifier)
+      const potentialAssets = await this.prisma.asset.findMany({
         where: {
           userId,
           isDeleted: false,
@@ -2354,42 +2369,48 @@ export class ProductService {
         orderBy: {
           createdAt: 'desc',
         },
-        take: 1, // We only need the first match
       });
 
-      if (exactMatchAssets.length === 0) {
-        this.logger.log(`No exact match assets found for SKU: ${sku}. Checking for SKU[Identifier] patterns.`);
-        // Still scan for SKU[Identifier] patterns
-        await this.autoScanAndAttachSkuPatternAssets(productId, sku, userId);
+      if (potentialAssets.length === 0) {
+        this.logger.log(`No assets found starting with SKU: ${sku}. Skipping auto-attach.`);
         return;
       }
 
-      const mainImageAsset = exactMatchAssets[0];
-      this.logger.log(`Found exact match asset: ${mainImageAsset.name} (ID: ${mainImageAsset.id})`);
+      // Find exact match for main image (asset name = SKU exactly, ignoring extension)
+      const mainImageAsset = !hasMainImage 
+        ? potentialAssets.find(asset => {
+            const nameWithoutExt = asset.name.replace(/\.[^/.]+$/, '');
+            return nameWithoutExt.toLowerCase() === sku.toLowerCase();
+          })
+        : undefined;
 
-      // OPTIMIZATION: Use upsert to avoid separate findUnique + create calls
-      await this.prisma.productAsset.upsert({
-        where: {
-          productId_assetId: {
+      if (mainImageAsset) {
+        this.logger.log(`Found exact match asset for main image: ${mainImageAsset.name} (ID: ${mainImageAsset.id})`);
+
+        // OPTIMIZATION: Use upsert to avoid separate findUnique + create calls
+        await this.prisma.productAsset.upsert({
+          where: {
+            productId_assetId: {
+              productId,
+              assetId: mainImageAsset.id,
+            },
+          },
+          create: {
             productId,
             assetId: mainImageAsset.id,
           },
-        },
-        create: {
-          productId,
-          assetId: mainImageAsset.id,
-        },
-        update: {}, // No updates needed if already exists
-      });
-      this.logger.log(`Attached asset ${mainImageAsset.id} (${mainImageAsset.name}) to product ${productId}`);
+          update: {}, // No updates needed if already exists
+        });
+        this.logger.log(`Attached asset ${mainImageAsset.id} (${mainImageAsset.name}) to product ${productId}`);
 
-      // Set main image if not already set
-      if (!hasMainImage) {
+        // Set main image
         await this.prisma.product.update({
           where: { id: productId },
           data: { imageUrl: mainImageAsset.filePath },
         });
         this.logger.log(`Set main image for product ${productId} to asset ${mainImageAsset.id} (${mainImageAsset.name})`);
+      } else if (!hasMainImage) {
+        this.logger.log(`No exact match asset found for main image (SKU: ${sku})`);
       }
 
       // After setting main image, scan for SKU[Identifier] patterns automatically
@@ -2402,16 +2423,21 @@ export class ProductService {
   }
 
   /**
-   * Automatically scan Digital Assets for SKU[Identifier] pattern matches and attach them.
-   * This method finds assets whose names contain the SKU followed by [Identifier] pattern.
+   * Automatically scan Digital Assets for filename pattern matches and classify them.
+   * This method classifies assets based on their filename patterns:
    * 
-   * Asset naming in Digital Assets should follow: SKU[Identifier].ext
-   * Examples:
-   * - PROD-123[Detail1].jpg
-   * - PROD-123[Manual].pdf
-   * - PROD-123[Video].mp4
+   * Main Images:
+   * - SKU.ext
+   * - SKU_image.ext, SKU-image.ext, SKU.image.ext
    * 
-   * These assets will be automatically detected and attached without Excel configuration.
+   * Sub Images:
+   * - SKU_SubImage.ext, SKU-SubImage.ext, SKU[SubImage].ext
+   * - Any filename containing "subimage" after SKU
+   * 
+   * Assets:
+   * - SKU_Assets.ext, SKU-Assets.ext, SKU[Assets].ext
+   * - Any filename containing "asset" or "assets" after SKU
+   * - Default classification for other patterns like SKU[Detail1].ext
    * 
    * @param productId - The product ID
    * @param sku - The product SKU
@@ -2419,11 +2445,9 @@ export class ProductService {
    */
   private async autoScanAndAttachSkuPatternAssets(productId: number, sku: string, userId: number): Promise<void> {
     try {
-      this.logger.log(`Auto-scanning for SKU[Identifier] pattern assets for SKU: ${sku}`);
+      this.logger.log(`Auto-scanning for filename pattern assets for SKU: ${sku}`);
 
-      // OPTIMIZATION: Use SQL LIKE pattern to filter assets that potentially match SKU[Identifier] pattern
-      // This significantly reduces the dataset returned from the database
-      const skuPattern = `${sku}[%`; // Matches "SKU[anything"
+      // OPTIMIZATION: Query assets that start with SKU
       const assets = await this.prisma.asset.findMany({
         where: {
           userId,
@@ -2448,28 +2472,54 @@ export class ProductService {
       const assetsToAttach: number[] = [];
       const subImagesToAdd: string[] = [];
 
-      // Scan each asset for SKU[Identifier] pattern in the asset name
+      // Scan each asset and classify based on filename pattern
       for (const asset of assets) {
-        const nameWithoutExt = asset.name.replace(/\\.[^/.]+$/, '');
+        const nameWithoutExt = asset.name.replace(/\.[^/.]+$/, '');
         
-        // Check if this asset name contains a SKU[Identifier] pattern
-        const parsed = SkuPatternHelper.parseSkuPattern(nameWithoutExt);
+        // Skip exact match (already processed as main image)
+        if (nameWithoutExt.toLowerCase() === skuLower) {
+          continue;
+        }
         
-        if (parsed && parsed.sku.toLowerCase() === skuLower) {
-          // This asset is named with our SKU in a pattern format!
-          const identifier = parsed.identifier;
-          this.logger.log(`Found SKU pattern asset: ${nameWithoutExt} (${sku}[${identifier}])`);
-          
-          const isImage = imageExtensions.some(ext => 
-            asset.fileName.toLowerCase().endsWith(ext)
-          );
+        // Classify the asset based on filename pattern
+        const classification = ImageClassificationHelper.classifyImage(asset.name, sku);
+        
+        if (classification.type === ImageClassificationType.NONE) {
+          // Doesn't match our SKU pattern, skip it
+          continue;
+        }
+        
+        const isImage = imageExtensions.some(ext => 
+          asset.fileName.toLowerCase().endsWith(ext)
+        );
 
-          // Add image assets to subImages array
-          if (isImage) {
-            subImagesToAdd.push(asset.filePath);
-          }
+        this.logger.log(`Classified asset as ${classification.type}: ${asset.name}`);
 
-          assetsToAttach.push(asset.id);
+        // Handle based on classification type
+        switch (classification.type) {
+          case ImageClassificationType.MAIN_IMAGE:
+            // Main images are already handled by autoAttachAssetsBySku, but log for info
+            this.logger.log(`Found main image pattern (skipping, already handled): ${asset.name}`);
+            break;
+
+          case ImageClassificationType.SUB_IMAGE:
+            // Add to subImages if it's an image file, otherwise just attach as asset
+            if (isImage) {
+              subImagesToAdd.push(asset.filePath);
+              this.logger.log(`Adding to subImages: ${asset.name}`);
+            }
+            assetsToAttach.push(asset.id);
+            break;
+
+          case ImageClassificationType.ASSET:
+            // Always attach as asset, but don't add non-images to subImages
+            if (isImage) {
+              // For assets that are images, we can optionally add them to subImages or not
+              // Based on requirements, we'll only attach them, not add to subImages
+              this.logger.log(`Asset (image) will be attached only: ${asset.name}`);
+            }
+            assetsToAttach.push(asset.id);
+            break;
         }
       }
 

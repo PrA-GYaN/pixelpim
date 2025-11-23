@@ -20,4 +20,5 @@ export class ImportProgressDto {
   percentage: number;
   status: 'processing' | 'completed' | 'error';
   message?: string;
+  failedRows?: Array<{ row: number; error: string; sku?: string; productName?: string }>;
 }
