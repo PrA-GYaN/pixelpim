@@ -7,7 +7,7 @@ import { FamilyFilterDto, FamilySortField, SortOrder, DateFilter } from './dto/f
 import { AttributeValueValidator } from '../attribute/validators/attribute-value.validator';
 import { AttributeType } from '../types/attribute-type.enum';
 import { PaginatedResponse, PaginationUtils } from '../common';
-import type { Family } from '../../generated/prisma';
+import type { Family } from '@prisma/client';
 
 @Injectable()
 export class FamilyService {

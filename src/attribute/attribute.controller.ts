@@ -18,12 +18,16 @@ import { CreateAttributeDto } from './dto/create-attribute.dto';
 import { UpdateAttributeDto } from './dto/update-attribute.dto';
 import { AttributeFilterDto, AttributeGroupFilterDto } from './dto/attribute-filter.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { OwnershipGuard } from '../auth/guards/ownership.guard';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { User } from '../auth/decorators/user.decorator';
+import { EffectiveUserId } from '../auth/decorators/effective-user-id.decorator';
 import { UserAttributeType, getAvailableUserTypes, USER_TO_STORAGE_TYPE_MAP } from '../types/user-attribute-type.enum';
 import { PaginatedResponse } from '../common';
 
 @Controller('attributes')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, OwnershipGuard, PermissionsGuard)
 export class AttributeController {
   private readonly logger = new Logger(AttributeController.name);
 
@@ -39,14 +43,19 @@ export class AttributeController {
   }
 
   @Post()
-  async create(@Body() createAttributeDto: CreateAttributeDto, @User() user: any) {
+  @RequirePermissions({ resource: 'attributes', action: 'create' })
+  async create(
+    @Body() createAttributeDto: CreateAttributeDto,
+    @User() user: any,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
     try {
       this.logger.log(`Creating attribute: ${JSON.stringify(createAttributeDto)} for user: ${user.id}`);
       
       // Basic pre-validation (the service will handle detailed validation and conversion)
       this.validateBasicInput(createAttributeDto);
       
-      return await this.attributeService.create(createAttributeDto, user.id);
+      return await this.attributeService.create(createAttributeDto, effectiveUserId);
     } catch (error) {
       return this.handleError(error, 'creating');
     }
@@ -102,8 +111,10 @@ export class AttributeController {
   }
 
   @Get()
+  @RequirePermissions({ resource: 'attributes', action: 'read' })
   async findAll(
     @User() user: any,
+    @EffectiveUserId() effectiveUserId: number,
     @Query() filters: AttributeFilterDto,
   ) {
     try {
@@ -112,89 +123,107 @@ export class AttributeController {
           (Object.keys(filters).length === 2 && filters.page && filters.limit)) {
         const pageNum = filters.page || 1;
         const limitNum = filters.limit || 10;
-        return await this.attributeService.findAll(user.id, pageNum, limitNum);
+        return await this.attributeService.findAll(effectiveUserId, pageNum, limitNum);
       }
       
       // Use the filtered search
-      return await this.attributeService.findAllWithFilters(user.id, filters);
+      return await this.attributeService.findAllWithFilters(effectiveUserId, filters);
     } catch (error) {
       return this.handleError(error, 'fetching');
     }
   }
 
   @Get('with-product-counts')
+  @RequirePermissions({ resource: 'attributes', action: 'read' })
   async findAllWithProductCounts(
     @User() user: any,
+    @EffectiveUserId() effectiveUserId: number,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
     try {
       const pageNum = page ? parseInt(page) : 1;
       const limitNum = limit ? parseInt(limit) : 10;
-      return await this.attributeService.findAllWithProductCounts(user.id, pageNum, limitNum);
+      return await this.attributeService.findAllWithProductCounts(effectiveUserId, pageNum, limitNum);
     } catch (error) {
       return this.handleError(error, 'fetching attributes with product counts');
     }
   }
 
   @Get('groups')
+  @RequirePermissions({ resource: 'attributes', action: 'read' })
   async findAllGroups(
     @User() user: any,
+    @EffectiveUserId() effectiveUserId: number,
     @Query() filters: AttributeGroupFilterDto,
   ) {
     try {
-      return await this.attributeService.findAllGroupsWithFilters(user.id, filters);
+      return await this.attributeService.findAllGroupsWithFilters(effectiveUserId, filters);
     } catch (error) {
       return this.handleError(error, 'fetching attribute groups');
     }
   }
 
   @Get('attribute-suggestions')
+  @RequirePermissions({ resource: 'attributes', action: 'update' })
   async getAttributeSuggestions(
     @Query('productId', ParseIntPipe) productId: number,
     @Query('attributeId', ParseIntPipe) attributeId: number,
     @Query('query') query: string,
     @User() user: any,
+    @EffectiveUserId() effectiveUserId: number,
   ) {
     try {
       if (!query || query.length < 2) {
         return { suggestions: [] };
       }
 
-      return await this.attributeService.getAttributeSuggestions(productId, attributeId, query, user.id);
+      return await this.attributeService.getAttributeSuggestions(productId, attributeId, query, effectiveUserId);
     } catch (error) {
       return this.handleError(error, 'fetching attribute suggestions');
     }
   }
 
   @Get(':id')
-  async findOne(@Param('id', ParseIntPipe) id: number, @User() user: any) {
+  @RequirePermissions({ resource: 'attributes', action: 'read' })
+  async findOne(
+    @Param('id', ParseIntPipe) id: number,
+    @User() user: any,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
     try {
-      return await this.attributeService.findOne(id, user.id);
+      return await this.attributeService.findOne(id, effectiveUserId);
     } catch (error) {
       return this.handleError(error, 'fetching');
     }
   }
 
   @Patch(':id')
+  @RequirePermissions({ resource: 'attributes', action: 'update' })
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateAttributeDto: UpdateAttributeDto,
     @User() user: any,
+    @EffectiveUserId() effectiveUserId: number,
   ) {
     try {
       this.logger.log(`Updating attribute ${id}: ${JSON.stringify(updateAttributeDto)} for user: ${user.id}`);
       
-      return await this.attributeService.update(id, updateAttributeDto, user.id);
+      return await this.attributeService.update(id, updateAttributeDto, effectiveUserId);
     } catch (error) {
       return this.handleError(error, 'updating');
     }
   }
 
   @Delete(':id')
-  async remove(@Param('id', ParseIntPipe) id: number, @User() user: any) {
+  @RequirePermissions({ resource: 'attributes', action: 'delete' })
+  async remove(
+    @Param('id', ParseIntPipe) id: number,
+    @User() user: any,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
     try {
-      return await this.attributeService.remove(id, user.id);
+      return await this.attributeService.remove(id, effectiveUserId);
     } catch (error) {
       return this.handleError(error, 'deleting');
     }

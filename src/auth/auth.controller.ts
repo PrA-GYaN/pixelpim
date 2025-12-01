@@ -6,7 +6,6 @@ import { LoginDto } from './dto/login.dto';
 import { SendOtpDto } from './dto/send-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
-import { GoogleAuthGuard } from './guards/google-auth.guard';
 
 @Controller('auth')
 export class AuthController {
@@ -30,21 +29,6 @@ export class AuthController {
   @Post('login')
   async login(@Body() loginDto: LoginDto) {
     return this.authService.login(loginDto);
-  }
-
-  @Get('google')
-  @UseGuards(GoogleAuthGuard)
-  async googleAuth(@Request() req) {
-    // This will redirect to Google
-  }
-
-  @Get('google/callback')
-  @UseGuards(GoogleAuthGuard)
-  async googleAuthRedirect(@Request() req, @Res() res: Response) {
-    const result = await this.authService.googleLogin(req.user);
-    
-    // Send response with token
-    res.redirect(`${process.env.BASE_URL}/auth/callback?token=${result.token}`);
   }
 
   @UseGuards(JwtAuthGuard)

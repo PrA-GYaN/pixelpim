@@ -152,7 +152,12 @@ export class AuthService {
     });
 
     // Generate JWT token
-    const payload = { sub: user.id, email: user.email };
+    const payload = { 
+      sub: user.id, 
+      email: user.email,
+      role: user.role,
+      ownerId: user.ownerId 
+    };
     const token = this.jwtService.sign(payload);
 
     return {
@@ -197,7 +202,12 @@ export class AuthService {
     }
 
     // Generate JWT token
-    const payload = { sub: user.id, email: user.email };
+    const payload = { 
+      sub: user.id, 
+      email: user.email,
+      role: user.role,
+      ownerId: user.ownerId 
+    };
     const token = this.jwtService.sign(payload);
 
     return {
@@ -219,6 +229,8 @@ export class AuthService {
         id: true,
         email: true,
         fullname: true,
+        role: true,
+        ownerId: true,
         createdAt: true,
       },
     });
@@ -269,7 +281,12 @@ export class AuthService {
   }
 
   async googleLogin(user: any) {
-    const payload = { sub: user.id, email: user.email };
+    const payload = { 
+      sub: user.id, 
+      email: user.email,
+      role: user.role,
+      ownerId: user.ownerId 
+    };
     const token = this.jwtService.sign(payload);
 
     return {

@@ -1,5 +1,4 @@
-import { Prisma } from '../../generated/prisma';
-import { PrismaClient } from '../../generated/prisma';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { updateProductStatus } from 'src/utils/productStatusUtils';
 
 export const productAttributeStatusExtension = Prisma.defineExtension({

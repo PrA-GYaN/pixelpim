@@ -13,15 +13,19 @@ import {
   WooCommerceIntegrationResponseDto,
 } from './woocommerce/dto/woocommerce.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { OwnershipGuard } from '../auth/guards/ownership.guard';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { User as GetUser } from '../auth/decorators/user.decorator';
-import type { User } from '../../generated/prisma';
+import { EffectiveUserId } from '../auth/decorators/effective-user-id.decorator';
+import type { User } from '@prisma/client';
 
 /**
  * Legacy integration controller - kept for backward compatibility
  * @deprecated Use WooCommerceController or AmazonController instead
  */
 @Controller('integrate')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, OwnershipGuard, PermissionsGuard)
 export class IntegrationController {
   private readonly logger = new Logger(IntegrationController.name);
 
@@ -32,9 +36,11 @@ export class IntegrationController {
    */
   @Post('woocommerce')
   @HttpCode(HttpStatus.OK)
+  @RequirePermissions({ resource: 'integration', action: 'export' })
   async integrateWooCommerce(
     @Body() integrationDto: WooCommerceIntegrationDto,
     @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
   ): Promise<WooCommerceIntegrationResponseDto> {
     this.logger.warn(
       'POST /integrate/woocommerce is deprecated. Use POST /integration/woocommerce/export instead.',
@@ -45,7 +51,7 @@ export class IntegrationController {
 
     const result = await this.integrationService.syncProductsToWooCommerce(
       integrationDto.productIds,
-      user.id,
+      effectiveUserId,
     );
 
     return {

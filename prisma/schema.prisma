@@ -1,11 +1,16 @@
 generator client {
   provider = "prisma-client-js"
-  output   = "../generated/prisma"
 }
 
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  OWNER
+  STAFF
 }
 
 model User {
@@ -17,7 +22,16 @@ model User {
   provider        String           @default("local")
   apiKey          String?          @unique
   secretKey       String?
+  role            Role             @default(OWNER)
+  ownerId         Int?
   createdAt       DateTime         @default(now())
+
+  // Hierarchical relationship for Owner-Staff
+  owner              User?            @relation("OwnerStaff", fields: [ownerId], references: [id], onDelete: Cascade)
+  staffMembers       User[]           @relation("OwnerStaff")
+
+  // User permissions (for STAFF users only)
+  permissions        UserPermission[] @relation("StaffPermissions")
 
   attributes         Attribute[]         @relation("UserAttributes")
   attributeGroups    AttributeGroup[]    @relation("UserAttributeGroups")
@@ -32,6 +46,7 @@ model User {
   integrationLogs     IntegrationLog[]    @relation("UserIntegrationLogs")
   integrationCredentials UserIntegrationCredentials[] @relation("UserIntegrationCredentials")
   webhooks           Webhook[]           @relation("UserWebhooks")
+  shareLinks         ShareLink[]         @relation("UserShareLinks")
 }
 
 model Otp {
@@ -376,4 +391,62 @@ model WebhookDelivery {
   webhook   Webhook  @relation(fields: [webhookId], references: [id], onDelete: Cascade)
 
   @@index([webhookId, deliveredAt])
+}
+
+model UserPermission {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  resource   String   // 'products', 'assets', 'categories', 'families', 'attributes', 'integrations', etc.
+  action     String   // 'create', 'read', 'update', 'delete', 'export', 'import'
+  granted    Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user       User     @relation("StaffPermissions", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, resource, action])
+  @@index([userId, resource])
+}
+
+// Multi-item sharing support (Google Drive-inspired)
+model ShareLink {
+  id          String   @id @default(cuid())
+  slug        String   @unique // Short, non-guessable public identifier
+  userId      Int
+  createdAt   DateTime @default(now())
+  expiresAt   DateTime?
+  accessCount Int      @default(0)
+  isActive    Boolean  @default(true)
+
+  user        User     @relation("UserShareLinks", fields: [userId], references: [id], onDelete: Cascade)
+  
+  sharedAssets       SharedAsset[]
+  sharedAssetGroups  SharedAssetGroup[]
+
+  @@index([slug, isActive])
+  @@index([userId])
+}
+
+model SharedAsset {
+  id          Int      @id @default(autoincrement())
+  shareLinkId String
+  assetId     Int
+  createdAt   DateTime @default(now())
+
+  shareLink   ShareLink @relation(fields: [shareLinkId], references: [id], onDelete: Cascade)
+
+  @@unique([shareLinkId, assetId])
+  @@index([shareLinkId])
+}
+
+model SharedAssetGroup {
+  id          Int      @id @default(autoincrement())
+  shareLinkId String
+  assetGroupId Int
+  createdAt   DateTime @default(now())
+
+  shareLink   ShareLink @relation(fields: [shareLinkId], references: [id], onDelete: Cascade)
+
+  @@unique([shareLinkId, assetGroupId])
+  @@index([shareLinkId])
 }

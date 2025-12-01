@@ -7,7 +7,7 @@ import { AttributeResponseDto } from './dto/attribute-response.dto';
 import { AttributeFilterDto, AttributeGroupFilterDto, AttributeSortField, SortOrder, DateFilter } from './dto/attribute-filter.dto';
 import { AttributeValueValidator } from './validators/attribute-value.validator';
 import { PaginatedResponse, PaginationUtils } from '../common';
-import type { Attribute } from '../../generated/prisma';
+import type { Attribute } from '@prisma/client';
 import { AttributeType } from '../types/attribute-type.enum';
 import { UserAttributeType, storageTypeToUserType, userTypeToStorageType } from '../types/user-attribute-type.enum';
 

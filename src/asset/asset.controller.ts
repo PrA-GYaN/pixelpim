@@ -19,16 +19,23 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { AssetService } from './asset.service';
 import { CreateAssetDto, UpdateAssetDto, ExportAssetsDto } from './dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { OwnershipGuard } from '../auth/guards/ownership.guard';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { User as GetUser } from '../auth/decorators/user.decorator';
+import { EffectiveUserId } from '../auth/decorators/effective-user-id.decorator';
 import { PaginatedResponse } from '../common';
 import { FileUploadUtil } from '../utils/file-upload.util';
 import type { Response } from 'express';
+import type { User } from '@prisma/client';
 
 @Controller('assets')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, OwnershipGuard, PermissionsGuard)
 export class AssetController {
   constructor(private readonly assetService: AssetService) {}
 
   @Post('upload')
+  @RequirePermissions({ resource: 'assets', action: 'create' })
   @UseInterceptors(
     FileInterceptor('file', {
       limits: {
@@ -39,20 +46,23 @@ export class AssetController {
   async uploadAsset(
     @UploadedFile() file: Express.Multer.File,
     @Body() createAssetDto: CreateAssetDto,
-    @Req() req: any,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
   ) {
-    const userId = req.user.id;
-    return this.assetService.create(createAssetDto, file, userId);
+    return this.assetService.create(createAssetDto, file, effectiveUserId);
   }
 
   @Post('zip')
+  @RequirePermissions({ resource: 'assets', action: 'read' })
   async downloadZip(@Body('files') files: string[], @Res() res: Response) {
     await FileUploadUtil.downloadFilesAsZip(files, res, 'my-assets.zip');
   }
 
   @Get()
+  @RequirePermissions({ resource: 'assets', action: 'read' })
   async findAll(
-    @Req() req: any,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
     @Query('assetGroupId') assetGroupId?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
@@ -67,7 +77,6 @@ export class AssetController {
     @Query('hasGroup') hasGroup?: string,
     @Query('dateFilter') dateFilter?: 'latest' | 'oldest',
   ) {
-    const userId = req.user.id;
     const groupId = assetGroupId ? parseInt(assetGroupId, 10) : undefined;
     const pageNum = page ? parseInt(page) : 1;
     const limitNum = limit ? parseInt(limit) : 10;
@@ -86,24 +95,29 @@ export class AssetController {
       dateFilter,
     };
     
-    return this.assetService.findAll(userId, groupId, pageNum, limitNum, filters);
+    return this.assetService.findAll(effectiveUserId, groupId, pageNum, limitNum, filters);
   }
 
   @Get(':id')
-  async findOne(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
-    const userId = req.user.id;
-    return this.assetService.findOne(id, userId);
+  @RequirePermissions({ resource: 'assets', action: 'read' })
+  async findOne(
+    @Param('id', ParseIntPipe) id: number,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    return this.assetService.findOne(id, effectiveUserId);
   }
 
   @Patch(':id')
+  @RequirePermissions({ resource: 'assets', action: 'update' })
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateAssetDto: UpdateAssetDto,
-    @Req() req: any,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
   ) {
-      const userId = req.user.id;
       try {
-        return await this.assetService.update(id, updateAssetDto, userId);
+        return await this.assetService.update(id, updateAssetDto, effectiveUserId);
       } catch (error) {
         // Handle known HTTP exceptions
         if (error instanceof Error && error.name === 'NotFoundException') {
@@ -135,29 +149,35 @@ export class AssetController {
   }
 
   @Delete(':id')
-  async remove(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
-    const userId = req.user.id;
-    return this.assetService.remove(id, userId);
+  @RequirePermissions({ resource: 'assets', action: 'delete' })
+  async remove(
+    @Param('id', ParseIntPipe) id: number,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    return this.assetService.remove(id, effectiveUserId);
   }
 
   @Get('export/json')
+  @RequirePermissions({ resource: 'assets', action: 'export' })
   async exportAsJson(
-    @Req() req: any,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
     @Query('assetGroupId') assetGroupId?: string,
   ) {
-    const userId = req.user.id;
     const groupId = assetGroupId ? parseInt(assetGroupId, 10) : undefined;
-    return this.assetService.exportAsJson(userId, groupId);
+    return this.assetService.exportAsJson(effectiveUserId, groupId);
   }
 
   @Post('export')
+  @RequirePermissions({ resource: 'assets', action: 'export' })
   async exportAssets(
     @Body() exportDto: ExportAssetsDto,
-    @Req() req: any,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
     @Res() res: Response,
   ) {
-    const userId = req.user.id;
-    const result = await this.assetService.exportAssets(userId, exportDto);
+    const result = await this.assetService.exportAssets(effectiveUserId, exportDto);
 
     // Set appropriate content type and headers based on format
     if (exportDto.format === 'xml') {
@@ -180,33 +200,36 @@ export class AssetController {
   // Soft Delete Endpoints
 
   @Get('deleted')
+  @RequirePermissions({ resource: 'assets', action: 'delete' })
   async getSoftDeletedAssets(
-    @Req() req: any,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
-    const userId = req.user.id;
     const pageNum = page ? parseInt(page) : 1;
     const limitNum = limit ? parseInt(limit) : 10;
     
-    return this.assetService.getSoftDeletedAssets(userId, pageNum, limitNum);
+    return this.assetService.getSoftDeletedAssets(effectiveUserId, pageNum, limitNum);
   }
 
   @Post(':id/restore')
+  @RequirePermissions({ resource: 'assets', action: 'create' })
   async restoreAsset(
     @Param('id', ParseIntPipe) id: number,
-    @Req() req: any,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
   ) {
-    const userId = req.user.id;
-    return this.assetService.restoreAsset(id, userId);
+    return this.assetService.restoreAsset(id, effectiveUserId);
   }
 
   @Delete(':id/permanent')
+  @RequirePermissions({ resource: 'assets', action: 'delete' })
   async permanentlyDeleteAsset(
     @Param('id', ParseIntPipe) id: number,
-    @Req() req: any,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
   ) {
-    const userId = req.user.id;
-    return this.assetService.permanentlyDeleteAsset(id, userId);
+    return this.assetService.permanentlyDeleteAsset(id, effectiveUserId);
   }
 }

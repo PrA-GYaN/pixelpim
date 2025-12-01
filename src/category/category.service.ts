@@ -5,7 +5,7 @@ import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import { CategoryResponseDto, CategoryTreeResponseDto } from './dto/category-response.dto';
 import { PaginatedResponse, PaginationUtils } from '../common';
-import type { Category } from '../../generated/prisma';
+import type { Category } from '@prisma/client';
 
 @Injectable()
 export class CategoryService {

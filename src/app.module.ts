@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-// import { ServeStaticModule } from '@nestjs/serve-static';
+import { ServeStaticModule } from '@nestjs/serve-static';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 import * as path from 'path';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -18,6 +19,8 @@ import { SupportModule } from './support/support.module';
 import { IntegrationModule } from './integration/integration.module';
 import { ApiKeyModule } from './api-key/api-key.module';
 import { WebhookModule } from './webhook/webhook.module';
+import { ShareLinkModule } from './share-link/share-link.module';
+import { EffectiveUserInterceptor } from './auth/interceptors/effective-user.interceptor';
 
 @Module({
   imports: [
@@ -25,10 +28,10 @@ import { WebhookModule } from './webhook/webhook.module';
       isGlobal: true,
       envFilePath: '.env',
     }),
-    // ServeStaticModule.forRoot({
-    //   rootPath: path.join(process.cwd(), 'uploads'),
-    //   serveRoot: '/uploads',
-    // }),
+    ServeStaticModule.forRoot({
+      rootPath: path.join(process.cwd(), 'uploads'),
+      serveRoot: '/uploads',
+    }),
     PrismaModule, 
     AuthModule, 
     AttributeModule, 
@@ -42,9 +45,16 @@ import { WebhookModule } from './webhook/webhook.module';
     SupportModule,
     IntegrationModule,
     ApiKeyModule,
-    WebhookModule
+    WebhookModule,
+    ShareLinkModule
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: EffectiveUserInterceptor,
+    },
+  ],
 })
 export class AppModule {}

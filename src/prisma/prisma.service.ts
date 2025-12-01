@@ -1,5 +1,5 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
-import { PrismaClient } from '../../generated/prisma';
+import { PrismaClient } from '@prisma/client';
 import { productAttributeStatusExtension } from '../middleware/statusTrigger';
 import { softDeleteMiddleware } from '../middleware/softDeleteMiddleware';
 

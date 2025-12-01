@@ -187,12 +187,6 @@ export class AssetService {
     // Save file locally
     await fs.writeFile(localFilePath, file.buffer);
 
-    // Upload to Cloudinary (keep existing functionality)
-    const uploadOptions = CloudinaryUtil.getAssetUploadOptions();
-    const cloudinaryResult: CloudinaryUploadResult =
-      await CloudinaryUtil.uploadFile(file, uploadOptions);
-    console.log('Cloudinary upload result:', cloudinaryResult);
-
     // Check asset group exists
     if (createAssetDto.assetGroupId) {
       const assetGroup = await this.prisma.assetGroup.findFirst({
@@ -207,12 +201,15 @@ export class AssetService {
       }
     }
 
-    // Store Cloudinary URL in filePath
+    // Convert local path to URL format for serving
+    const fileUrl = await this.convertLocalPathToUrl(localFilePath, userId);
+
+    // Store local file path in database
     const asset = await this.prisma.asset.create({
       data: {
         name: createAssetDto.name,
         fileName: uniqueFileName,
-        filePath: cloudinaryResult.secure_url, // Store Cloudinary URL
+        filePath: localFilePath, // Store local file path
         mimeType: file.mimetype,
         size: BigInt(file.size),
         userId,
@@ -231,7 +228,7 @@ export class AssetService {
     return {
       ...AssetService.convertBigIntToString(asset),
       size: Number(asset.size),
-      url: asset.filePath, // Cloudinary URL
+      url: fileUrl, // Local file URL
       formattedSize: CloudinaryUtil.formatFileSize(Number(asset.size)),
     };
   }
@@ -251,13 +248,18 @@ export class AssetService {
       whereCondition.isDeleted = false;
     }
     
-    // Group filter
+    // Group filter - IMPORTANT: Always filter by exact folder context
+    // If assetGroupId is explicitly provided (including null for root), use it
+    // If not provided and no hasGroup filter, show only root-level assets (null)
     if (assetGroupId !== undefined) {
       whereCondition.assetGroupId = assetGroupId;
+    } else if (filters.hasGroup === undefined) {
+      // Default behavior: show only root-level assets when no group context specified
+      whereCondition.assetGroupId = null;
     }
 
-    // Has group filter
-    if (filters.hasGroup !== undefined) {
+    // Has group filter (only applies if assetGroupId not explicitly set)
+    if (assetGroupId === undefined && filters.hasGroup !== undefined) {
       if (filters.hasGroup === true) {
         whereCondition.assetGroupId = { not: null };
       } else if (filters.hasGroup === false) {
@@ -326,12 +328,12 @@ export class AssetService {
       this.prisma.asset.count({ where: whereCondition }),
     ]);
 
-    const transformedAssets = assets.map((asset) => ({
+    const transformedAssets = await Promise.all(assets.map(async (asset) => ({
       ...AssetService.convertBigIntToString(asset),
       size: Number(asset.size),
-      url: asset.filePath, // Cloudinary URL
+      url: await this.convertLocalPathToUrl(asset.filePath, userId), // Convert to URL
       formattedSize: CloudinaryUtil.formatFileSize(Number(asset.size)),
-    }));
+    })));
 
     return PaginationUtils.createPaginatedResponse(
       transformedAssets,
@@ -433,7 +435,7 @@ export class AssetService {
     return {
       ...AssetService.convertBigIntToString(updatedAsset),
       size: Number(updatedAsset.size),
-      url: updatedAsset.filePath, // Cloudinary URL
+      url: await this.convertLocalPathToUrl(updatedAsset.filePath, userId), // Convert to URL
       formattedSize: CloudinaryUtil.formatFileSize(Number(updatedAsset.size)),
     };
   }
@@ -556,7 +558,7 @@ export class AssetService {
     const exportData = await Promise.all(assets.map(async (asset) => ({
       id: asset.id.toString(),
       name: asset.name,
-      url: asset.filePath, // Cloudinary URL
+      url: await this.convertLocalPathToUrl(asset.filePath, userId), // Convert to URL
       fileName: asset.fileName,
       mimeType: asset.mimeType,
       size: asset.size.toString(),
@@ -690,7 +692,7 @@ export class AssetService {
     const exportData = await Promise.all(assets.map(async (asset) => ({
       id: asset.id.toString(),
       name: asset.name,
-      url: asset.filePath, // Cloudinary URL
+      url: await this.convertLocalPathToUrl(asset.filePath, userId), // Convert to URL
       fileName: asset.fileName,
       mimeType: asset.mimeType,
       size: asset.size.toString(),
@@ -799,7 +801,7 @@ export class AssetService {
       asset: {
         ...AssetService.convertBigIntToString(restoredAsset),
         size: Number(restoredAsset.size),
-        url: restoredAsset.filePath,
+        url: await this.convertLocalPathToUrl(restoredAsset.filePath, userId),
         formattedSize: CloudinaryUtil.formatFileSize(Number(restoredAsset.size)),
       }
     };
@@ -836,12 +838,12 @@ export class AssetService {
       this.prisma.asset.count({ where: whereCondition }),
     ]);
 
-    const transformedAssets = assets.map((asset) => ({
+    const transformedAssets = await Promise.all(assets.map(async (asset) => ({
       ...AssetService.convertBigIntToString(asset),
       size: Number(asset.size),
-      url: asset.filePath,
+      url: await this.convertLocalPathToUrl(asset.filePath, userId),
       formattedSize: CloudinaryUtil.formatFileSize(Number(asset.size)),
-    }));
+    })));
 
     return PaginationUtils.createPaginatedResponse(
       transformedAssets,
@@ -872,19 +874,9 @@ export class AssetService {
 
     // Delete local file
     try {
-      const localDirPath = await this.buildLocalDirectoryPath(asset.userId, asset.assetGroupId ?? undefined);
-      const localFilePath = path.join(localDirPath, asset.fileName);
-      await fs.unlink(localFilePath);
+      await fs.unlink(asset.filePath);
     } catch (error) {
       console.error('Error deleting local file:', error);
-    }
-
-    // Delete file from Cloudinary
-    try {
-      const publicId = CloudinaryUtil.extractPublicId(asset.filePath);
-      await CloudinaryUtil.deleteFile(publicId);
-    } catch (error) {
-      console.error('Error deleting file from Cloudinary:', error);
     }
 
     // Permanently delete

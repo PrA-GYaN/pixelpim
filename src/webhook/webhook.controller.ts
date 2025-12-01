@@ -2,36 +2,55 @@ import { Controller, Post, Get, Put, Delete, Body, Param, UseGuards, Request } f
 import { WebhookService } from './webhook.service';
 import { CreateWebhookDto } from './dto/create-webhook.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { OwnershipGuard } from '../auth/guards/ownership.guard';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { User as GetUser } from '../auth/decorators/user.decorator';
+import { EffectiveUserId } from '../auth/decorators/effective-user-id.decorator';
+import type { User } from '@prisma/client';
 
 @Controller('webhooks')
+@UseGuards(JwtAuthGuard, OwnershipGuard, PermissionsGuard)
 export class WebhookController {
   constructor(private webhookService: WebhookService) {}
 
-  @UseGuards(JwtAuthGuard)
   @Post()
-  async createWebhook(@Request() req, @Body() dto: CreateWebhookDto) {
-    const userId = req.user.id;
-    return this.webhookService.createWebhook(userId, dto);
+  @RequirePermissions({ resource: 'webhooks', action: 'create' })
+  async createWebhook(
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+    @Body() dto: CreateWebhookDto,
+  ) {
+    return this.webhookService.createWebhook(effectiveUserId, dto);
   }
 
-  @UseGuards(JwtAuthGuard)
   @Get()
-  async getWebhooks(@Request() req) {
-    const userId = req.user.id;
-    return this.webhookService.getWebhooks(userId);
+  @RequirePermissions({ resource: 'webhooks', action: 'read' })
+  async getWebhooks(
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    return this.webhookService.getWebhooks(effectiveUserId);
   }
 
-  @UseGuards(JwtAuthGuard)
   @Put(':id')
-  async updateWebhook(@Request() req, @Param('id') id: string, @Body() dto: Partial<CreateWebhookDto>) {
-    const userId = req.user.id;
-    return this.webhookService.updateWebhook(userId, +id, dto);
+  @RequirePermissions({ resource: 'webhooks', action: 'update' })
+  async updateWebhook(
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+    @Param('id') id: string,
+    @Body() dto: Partial<CreateWebhookDto>,
+  ) {
+    return this.webhookService.updateWebhook(effectiveUserId, +id, dto);
   }
 
-  @UseGuards(JwtAuthGuard)
   @Delete(':id')
-  async deleteWebhook(@Request() req, @Param('id') id: string) {
-    const userId = req.user.id;
-    return this.webhookService.deleteWebhook(userId, +id);
+  @RequirePermissions({ resource: 'webhooks', action: 'delete' })
+  async deleteWebhook(
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+    @Param('id') id: string,
+  ) {
+    return this.webhookService.deleteWebhook(effectiveUserId, +id);
   }
 }

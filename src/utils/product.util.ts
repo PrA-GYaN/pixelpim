@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import type { Prisma } from '../../generated/prisma';
+import type { Prisma } from '@prisma/client';
 
 export interface PopulatedProductData {
   id: number;

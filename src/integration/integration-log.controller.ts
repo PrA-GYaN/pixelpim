@@ -21,11 +21,16 @@ import {
   ErrorLogsResponseDto,
 } from './dto/query-integration-log.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { OwnershipGuard } from '../auth/guards/ownership.guard';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { User as GetUser } from '../auth/decorators/user.decorator';
-import type { User } from '../../generated/prisma';
+import { EffectiveUserId } from '../auth/decorators/effective-user-id.decorator';
+import type { User } from '@prisma/client';
 
 @Controller('api/integration/logs')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, OwnershipGuard, PermissionsGuard)
+@RequirePermissions({ resource: 'integration', action: 'read' })
 export class IntegrationLogController {
   private readonly logger = new Logger(IntegrationLogController.name);
 
@@ -39,13 +44,14 @@ export class IntegrationLogController {
   async getLogs(
     @Query() query: QueryIntegrationLogDto,
     @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
   ): Promise<IntegrationLogResponseDto> {
     this.logger.log(
       `User ${user.id} fetching integration logs with filters: ${JSON.stringify(query)}`,
     );
 
     try {
-      return await this.integrationLogService.getLogs(user.id, query);
+      return await this.integrationLogService.getLogs(effectiveUserId, query);
     } catch (error) {
       this.logger.error(
         `Failed to fetch integration logs for user ${user.id}`,
@@ -64,6 +70,7 @@ export class IntegrationLogController {
     @Param('productId', ParseIntPipe) productId: number,
     @Query() query: ProductLogsQueryDto,
     @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
   ): Promise<ProductLogsResponseDto> {
     this.logger.log(
       `User ${user.id} fetching logs for product ${productId} with filters: ${JSON.stringify(query)}`,
@@ -71,7 +78,7 @@ export class IntegrationLogController {
 
     try {
       return await this.integrationLogService.getLogsByProduct(
-        user.id,
+        effectiveUserId,
         productId,
         query,
       );
@@ -95,6 +102,7 @@ export class IntegrationLogController {
     @Param('integrationType') integrationType: string,
     @Param('externalId') externalId: string,
     @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
   ): Promise<ExternalProductLogsResponseDto> {
     this.logger.log(
       `User ${user.id} fetching logs for external product ${externalId} (${integrationType})`,
@@ -102,7 +110,7 @@ export class IntegrationLogController {
 
     try {
       return await this.integrationLogService.getLogsByExternalId(
-        user.id,
+        effectiveUserId,
         integrationType,
         externalId,
       );
@@ -125,13 +133,14 @@ export class IntegrationLogController {
   async getStats(
     @Query() query: StatsQueryDto,
     @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
   ): Promise<StatsResponseDto> {
     this.logger.log(
       `User ${user.id} fetching integration statistics with filters: ${JSON.stringify(query)}`,
     );
 
     try {
-      return await this.integrationLogService.getStats(user.id, query);
+      return await this.integrationLogService.getStats(effectiveUserId, query);
     } catch (error) {
       this.logger.error(
         `Failed to fetch statistics for user ${user.id}`,
@@ -149,13 +158,14 @@ export class IntegrationLogController {
   async getErrorLogs(
     @Query() query: ErrorLogsQueryDto,
     @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
   ): Promise<ErrorLogsResponseDto> {
     this.logger.log(
       `User ${user.id} fetching error logs with filters: ${JSON.stringify(query)}`,
     );
 
     try {
-      return await this.integrationLogService.getErrorLogs(user.id, query);
+      return await this.integrationLogService.getErrorLogs(effectiveUserId, query);
     } catch (error) {
       this.logger.error(`Failed to fetch error logs for user ${user.id}`, error);
       throw new BadRequestException('Failed to fetch error logs');

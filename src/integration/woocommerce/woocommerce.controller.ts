@@ -19,8 +19,12 @@ import {
   WooCommerceIntegrationResponseDto,
 } from './dto/woocommerce.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { OwnershipGuard } from '../../auth/guards/ownership.guard';
+import { PermissionsGuard } from '../../auth/guards/permissions.guard';
+import { RequirePermissions } from '../../auth/decorators/permissions.decorator';
 import { User as GetUser } from '../../auth/decorators/user.decorator';
-import type { User } from '../../../generated/prisma';
+import { EffectiveUserId } from '../../auth/decorators/effective-user-id.decorator';
+import type { User } from '@prisma/client';
 
 @Controller('integration/woocommerce')
 export class WooCommerceController {
@@ -29,11 +33,13 @@ export class WooCommerceController {
   constructor(private readonly woocommerceService: WooCommerceService) {}
 
   @Post('export')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, OwnershipGuard, PermissionsGuard)
   @HttpCode(HttpStatus.OK)
+  @RequirePermissions({ resource: 'integration', action: 'export' })
   async exportProducts(
     @Body() integrationDto: WooCommerceIntegrationDto,
     @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
   ): Promise<WooCommerceIntegrationResponseDto> {
     this.logger.log(
       `User ${user.id} exporting ${integrationDto.productIds.length} products to WooCommerce`,
@@ -41,7 +47,7 @@ export class WooCommerceController {
 
     const result = await this.woocommerceService.exportProducts(
       integrationDto.productIds,
-      user.id,
+      effectiveUserId,
     );
 
     const woocommerceTotal = await this.woocommerceService.getWooCommerceProductCount();
@@ -61,46 +67,54 @@ export class WooCommerceController {
   }
 
   @Post('update/:productId')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, OwnershipGuard, PermissionsGuard)
   @HttpCode(HttpStatus.OK)
+  @RequirePermissions({ resource: 'integration', action: 'update' })
   async updateProduct(
     @Param('productId') productId: string,
     @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
   ) {
     this.logger.log(`User ${user.id} updating product ${productId} in WooCommerce`);
 
     const result = await this.woocommerceService.updateProduct(
       parseInt(productId),
-      user.id,
+      effectiveUserId,
     );
 
     return result;
   }
 
   @Delete(':productId')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, OwnershipGuard, PermissionsGuard)
   @HttpCode(HttpStatus.OK)
+  @RequirePermissions({ resource: 'integration', action: 'delete' })
   async deleteProduct(
     @Param('productId') productId: string,
     @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
   ) {
     this.logger.log(`User ${user.id} deleting product ${productId} from WooCommerce`);
 
     const result = await this.woocommerceService.deleteProduct(
       parseInt(productId),
-      user.id,
+      effectiveUserId,
     );
 
     return result;
   }
 
   @Get('pull')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, OwnershipGuard, PermissionsGuard)
   @HttpCode(HttpStatus.OK)
-  async pullUpdates(@GetUser() user: User) {
+  @RequirePermissions({ resource: 'integration', action: 'read' })
+  async pullUpdates(
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
     this.logger.log(`User ${user.id} pulling updates from WooCommerce`);
 
-    const result = await this.woocommerceService.pullUpdates(user.id);
+    const result = await this.woocommerceService.pullUpdates(effectiveUserId);
 
     return result;
   }

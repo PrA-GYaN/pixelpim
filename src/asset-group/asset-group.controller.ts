@@ -14,22 +14,34 @@ import {
 import { AssetGroupService } from './asset-group.service';
 import { CreateAssetGroupDto, UpdateAssetGroupDto, AttachAssetsToGroupDto } from './dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { OwnershipGuard } from '../auth/guards/ownership.guard';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { User as GetUser } from '../auth/decorators/user.decorator';
+import { EffectiveUserId } from '../auth/decorators/effective-user-id.decorator';
 import { PaginatedResponse } from '../common';
+import type { User } from '@prisma/client';
 
 @Controller('asset-groups')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, OwnershipGuard, PermissionsGuard)
 export class AssetGroupController {
   constructor(private readonly assetGroupService: AssetGroupService) {}
 
   @Post()
-  async create(@Body() createAssetGroupDto: CreateAssetGroupDto, @Req() req: any) {
-    const userId = req.user.id;
-    return this.assetGroupService.create(createAssetGroupDto, userId);
+  @RequirePermissions({ resource: 'asset-groups', action: 'create' })
+  async create(
+    @Body() createAssetGroupDto: CreateAssetGroupDto,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    return this.assetGroupService.create(createAssetGroupDto, effectiveUserId);
   }
 
   @Get()
+  @RequirePermissions({ resource: 'asset-groups', action: 'read' })
   async findAll(
-    @Req() req: any,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('search') search?: string,
@@ -44,7 +56,6 @@ export class AssetGroupController {
     @Query('dateFilter') dateFilter?: 'latest' | 'oldest',
     @Query('hasAssets') hasAssets?: string,
   ) {
-    const userId = req.user.id;
     const pageNum = page ? parseInt(page) : 1;
     const limitNum = limit ? parseInt(limit) : 10;
     const sortOrderValidated = sortOrder === 'asc' ? 'asc' : 'desc';
@@ -64,13 +75,15 @@ export class AssetGroupController {
     };
     
     // Only return root level groups (parentGroupId = null)
-    return this.assetGroupService.findAll(userId, null, pageNum, limitNum, filters);
+    return this.assetGroupService.findAll(effectiveUserId, null, pageNum, limitNum, filters);
   }
 
   @Get(':parentId/children')
+  @RequirePermissions({ resource: 'asset-groups', action: 'read' })
   async findChildren(
     @Param('parentId', ParseIntPipe) parentId: number,
-    @Req() req: any,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('search') search?: string,
@@ -85,7 +98,6 @@ export class AssetGroupController {
     @Query('dateFilter') dateFilter?: 'latest' | 'oldest',
     @Query('hasAssets') hasAssets?: string,
   ) {
-    const userId = req.user.id;
     const pageNum = page ? parseInt(page) : 1;
     const limitNum = limit ? parseInt(limit) : 10;
     const sortOrderValidated = sortOrder === 'asc' ? 'asc' : 'desc';
@@ -105,19 +117,25 @@ export class AssetGroupController {
     };
     
     // Return groups with specific parentGroupId
-    return this.assetGroupService.findAll(userId, parentId, pageNum, limitNum, filters);
+    return this.assetGroupService.findAll(effectiveUserId, parentId, pageNum, limitNum, filters);
   }
 
   @Get(':id')
-  async findOne(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
-    const userId = req.user.id;
-    return this.assetGroupService.findOne(id, userId);
+  @RequirePermissions({ resource: 'asset-groups', action: 'read' })
+  async findOne(
+    @Param('id', ParseIntPipe) id: number,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    return this.assetGroupService.findOne(id, effectiveUserId);
   }
 
   @Get(':id/assets')
+  @RequirePermissions({ resource: 'asset-groups', action: 'read' })
   async getAssetsInGroup(
     @Param('id', ParseIntPipe) id: number,
-    @Req() req: any,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('search') search?: string,
@@ -127,7 +145,6 @@ export class AssetGroupController {
     @Query('sortBy') sortBy?: string,
     @Query('sortOrder') sortOrder?: 'asc' | 'desc',
   ) {
-    const userId = req.user.id;
     const pageNum = page ? parseInt(page) : 1;
     const limitNum = limit ? parseInt(limit) : 10;
     const sortOrderValidated = sortOrder === 'asc' ? 'asc' : 'desc';
@@ -141,18 +158,19 @@ export class AssetGroupController {
       sortOrder: sortOrderValidated,
     };
     
-    return this.assetGroupService.getAssetsInGroup(id, userId, pageNum, limitNum, filters);
+    return this.assetGroupService.getAssetsInGroup(id, effectiveUserId, pageNum, limitNum, filters);
   }
 
   @Patch(':id')
+  @RequirePermissions({ resource: 'asset-groups', action: 'update' })
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateAssetGroupDto: UpdateAssetGroupDto,
-    @Req() req: any,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
   ) {
-    const userId = req.user.id;
     try {
-      return await this.assetGroupService.update(id, updateAssetGroupDto, userId);
+      return await this.assetGroupService.update(id, updateAssetGroupDto, effectiveUserId);
     } catch (error) {
       if (error.status && error.message) {
         // Known NestJS exception
@@ -170,18 +188,23 @@ export class AssetGroupController {
   }
 
   @Delete(':id')
-  async remove(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
-    const userId = req.user.id;
-    return this.assetGroupService.remove(id, userId);
+  @RequirePermissions({ resource: 'asset-groups', action: 'delete' })
+  async remove(
+    @Param('id', ParseIntPipe) id: number,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    return this.assetGroupService.remove(id, effectiveUserId);
   }
   
   @Post(':id/attach-assets')
+  @RequirePermissions({ resource: 'asset-groups', action: 'update' })
   async attachAssetsToGroup(
     @Param('id', ParseIntPipe) id: number,
     @Body() attachAssetsToGroupDto: AttachAssetsToGroupDto,
-    @Req() req: any,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
   ) {
-    const userId = req.user.id;
-    return this.assetGroupService.attachAssetsToGroup(id, attachAssetsToGroupDto.assetIds, userId);
+    return this.assetGroupService.attachAssetsToGroup(id, attachAssetsToGroupDto.assetIds, effectiveUserId);
   }
 }
