@@ -154,17 +154,20 @@ export class NotificationService {
       case ActionType.DELETED:
         return `${entityDisplayName} "${entityName}" was deleted`;
       
-      case ActionType.BULK_CREATED:
+      case ActionType.BULK_CREATED: {
         const createdCount = metadata?.count || 'Multiple';
         return `${createdCount} ${entityDisplayName.toLowerCase()}${createdCount !== 1 ? 's' : ''} were created`;
+      }
       
-      case ActionType.BULK_UPDATED:
+      case ActionType.BULK_UPDATED: {
         const updatedCount = metadata?.count || 'Multiple';
         return `${updatedCount} ${entityDisplayName.toLowerCase()}${updatedCount !== 1 ? 's' : ''} were updated`;
+      }
       
-      case ActionType.BULK_DELETED:
+      case ActionType.BULK_DELETED: {
         const deletedCount = metadata?.count || 'Multiple';
         return `${deletedCount} ${entityDisplayName.toLowerCase()}${deletedCount !== 1 ? 's' : ''} were deleted`;
+      }
       
       case ActionType.LINKED:
         return `${entityDisplayName} "${entityName}" was linked${metadata?.details ? ` ${metadata.details}` : ''}`;
@@ -173,7 +176,7 @@ export class NotificationService {
         return `${entityDisplayName} "${entityName}" was unlinked${metadata?.details ? ` ${metadata.details}` : ''}`;
       
       default:
-        return `${entityDisplayName} "${entityName}" was ${action}`;
+        return `${entityDisplayName} "${entityName}" was ${String(action)}`;
     }
   }
 

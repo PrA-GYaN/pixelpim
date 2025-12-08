@@ -1,7 +1,8 @@
 import { BadRequestException } from '@nestjs/common';
 import { diskStorage } from 'multer';
 import { extname, join } from 'path';
-import { promises as fs } from 'fs';
+import { promises as fsPromises } from 'fs';
+import * as fs from 'fs';
 import { Request, Response } from 'express';
 import archiver from 'archiver';
 import axios from 'axios';
@@ -28,10 +29,14 @@ export class FileUploadUtil {
    */
   static createStorage(destination: string) {
     return diskStorage({
-      destination: async (req, file, callback) => {
-        // Ensure directory exists
-        await fs.mkdir(destination, { recursive: true });
-        callback(null, destination);
+      destination: (req, file, callback) => {
+        // Ensure directory exists synchronously
+        try {
+          fs.mkdirSync(destination, { recursive: true });
+          callback(null, destination);
+        } catch (error) {
+          callback(error, destination);
+        }
       },
       filename: (req, file, callback) => {
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
@@ -112,7 +117,7 @@ export class FileUploadUtil {
    */
   static async deleteFile(filePath: string): Promise<void> {
     try {
-      await fs.unlink(filePath);
+      await fsPromises.unlink(filePath);
     } catch (error) {
       console.error('Error deleting file:', error);
       // Don't throw error as file might already be deleted
@@ -254,11 +259,35 @@ export class FileUploadUtil {
 
       for (const url of files) {
         try {
-          const response = await axios.get(url, { responseType: 'arraybuffer' });
+          // Handle both relative paths (/uploads/...) and full URLs
+          let filePath: string;
+          
+          if (url.startsWith('http://') || url.startsWith('https://')) {
+            // Full URL - fetch via HTTP (e.g., Cloudinary)
+            const response = await axios.get(url, { responseType: 'arraybuffer' });
+            const fileName = url.split('/').pop() || 'file';
+            archive.append(response.data, { name: fileName });
+            continue;
+          } else if (url.startsWith('/uploads/')) {
+            // Relative path with /uploads/ prefix - convert to file system path
+            filePath = join(process.cwd(), url.replace(/^\//, ''));
+          } else {
+            // Already a relative path without leading slash
+            filePath = join(process.cwd(), 'uploads', url);
+          }
+
+          // Read file from local file system
+          const fileExists = await fsPromises.access(filePath).then(() => true).catch(() => false);
+          if (!fileExists) {
+            console.error(`File not found: ${filePath}`);
+            continue;
+          }
+
+          const fileBuffer = await fsPromises.readFile(filePath);
           const fileName = url.split('/').pop() || 'file';
-          archive.append(response.data, { name: fileName });
+          archive.append(fileBuffer, { name: fileName });
         } catch (err) {
-          console.error(`Failed to fetch ${url}`, err);
+          console.error(`Failed to add file ${url} to archive:`, err);
           // Continue with other files
         }
       }

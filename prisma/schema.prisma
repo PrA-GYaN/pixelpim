@@ -361,7 +361,8 @@ model UserIntegrationCredentials {
 
   user          User     @relation("UserIntegrationCredentials", fields: [userId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, integrationType])
+  @@index([userId, integrationType])
+  @@unique([userId, storeUrl])
 }
 
 model Webhook {

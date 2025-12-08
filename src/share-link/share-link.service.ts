@@ -169,18 +169,21 @@ export class ShareLinkService {
     ]);
 
     // Format assets with download URLs
-    const formattedAssets = assets.map((asset) => ({
-      id: asset.id,
-      name: asset.name,
-      fileName: asset.fileName,
-      filePath: asset.filePath,
-      mimeType: asset.mimeType,
-      size: Number(asset.size),
-      uploadDate: asset.uploadDate,
-      url: `${process.env.BASE_URL || 'http://localhost:3000'}/uploads/${this.extractRelativePath(asset.filePath)}`,
-      formattedSize: this.formatBytes(Number(asset.size)),
-      assetGroup: asset.assetGroup,
-    }));
+    const formattedAssets = assets.map((asset) => {
+      const relativePath = this.extractRelativePath(asset.filePath);
+      return {
+        id: asset.id,
+        name: asset.name,
+        fileName: asset.fileName,
+        filePath: asset.filePath,
+        mimeType: asset.mimeType,
+        size: Number(asset.size),
+        uploadDate: asset.uploadDate,
+        url: asset.filePath, // Return relative path, frontend will construct full URL
+        formattedSize: this.formatBytes(Number(asset.size)),
+        assetGroup: asset.assetGroup,
+      };
+    });
 
     const formattedGroups = groups.map((group) => ({
       id: group.id,
@@ -190,16 +193,19 @@ export class ShareLinkService {
       parentGroupId: group.parentGroupId,
       assetCount: group._count.assets,
       childGroupCount: group._count.childGroups,
-      assets: group.assets.map((asset) => ({
-        id: asset.id,
-        name: asset.name,
-        fileName: asset.fileName,
-        mimeType: asset.mimeType,
-        size: Number(asset.size), // Convert BigInt to number
-        uploadDate: asset.uploadDate,
-        url: `${process.env.BASE_URL || 'http://localhost:3000'}/uploads/${this.extractRelativePath(asset.filePath)}`,
-        formattedSize: this.formatBytes(Number(asset.size)),
-      })),
+      assets: group.assets.map((asset) => {
+        return {
+          id: asset.id,
+          name: asset.name,
+          fileName: asset.fileName,
+          filePath: asset.filePath,
+          mimeType: asset.mimeType,
+          size: Number(asset.size), // Convert BigInt to number
+          uploadDate: asset.uploadDate,
+          url: asset.filePath, // Return relative path, frontend will construct full URL
+          formattedSize: this.formatBytes(Number(asset.size)),
+        };
+      }),
       childGroups: group.childGroups.map((child) => ({
         ...child,
         totalSize: Number(child.totalSize || 0), // Convert BigInt to number

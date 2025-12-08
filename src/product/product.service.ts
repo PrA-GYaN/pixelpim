@@ -534,8 +534,55 @@ export class ProductService {
       }
     });
 
+    // Map family: resolve family name to familyId
+    let resolvedFamilyId: number | undefined;
+    let familyAttributes: Array<{ id: number; name: string }> = [];
+    
+    const familyHeader = mapping['family'];
+    if (familyHeader) {
+      const familyValue = row[familyHeader];
+      if (familyValue !== undefined && familyValue !== null && String(familyValue).trim() !== '') {
+        const familyName = String(familyValue).trim();
+        // Look up family by name with its attributes
+        const family = await this.prisma.family.findFirst({
+          where: { 
+            name: familyName, 
+            userId 
+          },
+          select: { 
+            id: true,
+            familyAttributes: {
+              include: {
+                attribute: {
+                  select: {
+                    id: true,
+                    name: true,
+                  }
+                }
+              }
+            }
+          }
+        });
+        
+        if (family) {
+          resolvedFamilyId = family.id;
+          productDto.familyId = family.id;
+          familyAttributes = family.familyAttributes.map(fa => fa.attribute);
+          this.logger.log(`Resolved family "${familyName}" to ID: ${family.id} with ${familyAttributes.length} attributes`);
+        } else {
+          this.logger.warn(`Family "${familyName}" not found - product will be created without family`);
+        }
+      }
+    }
+
     // Map extras (any mapping key other than standard product fields will be treated as an attribute)
-    const attributeEntries: Array<{ attributeId?: number; attributeName?: string; value: string }> = [];
+    // Separate family attributes from custom attributes
+    const familyAttributesWithValues: Array<{ attributeId: number; value: string }> = [];
+    const customAttributeEntries: Array<{ attributeId?: number; attributeName?: string; value: string }> = [];
+    
+    const familyAttributeIds = new Set(familyAttributes.map(fa => fa.id));
+    const familyAttributeNames = new Set(familyAttributes.map(fa => fa.name));
+    
     for (const [key, header] of Object.entries(mapping)) {
       if (!header) continue;
       if (['sku', 'name', 'productLink', 'imageUrl', 'subImages', 'category', 'family', 'parentSku'].includes(key)) continue;
@@ -547,19 +594,38 @@ export class ProductService {
       const value = row[cleanHeader] !== undefined ? row[cleanHeader] : row[header];
       
       console.log(`Mapping attribute "${key}" from column "${header}" (clean: "${cleanHeader}") with raw value:`, value);
-      if (value === undefined || value === null || String(value).trim() === '') continue;
-
+      
       // Extract clean attribute name (strip type suffix from key as well)
       // e.g., "ATTR1 [Paragraph]" -> "ATTR1"
       const cleanAttributeName = key.replace(/\s*\[.*?\]\s*$/, '').trim();
-      attributeEntries.push({ attributeName: cleanAttributeName, value: String(value).trim() });
+      
+      // Check if this is a family attribute
+      const familyAttr = familyAttributes.find(fa => fa.name === cleanAttributeName);
+      
+      if (familyAttr) {
+        // This is a family attribute - always include it (even if empty)
+        const stringValue = (value === undefined || value === null) ? '' : String(value).trim();
+        familyAttributesWithValues.push({ 
+          attributeId: familyAttr.id, 
+          value: stringValue 
+        });
+        console.log(`Added family attribute "${cleanAttributeName}" (ID: ${familyAttr.id}) with value:`, stringValue);
+      } else {
+        // This is a custom attribute - only include if it has a value
+        if (value !== undefined && value !== null && String(value).trim() !== '') {
+          customAttributeEntries.push({ 
+            attributeName: cleanAttributeName, 
+            value: String(value).trim() 
+          });
+        }
+      }
     }
 
-    // Convert attribute names to IDs using prisma; create attributes if missing
-    const attributesWithValues = [] as any[];
-    if (attributeEntries.length > 0) {
+    // Convert custom attribute names to IDs using prisma; create attributes if missing
+    const customAttributesWithValues = [] as any[];
+    if (customAttributeEntries.length > 0) {
       // Batch fetch all attributes at once
-      const attributeNames = attributeEntries.map(a => a.attributeName!);
+      const attributeNames = customAttributeEntries.map(a => a.attributeName!);
       const existingAttributes = await this.prisma.attribute.findMany({
         where: { name: { in: attributeNames }, userId },
       });
@@ -567,7 +633,7 @@ export class ProductService {
       const existingAttrMap = new Map(existingAttributes.map(a => [a.name, a]));
       
       // Process each attribute
-      for (const attr of attributeEntries) {
+      for (const attr of customAttributeEntries) {
         try {
           let attribute = existingAttrMap.get(attr.attributeName!);
           
@@ -579,15 +645,22 @@ export class ProductService {
             existingAttrMap.set(attribute.name, attribute);
           }
           
-          attributesWithValues.push({ attributeId: attribute.id, value: attr.value });
+          customAttributesWithValues.push({ attributeId: attribute.id, value: attr.value });
         } catch (e) {
           this.logger.warn(`Failed creating attribute ${attr.attributeName}: ${e.message}`);
         }
       }
     }
 
-    if (attributesWithValues.length > 0) {
-      productDto.attributesWithValues = attributesWithValues;
+    // Set family attributes with values (these will be used by upsertProductFromCsv)
+    if (familyAttributesWithValues.length > 0) {
+      productDto.familyAttributesWithValues = familyAttributesWithValues;
+      console.log('Family attributes with values:', familyAttributesWithValues);
+    }
+
+    // Set custom attributes with values
+    if (customAttributesWithValues.length > 0) {
+      productDto.attributesWithValues = customAttributesWithValues;
     }
     console.log('Mapped row to CreateProductDto:', productDto);
     return productDto;
@@ -1984,7 +2057,7 @@ export class ProductService {
       let deletedCount = 0;
       for (const id of productIds) {
         try {
-          await this.softDeleteProduct(id, userId, false);
+          await this.permanentlyDeleteProduct(id, userId);
           deletedCount += 1;
         } catch (err) {
           // Ignore per-item failures but log
@@ -2230,6 +2303,7 @@ export class ProductService {
         name: pa.asset.name,
         fileName: pa.asset.fileName,
         filePath: pa.asset.filePath,
+        url: pa.asset.filePath,
         mimeType: pa.asset.mimeType,
         uploadDate: pa.asset.uploadDate,
         size: pa.asset.size !== undefined && pa.asset.size !== null ? pa.asset.size.toString() : null,
@@ -2342,19 +2416,9 @@ export class ProductService {
    */
   private async autoAttachAssetsBySku(productId: number, sku: string, userId: number): Promise<void> {
     try {
-      // Check if product already has a main image
-      const product = await this.prisma.product.findUnique({
-        where: { id: productId },
-        select: { imageUrl: true, subImages: true },
-      });
-
-      const hasMainImage = product?.imageUrl && product.imageUrl.trim() !== '';
-
-      this.logger.log(`Auto-attaching assets for SKU: ${sku} (hasMainImage: ${hasMainImage})`);
-
-      const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'];
+      this.logger.log(`Auto-attaching assets for SKU: ${sku}`);
       
-      // OPTIMIZATION: Query assets that start with SKU
+      // OPTIMIZATION: Query assets that start with SKU, excluding soft-deleted ones
       // Then filter for exact match (SKU only, no suffix) vs pattern match (SKU + identifier)
       const potentialAssets = await this.prisma.asset.findMany({
         where: {
@@ -2377,12 +2441,11 @@ export class ProductService {
       }
 
       // Find exact match for main image (asset name = SKU exactly, ignoring extension)
-      const mainImageAsset = !hasMainImage 
-        ? potentialAssets.find(asset => {
-            const nameWithoutExt = asset.name.replace(/\.[^/.]+$/, '');
-            return nameWithoutExt.toLowerCase() === sku.toLowerCase();
-          })
-        : undefined;
+      // ALWAYS overwrite main image when found
+      const mainImageAsset = potentialAssets.find(asset => {
+        const nameWithoutExt = asset.name.replace(/\.[^/.]+$/, '');
+        return nameWithoutExt.toLowerCase() === sku.toLowerCase();
+      });
 
       if (mainImageAsset) {
         this.logger.log(`Found exact match asset for main image: ${mainImageAsset.name} (ID: ${mainImageAsset.id})`);
@@ -2403,13 +2466,13 @@ export class ProductService {
         });
         this.logger.log(`Attached asset ${mainImageAsset.id} (${mainImageAsset.name}) to product ${productId}`);
 
-        // Set main image
+        // ALWAYS overwrite main image when exact SKU match is found
         await this.prisma.product.update({
           where: { id: productId },
           data: { imageUrl: mainImageAsset.filePath },
         });
         this.logger.log(`Set main image for product ${productId} to asset ${mainImageAsset.id} (${mainImageAsset.name})`);
-      } else if (!hasMainImage) {
+      } else {
         this.logger.log(`No exact match asset found for main image (SKU: ${sku})`);
       }
 
@@ -2447,7 +2510,7 @@ export class ProductService {
     try {
       this.logger.log(`Auto-scanning for filename pattern assets for SKU: ${sku}`);
 
-      // OPTIMIZATION: Query assets that start with SKU
+      // OPTIMIZATION: Query non-deleted assets that start with SKU
       const assets = await this.prisma.asset.findMany({
         where: {
           userId,
@@ -2456,6 +2519,12 @@ export class ProductService {
             startsWith: sku,
             mode: 'insensitive' as any,
           },
+        },
+        select: {
+          id: true,
+          name: true,
+          fileName: true,
+          filePath: true,
         },
         orderBy: {
           createdAt: 'desc',
@@ -2504,7 +2573,7 @@ export class ProductService {
 
           case ImageClassificationType.SUB_IMAGE:
             // Add to subImages if it's an image file, otherwise just attach as asset
-            if (isImage) {
+              if (isImage) {
               subImagesToAdd.push(asset.filePath);
               this.logger.log(`Adding to subImages: ${asset.name}`);
             }
@@ -3169,7 +3238,7 @@ export class ProductService {
         return transformedProduct;
       });
 
-      const filename = exportDto.filename || `products_export_${new Date().toISOString().split('T')[0]}.${exportDto.format || ExportFormat.JSON}`;
+      const filename = exportDto.filename || `products_export_${new Date().toISOString().split('T')[0]}.${String(exportDto.format || ExportFormat.JSON)}`;
 
       this.logger.log(`Successfully exported ${exportData.length} products`);
 
@@ -3403,7 +3472,7 @@ export class ProductService {
           break;
         default:
           // Handle any unknown attributes gracefully
-          this.logger.warn(`Unknown attribute: ${attr}`);
+          this.logger.warn(`Unknown attribute: ${String(attr)}`);
           break;
       }
     });
@@ -4471,8 +4540,7 @@ export class ProductService {
       const product = await this.prisma.product.findFirst({
         where: { 
           id, 
-          userId,
-          isDeleted: true 
+          userId
         },
       });
 

@@ -2,31 +2,35 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { ConfigService } from '@nestjs/config';
+import * as dotenv from 'dotenv';
 
 async function bootstrap() {
+  dotenv.config();
   const app = await NestFactory.create(AppModule);
 
-  // Get the ConfigService instance
   const configService = app.get(ConfigService);
 
-  // Get the CORS_ORIGIN from environment variables
-  const corsOrigin = configService.get<string>('CORS_ORIGIN', '*'); // Default to '*' if not set
+  // Dynamic origin OR allow all
+  const corsOrigin = configService.get<string>('CORS_ORIGIN') || '*';
 
-  // Enable validation pipes globally
-  app.useGlobalPipes(new ValidationPipe({
-    whitelist: true,
-    forbidNonWhitelisted: true,
-    transform: true,
-  }));
-
-  // Enable CORS with dynamic origin from the .env file
   app.enableCors({
     origin: corsOrigin,
-    methods: 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
-    allowedHeaders: 'Content-Type, Authorization',
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: '*', 
     credentials: true,
+    preflightContinue: false,
+    optionsSuccessStatus: 200,
   });
+
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    }),
+  );
 
   await app.listen(process.env.PORT ?? 3000);
 }
+
 bootstrap();

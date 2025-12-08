@@ -119,9 +119,9 @@ export class AttributeValueValidator {
   private readonly validatePhone = (value: any): string => {
     const phoneStr = String(value).trim();
     // Basic phone validation - accepts various formats
-    const phoneRegex = /^[\+]?[1-9][\d]{0,15}$/;
+    const phoneRegex = /^[+]?[1-9][\d]{0,15}$/;
     
-    if (phoneStr && !phoneRegex.test(phoneStr.replace(/[\s\-\(\)]/g, ''))) {
+    if (phoneStr && !phoneRegex.test(phoneStr.replace(/[\s\-()]/g, ''))) {
       throw new BadRequestException(`Invalid phone format: ${phoneStr}`);
     }
     return phoneStr;

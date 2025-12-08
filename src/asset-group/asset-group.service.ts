@@ -6,7 +6,7 @@ import { PaginatedResponse, PaginationUtils } from '../common';
 @Injectable()
 export class AssetGroupService {
   // Utility to recursively convert BigInt values to strings while preserving dates
-  private static convertBigIntToString(obj: any): any {
+  private static convertBigIntToString = (obj: any): any => {
     if (typeof obj === 'bigint') {
       return obj.toString();
     }
@@ -24,7 +24,7 @@ export class AssetGroupService {
       return newObj;
     }
     return obj;
-  }
+  };
 
   constructor(private prisma: PrismaService) {}
 

@@ -126,7 +126,7 @@ export class AmazonController {
     this.logger.log('Received Amazon webhook notification');
 
     // Validate webhook signature
-    const isValid = this.amazonService.validateWebhookSignature(headers, body);
+    const isValid = await this.amazonService.validateWebhookSignature(headers, body);
     
     if (!isValid) {
       this.logger.warn('Invalid webhook signature');

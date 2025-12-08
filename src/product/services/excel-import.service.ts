@@ -229,8 +229,8 @@ export class ExcelImportService {
     // For each family, build attribute definition
     for (const familyName of familyNames) {
       try {
-        // Get family from database
-        const family = await this.prisma.family.findFirst({
+        // STEP 1: Get or create family
+        let family = await this.prisma.family.findFirst({
           where: { name: familyName, userId },
           include: {
             familyAttributes: {
@@ -242,8 +242,22 @@ export class ExcelImportService {
         });
 
         if (!family) {
-          this.logger.warn(`Family "${familyName}" not found in database - products with this family will be created without family assignment`);
-          continue;
+          // Create new family
+          this.logger.log(`Family "${familyName}" not found - creating new family`);
+          family = await this.prisma.family.create({
+            data: {
+              name: familyName,
+              userId,
+            },
+            include: {
+              familyAttributes: {
+                include: {
+                  attribute: true,
+                },
+              },
+            },
+          });
+          this.logger.log(`Created family "${familyName}" with ID: ${family.id}`);
         }
 
         // Find first row with this family
@@ -259,43 +273,96 @@ export class ExcelImportService {
         const firstRowIndex = rows.indexOf(firstRow);
         const firstRowNumber = firstRowIndex + 2; // Excel row number
 
-        // Build attribute definitions based on first row and mapping
+        // STEP 2: Build attribute definitions and create missing attributes
         const attributeDefs: FamilyAttributeDefinition['attributes'] = [];
+        const existingFamilyAttrMap = new Map(
+          family.familyAttributes.map(fa => [fa.attribute.name, fa])
+        );
 
-        // Only consider attributes that are in the user's mapping
+        // Collect all attributes from mapping (excluding standard fields)
+        const attributesToProcess: Array<{
+          fieldName: string;
+          columnHeader: string;
+          cleanName: string;
+          dataType: AttributeDataType;
+          valueInFirstRow: any;
+          hasValue: boolean;
+        }> = [];
+
         for (const [fieldName, columnHeader] of Object.entries(mapping)) {
           // Skip standard fields
           if (['sku', 'name', 'productLink', 'imageUrl', 'subImages', 'category', 'family', 'parentSku'].includes(fieldName)) {
             continue;
           }
 
-          // Get header info to extract clean name
+          // Get header info to extract clean name and data type
           const headerInfo = headers.find(h => h.name === columnHeader || h.cleanName === columnHeader);
           const cleanAttributeName = headerInfo?.cleanName || fieldName;
+          const dataType = headerInfo?.dataType || AttributeDataType.SHORT_TEXT;
 
-          // Check if this attribute exists in the family (compare using clean names)
-          const familyAttr = family.familyAttributes.find(
-            fa => fa.attribute.name === cleanAttributeName
-          );
+          // Get value from first row
+          const valueInFirstRow = firstRow[columnHeader];
+          const hasValue = valueInFirstRow !== null && 
+                         valueInFirstRow !== undefined && 
+                         String(valueInFirstRow).trim() !== '';
 
-          if (familyAttr) {
-            // Get value from first row
-            const valueInFirstRow = firstRow[columnHeader];
-            const hasValue = valueInFirstRow !== null && 
-                           valueInFirstRow !== undefined && 
-                           String(valueInFirstRow).trim() !== '';
+          attributesToProcess.push({
+            fieldName,
+            columnHeader,
+            cleanName: cleanAttributeName,
+            dataType,
+            valueInFirstRow,
+            hasValue,
+          });
+        }
 
-            // Find header to get data type
-            const dataType = headerInfo?.dataType || AttributeDataType.SHORT_TEXT;
+        // STEP 3: Process each attribute - create if missing, add to family if not present
+        for (const attrInfo of attributesToProcess) {
+          // Check if attribute exists globally for this user
+          let attribute = await this.prisma.attribute.findFirst({
+            where: { name: attrInfo.cleanName, userId },
+          });
 
-            attributeDefs.push({
-              attributeId: familyAttr.attribute.id,
-              attributeName: familyAttr.attribute.name,
-              dataType,
-              isRequired: hasValue, // Required if first row has value
-              referenceRow: firstRowNumber,
+          if (!attribute) {
+            // Create new attribute
+            this.logger.log(`Creating new attribute "${attrInfo.cleanName}" for user ${userId}`);
+            attribute = await this.prisma.attribute.create({
+              data: {
+                name: attrInfo.cleanName,
+                type: this.mapDataTypeToAttributeType(attrInfo.dataType),
+                userId,
+              },
             });
           }
+
+          // Check if attribute is already in the family
+          const existingFamilyAttr = existingFamilyAttrMap.get(attribute.name);
+
+          if (!existingFamilyAttr) {
+            // Add attribute to family
+            this.logger.log(`Adding attribute "${attribute.name}" to family "${familyName}" (required: ${attrInfo.hasValue})`);
+            const familyAttribute = await this.prisma.familyAttribute.create({
+              data: {
+                familyId: family.id,
+                attributeId: attribute.id,
+                isRequired: attrInfo.hasValue, // Required if first row has value
+              },
+              include: {
+                attribute: true,
+              },
+            });
+
+            existingFamilyAttrMap.set(attribute.name, familyAttribute);
+          }
+
+          // Add to attribute definitions
+          attributeDefs.push({
+            attributeId: attribute.id,
+            attributeName: attribute.name,
+            dataType: attrInfo.dataType,
+            isRequired: attrInfo.hasValue,
+            referenceRow: firstRowNumber,
+          });
         }
 
         // Store family definition
@@ -314,6 +381,28 @@ export class ExcelImportService {
       } catch (error) {
         this.logger.error(`Error processing family "${familyName}":`, error);
       }
+    }
+  }
+
+  /**
+   * Maps AttributeDataType to Prisma AttributeType enum
+   */
+  private mapDataTypeToAttributeType(dataType: AttributeDataType): string {
+    switch (dataType) {
+      case AttributeDataType.SHORT_TEXT:
+        return 'STRING';
+      case AttributeDataType.LONG_TEXT:
+        return 'TEXT';
+      case AttributeDataType.NUMBER:
+        return 'NUMBER';
+      case AttributeDataType.DECIMAL:
+        return 'DECIMAL';
+      case AttributeDataType.DATE:
+        return 'DATE';
+      case AttributeDataType.BOOLEAN:
+        return 'BOOLEAN';
+      default:
+        return 'STRING';
     }
   }
 
@@ -421,19 +510,19 @@ export class ExcelImportService {
 
     // Image URL (optional)
     const imageUrl = getField('imageUrl', false);
-    if (imageUrl) {
-      const imgStr = String(imageUrl).trim();
-      if (imgStr && !this.isValidUrl(imgStr)) {
-        errors.push({
-          row: rowNumber,
-          field: 'imageUrl',
-          message: 'Image URL must be a valid URL',
-          value: imgStr,
-        });
-      } else if (imgStr) {
-        dto.imageUrl = imgStr;
-      }
-    }
+    // if (imageUrl) {
+    //   const imgStr = String(imageUrl).trim();
+    //   if (imgStr && !this.isValidUrl(imgStr)) {
+    //     errors.push({
+    //       row: rowNumber,
+    //       field: 'imageUrl',
+    //       message: 'Image URL must be a valid URL',
+    //       value: imgStr,
+    //     });
+    //   } else if (imgStr) {
+    //     dto.imageUrl = imgStr;
+    //   }
+    // }
 
     // STEP 2: Resolve Family (optional - can be empty)
     const familyName = getField('family', false);

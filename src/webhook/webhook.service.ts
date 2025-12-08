@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateWebhookDto } from './dto';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class WebhookService {
@@ -48,7 +49,6 @@ export class WebhookService {
     if (!secretKey) return;
 
     // Generate HMAC signature
-    const crypto = require('crypto');
     const signature = crypto
       .createHmac('sha256', secretKey)
       .update(JSON.stringify(payload))

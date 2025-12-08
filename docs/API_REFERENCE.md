@@ -1,6 +1,6 @@
 # API Reference
 
-This document provides detailed information about all available API endpoints in the PixelPim Backend.
+This comprehensive document provides detailed information about all available API endpoints in the PixelPim Backend.
 
 ## Table of Contents
 
@@ -9,18 +9,21 @@ This document provides detailed information about all available API endpoints in
 3. [File Upload & Cloud Storage](#file-upload--cloud-storage)
 4. [Authentication](#authentication)
 5. [Error Responses](#error-responses)
-6. [Endpoints](#endpoints)
+6. [Module Relationships](#module-relationships)
+7. [Endpoints](#endpoints)
    - [Authentication Module](#authentication-module)
+   - [Asset Module](#asset-module)
+   - [Asset Group Module](#asset-group-module)
    - [Attribute Module](#attribute-module)
    - [Attribute Group Module](#attribute-group-module)
    - [Family Module](#family-module)
-   - [Asset Module](#asset-module)
-   - [Asset Group Module](#asset-group-module)
    - [Category Module](#category-module)
    - [Product Module](#product-module)
-7. [Rate Limiting](#rate-limiting)
-8. [Data Types](#data-types)
-9. [Testing with cURL](#testing-with-curl)
+   - [Notification Module](#notification-module)
+   - [Support Module](#support-module)
+8. [Rate Limiting](#rate-limiting)
+9. [Data Types](#data-types)
+10. [Testing with cURL](#testing-with-curl)
 
 ## Base URL
 ```
@@ -64,7 +67,9 @@ For detailed pagination examples, see [PAGINATION_GUIDE.md](./PAGINATION_GUIDE.m
 The API supports file uploads through the Asset Management system with the following features:
 - **File Storage**: Integrated with Cloudinary for cloud-based file storage
 - **File Types**: Supports all common file types (images, documents, videos, etc.)
-- **File Size Limit**: Maximum 50MB per file
+- **File Size Limits**: 
+  - Assets: Maximum 50MB per file
+  - Support Attachments: Maximum 25MB per file (10 files max)
 - **Image Processing**: Automatic thumbnail generation and image optimization
 - **CDN Delivery**: Fast global content delivery through Cloudinary's CDN
 - **Organized Storage**: Files can be organized into Asset Groups for better management
@@ -75,6 +80,15 @@ Most endpoints require authentication via JWT token in the Authorization header:
 ```
 Authorization: Bearer <your-jwt-token>
 ```
+
+**Exceptions:** The following endpoints do NOT require authentication:
+- `POST /auth/send-otp`
+- `POST /auth/verify-otp`
+- `POST /auth/signup`
+- `POST /auth/login`
+- `GET /auth/google`
+- `GET /auth/google/callback`
+- `POST /api/support/tickets`
 
 ## Error Responses
 
@@ -94,8 +108,49 @@ Common HTTP status codes:
 - `400` - Bad Request
 - `401` - Unauthorized
 - `403` - Forbidden
+- `404` - Not Found
 - `409` - Conflict
+- `413` - Payload Too Large
 - `500` - Internal Server Error
+
+## Module Relationships
+
+Understanding the relationships between different modules:
+
+### **ASSETS ←→ ASSET GROUPS** (Many-to-One)
+- Assets belong to asset groups
+- Asset groups can have parent groups (hierarchical structure)
+- Asset groups organize assets into folders
+
+### **ATTRIBUTES ←→ ATTRIBUTE GROUPS** (Many-to-One)
+- Attributes belong to attribute groups
+- Attribute groups organize related attributes
+
+### **FAMILIES ←→ ATTRIBUTES** (Many-to-Many)
+- Families define which attributes products must have
+- Family-Attribute relationship can be required or optional
+- Families provide attribute inheritance for products
+
+### **PRODUCTS ←→ CATEGORIES** (Many-to-One)
+- Products belong to categories
+- Categories can have parent categories (hierarchical structure)
+
+### **PRODUCTS ←→ FAMILIES** (Many-to-One)
+- Products belong to a family
+- Family determines available attributes for the product
+
+### **PRODUCTS ←→ ATTRIBUTES** (Many-to-Many via ProductAttribute)
+- Products have attribute values
+- Each product-attribute has a specific value
+
+### **PRODUCTS ←→ VARIANTS** (One-to-Many)
+- Products can have multiple variants
+- Variants are products with different attribute combinations
+
+### **NOTIFICATIONS → ALL ENTITIES**
+- Tracks create/update/delete actions on all entities
+- Links to entity type and entity ID
+- Provides audit trail and activity log
 
 ## Endpoints
 
@@ -311,32 +366,102 @@ Authorization: Bearer <jwt-token>
 
 ### Attribute Module
 
+#### Get Available Attribute Types
+Retrieve all supported attribute types and their mappings.
+
+**Endpoint:** `GET /attributes/types`
+
+**Authentication:** Required (JWT token)
+
+**Success Response (200):**
+```json
+{
+  "userFriendlyTypes": ["text", "number", "boolean", "date", "select", "multiselect"],
+  "typeMapping": {
+    "text": "String",
+    "number": "Float",
+    "boolean": "Boolean",
+    "date": "DateTime",
+    "select": "String",
+    "multiselect": "String"
+  },
+  "description": "Available attribute types for creating attributes. Use the user-friendly types in your frontend."
+}
+```
+
+---
+
 #### Create Attribute
-Create a new attribute.
+Create a new attribute with specific type and configuration.
 
 **Endpoint:** `POST /attributes`
 
 **Authentication:** Required (JWT token)
 
-**Request Body:**
+**Request Body (Text Attribute):**
 ```json
 {
-  "name": "Brand",
-  "type": "string"
+  "name": "Color",
+  "type": "text",
+  "description": "Product color",
+  "defaultValue": "Black",
+  "isRequired": false,
+  "options": ["Red", "Blue", "Green", "Black", "White"],
+  "attributeGroupId": 1
+}
+```
+
+**Request Body (Number Attribute):**
+```json
+{
+  "name": "Weight",
+  "type": "number",
+  "description": "Product weight in kg",
+  "unit": "kg",
+  "isRequired": true
+}
+```
+
+**Request Body (Boolean Attribute):**
+```json
+{
+  "name": "In Stock",
+  "type": "boolean",
+  "defaultValue": true
+}
+```
+
+**Request Body (Date Attribute):**
+```json
+{
+  "name": "Manufacturing Date",
+  "type": "date",
+  "description": "Date when product was manufactured"
 }
 ```
 
 **Validation Rules:**
 - `name`: Required string, must be unique
-- `type`: Required string (e.g., 'string', 'number', 'boolean', 'date', 'enum')
+- `type`: Required string (text, number, boolean, date, select, multiselect)
+- `description`: Optional string
+- `defaultValue`: Optional (type-appropriate value)
+- `isRequired`: Optional boolean
+- `options`: Optional array (for select/multiselect types)
+- `unit`: Optional string (for number type)
+- `attributeGroupId`: Optional integer
 
 **Success Response (201):**
 ```json
 {
   "id": 1,
-  "name": "Brand",
-  "type": "string",
+  "name": "Color",
+  "type": "text",
+  "description": "Product color",
+  "defaultValue": "Black",
+  "isRequired": false,
+  "options": ["Red", "Blue", "Green", "Black", "White"],
   "userId": 1,
+  "attributeGroupId": 1,
   "createdAt": "2024-01-01T00:00:00.000Z",
   "updatedAt": "2024-01-01T00:00:00.000Z"
 }
@@ -344,38 +469,155 @@ Create a new attribute.
 
 **Error Responses:**
 - `409 Conflict` - Attribute with this name already exists
-- `400 Bad Request` - Invalid attribute type
+- `400 Bad Request` - Invalid attribute type or validation error
 
 ---
 
 #### Get All Attributes
-Retrieve all attributes for the authenticated user.
+Retrieve all attributes with advanced filtering and pagination.
 
 **Endpoint:** `GET /attributes`
 
 **Authentication:** Required (JWT token)
 
+**Query Parameters:**
+- `page`: Number (default: 1) - Page number
+- `limit`: Number (default: 10) - Items per page
+- `type`: String (optional) - Filter by attribute type
+- `attributeGroupId`: Number (optional) - Filter by attribute group
+- `isRequired`: Boolean (optional) - Filter by required status
+- `search`: String (optional) - Search in attribute name
+- `sortBy`: String (optional) - Field to sort by (name, type, createdAt)
+- `sortOrder`: String (optional) - Sort order (asc, desc)
+
+**Examples:**
+```
+GET /attributes?page=1&limit=10
+GET /attributes?type=text&attributeGroupId=1
+GET /attributes?isRequired=true&search=color&sortBy=name
+```
+
 **Success Response (200):**
 ```json
-[
-  {
-    "id": 1,
-    "name": "Brand",
-    "type": "string",
-    "userId": 1,
-    "createdAt": "2024-01-01T00:00:00.000Z",
-    "updatedAt": "2024-01-01T00:00:00.000Z"
-  },
-  {
-    "id": 2,
-    "name": "Price",
-    "type": "number",
-    "userId": 1,
-    "createdAt": "2024-01-01T00:00:00.000Z",
-    "updatedAt": "2024-01-01T00:00:00.000Z"
+{
+  "data": [
+    {
+      "id": 1,
+      "name": "Brand",
+      "type": "text",
+      "description": "Product brand",
+      "defaultValue": null,
+      "isRequired": false,
+      "options": [],
+      "userId": 1,
+      "attributeGroupId": 1,
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    },
+    {
+      "id": 2,
+      "name": "Price",
+      "type": "number",
+      "description": "Product price",
+      "unit": "USD",
+      "isRequired": true,
+      "userId": 1,
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 10,
+    "total": 45,
+    "totalPages": 5,
+    "hasNext": true,
+    "hasPrev": false
   }
-]
+}
 ```
+
+---
+
+#### Get Attributes with Product Counts
+Retrieve attributes with count of products using each attribute.
+
+**Endpoint:** `GET /attributes/with-product-counts`
+
+**Authentication:** Required (JWT token)
+
+**Query Parameters:**
+- `page`: Number (default: 1) - Page number
+- `limit`: Number (default: 20) - Items per page
+
+**Success Response (200):**
+```json
+{
+  "data": [
+    {
+      "id": 1,
+      "name": "Brand",
+      "type": "text",
+      "productCount": 25,
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 20,
+    "total": 45,
+    "totalPages": 3,
+    "hasNext": true,
+    "hasPrev": false
+  }
+}
+```
+
+---
+
+#### Get All Attribute Groups
+Retrieve attribute groups with filtering.
+
+**Endpoint:** `GET /attributes/groups`
+
+**Authentication:** Required (JWT token)
+
+**Query Parameters:**
+- `search`: String (optional) - Search in group name
+- `sortBy`: String (optional) - Field to sort by (name, createdAt)
+- `sortOrder`: String (optional) - Sort order (asc, desc)
+
+**Example:** `GET /attributes/groups?search=technical&sortBy=name`
+
+**Success Response (200):**
+Returns array of attribute groups with their attributes.
+
+---
+
+#### Get Attribute Suggestions
+Get autocomplete suggestions for attribute values based on existing product data.
+
+**Endpoint:** `GET /attributes/attribute-suggestions`
+
+**Authentication:** Required (JWT token)
+
+**Query Parameters:**
+- `productId`: Number (required) - Product ID
+- `attributeId`: Number (required) - Attribute ID
+- `query`: String (required) - Search query (minimum 2 characters)
+
+**Example:** `GET /attributes/attribute-suggestions?productId=1&attributeId=1&query=Bl`
+
+**Success Response (200):**
+```json
+{
+  "suggestions": ["Black", "Blue", "Blush Pink"]
+}
+```
+
+**Error Responses:**
+- `400 Bad Request` - Query must be at least 2 characters
 
 ---
 
@@ -1130,6 +1372,73 @@ Remove an attribute from a family.
 
 ### Asset Module
 
+The Asset Management system provides comprehensive digital asset management with advanced filtering, hierarchical organization, and cloud storage integration. Assets can be organized into groups (folders) with support for nested hierarchies.
+
+#### Asset Filtering Capabilities
+
+The asset API supports extensive filtering options for efficient asset discovery and management:
+
+**Search & Text Filters:**
+- **search**: Case-insensitive search across asset names and filenames
+- **mimeType**: Filter by file type (e.g., `image/jpeg`, `application/pdf`, `video/mp4`)
+
+**Size-Based Filters:**
+- **minSize**: Minimum file size in bytes
+- **maxSize**: Maximum file size in bytes
+
+**Date-Based Filters:**
+- **createdAfter**: Assets created after specified date (ISO 8601)
+- **createdBefore**: Assets created before specified date (ISO 8601)
+- **dateFilter**: Quick filters (`latest` for newest first, `oldest` for oldest first)
+
+**Relationship Filters:**
+- **hasGroup**: Filter assets by group membership (`true` for grouped, `false` for ungrouped)
+- **assetGroupId**: Filter assets within a specific group
+
+**Sorting Options:**
+- **sortBy**: Fields include `name`, `fileName`, `size`, `createdAt`, `updatedAt`
+- **sortOrder**: `asc` (ascending) or `desc` (descending, default)
+
+**Asset Group Filtering Capabilities:**
+
+Asset groups support similar comprehensive filtering for organizational management:
+
+**Search & Content Filters:**
+- **search**: Case-insensitive search in group names
+- **hasAssets**: Filter groups by asset presence (`true` for groups with assets, `false` for empty groups)
+- **minAssets**: Minimum number of assets in groups
+- **maxAssets**: Maximum number of assets in groups
+
+**Size-Based Filters:**
+- **minSize**: Minimum total size of all assets in groups (bytes)
+- **maxSize**: Maximum total size of all assets in groups (bytes)
+
+**Date-Based Filters:**
+- **createdAfter**: Groups created after specified date
+- **createdBefore**: Groups created before specified date
+- **dateFilter**: Quick date filters (`latest`, `oldest`)
+
+**Sorting Options:**
+- **sortBy**: Fields include `groupName`, `createdAt`, `updatedAt`, `totalSize`
+- **sortOrder**: `asc` or `desc` (default: `desc`)
+
+#### File Upload & Storage
+
+Assets are uploaded to cloud storage (Cloudinary) with automatic optimization:
+- **Maximum file size**: 50MB per asset
+- **Supported formats**: All common file types (images, documents, videos, etc.)
+- **Automatic processing**: Thumbnail generation and image optimization
+- **CDN delivery**: Fast global content delivery
+- **Organized storage**: Hierarchical group structure for asset organization
+
+#### Export Capabilities
+
+Assets can be exported in multiple formats:
+- **JSON export**: Structured data export with full metadata
+- **XML export**: Alternative format for system integrations
+- **ZIP download**: Bulk download of multiple assets
+- **Filtered exports**: Export only assets matching specific criteria
+
 #### Upload Asset
 Upload a new asset file to the system.
 
@@ -1194,44 +1503,93 @@ curl -X POST http://localhost:3000/assets/upload \
 ---
 
 #### Get All Assets
-Retrieve all assets for the authenticated user with optional filtering by asset group.
+Retrieve all assets with advanced filtering, sorting, and pagination.
 
 **Endpoint:** `GET /assets`
 
 **Authentication:** Required (JWT token)
 
 **Query Parameters:**
+- `page`: Number (default: 1) - Page number
+- `limit`: Number (default: 10) - Items per page (maximum: 100)
 - `assetGroupId`: Number (optional) - Filter by asset group ID
+- `search`: String (optional) - Search in asset name or file name (case-insensitive)
+- `mimeType`: String (optional) - Filter by MIME type (e.g., image/jpeg, application/pdf)
+- `minSize`: Number (optional) - Minimum file size in bytes
+- `maxSize`: Number (optional) - Maximum file size in bytes
+- `createdAfter`: String (optional) - Filter assets created after date (ISO 8601 format: YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss.sssZ)
+- `createdBefore`: String (optional) - Filter assets created before date (ISO 8601 format)
+- `sortBy`: String (optional) - Field to sort by (name, fileName, size, createdAt, updatedAt)
+- `sortOrder`: String (optional) - Sort order (asc, desc) - default: desc
+- `hasGroup`: Boolean (optional) - Filter by assets with/without group (true, false)
+- `dateFilter`: String (optional) - Quick date filter (latest, oldest)
 
-**Example:** `GET /assets?assetGroupId=1`
+**Examples:**
+```
+GET /assets?page=1&limit=10
+GET /assets?assetGroupId=1&search=product
+GET /assets?mimeType=image/jpeg&sortBy=size&sortOrder=desc
+GET /assets?minSize=1000&maxSize=5000000&hasGroup=true
+GET /assets?createdAfter=2024-01-01&dateFilter=latest
+GET /assets?search=logo&hasGroup=false&sortBy=name&sortOrder=asc
+GET /assets?mimeType=image&minSize=500000&createdAfter=2024-06-01&sortBy=size&sortOrder=desc
+```
+
+**Advanced Filtering Examples:**
+```bash
+# Complex filtering: Images + Size + Date + Group membership
+GET /assets?mimeType=image&minSize=1000000&maxSize=10000000&hasGroup=true&createdAfter=2024-01-01&sortBy=size&sortOrder=desc
+
+# Search with multiple criteria
+GET /assets?search=banner&mimeType=image&hasGroup=false&dateFilter=latest
+
+# Large file detection
+GET /assets?minSize=50000000&sortBy=size&sortOrder=desc
+
+# Recent uploads
+GET /assets?createdAfter=2024-10-01&sortBy=createdAt&sortOrder=desc
+
+# Assets without groups (orphaned assets)
+GET /assets?hasGroup=false&page=1&limit=50
+```
 
 **Success Response (200):**
 ```json
-[
-  {
-    "id": 1,
-    "name": "Product Image 1",
-    "fileName": "product-image.jpg",
-    "filePath": "assets/product-image_abc123",
-    "mimeType": "image/jpeg",
-    "uploadDate": "2024-01-01T00:00:00.000Z",
-    "size": 1048576,
-    "userId": 1,
-    "assetGroupId": 1,
-    "createdAt": "2024-01-01T00:00:00.000Z",
-    "updatedAt": "2024-01-01T00:00:00.000Z",
-    "assetGroup": {
+{
+  "data": [
+    {
       "id": 1,
-      "groupName": "Product Images",
-      "createdDate": "2024-01-01T00:00:00.000Z",
-      "totalSize": 2097152,
-      "userId": 1
-    },
-    "url": "https://res.cloudinary.com/your-cloud/image/upload/v123456789/assets/product-image_abc123.jpg",
-    "thumbnailUrl": "https://res.cloudinary.com/your-cloud/image/upload/c_thumb,w_150,h_150/assets/product-image_abc123.jpg",
-    "formattedSize": "1.0 MB"
+      "name": "Product Image 1",
+      "fileName": "product-image.jpg",
+      "filePath": "assets/product-image_abc123",
+      "mimeType": "image/jpeg",
+      "uploadDate": "2024-01-01T00:00:00.000Z",
+      "size": 1048576,
+      "userId": 1,
+      "assetGroupId": 1,
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z",
+      "assetGroup": {
+        "id": 1,
+        "groupName": "Product Images",
+        "createdDate": "2024-01-01T00:00:00.000Z",
+        "totalSize": 2097152,
+        "userId": 1
+      },
+      "url": "https://res.cloudinary.com/your-cloud/image/upload/v123456789/assets/product-image_abc123.jpg",
+      "thumbnailUrl": "https://res.cloudinary.com/your-cloud/image/upload/c_thumb,w_150,h_150/assets/product-image_abc123.jpg",
+      "formattedSize": "1.0 MB"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 10,
+    "total": 150,
+    "totalPages": 15,
+    "hasNext": true,
+    "hasPrev": false
   }
-]
+}
 ```
 
 ---
@@ -1290,6 +1648,7 @@ Delete an asset and remove it from cloud storage.
 **Authentication:** Required (JWT token)
 
 **Parameters:**
+- `id`: Asset ID (integer)
 
 **Success Response (200):**
 ```json
@@ -1299,6 +1658,100 @@ Delete an asset and remove it from cloud storage.
 ```
 
 **Error Responses:**
+- `404 Not Found` - Asset not found
+- `403 Forbidden` - You can only access your own assets
+
+---
+
+#### Export Assets as JSON
+Export all assets or filtered assets as JSON.
+
+**Endpoint:** `GET /assets/export/json`
+
+**Authentication:** Required (JWT token)
+
+**Query Parameters:**
+- `assetGroupId`: Number (optional) - Filter by asset group ID
+
+**Example:** `GET /assets/export/json?assetGroupId=1`
+
+**Success Response (200):**
+Returns JSON array of assets with full details.
+
+---
+
+#### Export Assets (JSON/XML)
+Export assets in specified format with filtering options.
+
+**Endpoint:** `POST /assets/export`
+
+**Authentication:** Required (JWT token)
+
+**Request Body:**
+```json
+{
+  "format": "json",
+  "assetGroupId": 1,
+  "filters": {
+    "mimeType": "image/jpeg",
+    "search": "product"
+  },
+  "includeMetadata": true
+}
+```
+
+**Parameters:**
+- `format`: String (required) - Export format (json, xml)
+- `assetGroupId`: Number (optional) - Filter by asset group
+- `filters`: Object (optional) - Additional filters
+- `includeMetadata`: Boolean (optional) - Include full metadata
+
+**Success Response (200):**
+Returns file download with appropriate content type:
+- JSON: `application/json`
+- XML: `application/xml`
+
+**Response Headers:**
+```
+Content-Type: application/json (or application/xml)
+Content-Disposition: attachment; filename="assets-export-[timestamp].json"
+```
+
+---
+
+#### Download Multiple Assets as ZIP
+Download selected assets as a ZIP file.
+
+**Endpoint:** `POST /assets/zip`
+
+**Authentication:** Required (JWT token)
+
+**Request Body:**
+```json
+{
+  "files": [
+    "/uploads/assets/file1.jpg",
+    "/uploads/assets/file2.png",
+    "/uploads/assets/file3.pdf"
+  ]
+}
+```
+
+**Parameters:**
+- `files`: Array of strings (required) - File paths to include in ZIP
+
+**Success Response (200):**
+Returns ZIP file download.
+
+**Response Headers:**
+```
+Content-Type: application/zip
+Content-Disposition: attachment; filename="my-assets.zip"
+```
+
+**Error Responses:**
+- `400 Bad Request` - No files specified or invalid file paths
+- `404 Not Found` - One or more files not found
 
 ---
 
@@ -1337,8 +1790,28 @@ Attach multiple assets to an asset group by passing an array of asset IDs.
 
 ### Asset Group Module
 
+Asset groups support hierarchical organization with parent-child relationships, allowing nested folder structures for better asset management. Groups can contain assets and can be nested up to multiple levels deep.
+
+#### Hierarchical Organization
+
+**Root Groups**: Top-level groups without a parent (`parentGroupId: null`)
+**Child Groups**: Nested groups belonging to a parent group
+**Asset Assignment**: Assets can be assigned to any group level
+**Inheritance**: Child groups inherit organizational context from parents
+
+**Hierarchy Navigation:**
+- `GET /asset-groups` - Retrieve all root groups
+- `GET /asset-groups/:parentId/children` - Get child groups of a specific parent
+- `GET /asset-groups/:id/assets` - Get assets within a specific group
+
+**Asset Group Management:**
+- Groups can be created, updated, and deleted
+- Assets can be attached to groups in bulk
+- Deleting a group unassigns assets (doesn't delete them)
+- Hierarchical filtering supports all group levels
+
 #### Create Asset Group
-Create a new asset group for organizing assets.
+Create a new asset group (folder) for organizing assets. Supports nested groups via `parentGroupId`.
 
 **Endpoint:** `POST /asset-groups`
 
@@ -1347,18 +1820,33 @@ Create a new asset group for organizing assets.
 **Request Body:**
 ```json
 {
-  "groupName": "Product Images"
+  "name": "Product Images",
+  "description": "Images for product catalog",
+  "parentGroupId": null
+}
+```
+
+**Request Body (Create Sub-Group):**
+```json
+{
+  "name": "Electronics",
+  "description": "Electronics product images",
+  "parentGroupId": 1
 }
 ```
 
 **Validation Rules:**
-- `groupName`: Required string, must be unique per user
+- `name`: Required string, must be unique per user
+- `description`: Optional string
+- `parentGroupId`: Optional integer (parent group ID for nested structure)
 
 **Success Response (201):**
 ```json
 {
   "id": 1,
-  "groupName": "Product Images",
+  "name": "Product Images",
+  "description": "Images for product catalog",
+  "parentGroupId": null,
   "createdDate": "2024-01-01T00:00:00.000Z",
   "totalSize": 0,
   "userId": 1,
@@ -1372,33 +1860,143 @@ Create a new asset group for organizing assets.
 
 **Error Responses:**
 - `409 Conflict` - Asset group with this name already exists
+- `404 Not Found` - Parent group not found
 
 ---
 
-#### Get All Asset Groups
-Retrieve all asset groups for the authenticated user with asset counts.
+#### Get All Root Asset Groups
+Retrieve all root-level asset groups (no parent) with advanced filtering, sorting, and pagination.
 
 **Endpoint:** `GET /asset-groups`
 
 **Authentication:** Required (JWT token)
 
+**Query Parameters:**
+- `page`: Number (default: 1) - Page number
+- `limit`: Number (default: 10) - Items per page (maximum: 100)
+- `search`: String (optional) - Search in group name (case-insensitive)
+- `minAssets`: Number (optional) - Minimum number of assets in group
+- `maxAssets`: Number (optional) - Maximum number of assets in group
+- `minSize`: Number (optional) - Minimum total size of assets in group (bytes)
+- `maxSize`: Number (optional) - Maximum total size of assets in group (bytes)
+- `createdAfter`: String (optional) - Filter groups created after date (ISO 8601 format)
+- `createdBefore`: String (optional) - Filter groups created before date (ISO 8601 format)
+- `sortBy`: String (optional) - Field to sort by (groupName, createdAt, updatedAt, totalSize)
+- `sortOrder`: String (optional) - Sort order (asc, desc) - default: desc
+- `dateFilter`: String (optional) - Quick date filter (latest, oldest)
+- `hasAssets`: Boolean (optional) - Filter groups with/without assets (true, false)
+
+**Examples:**
+```
+GET /asset-groups?page=1&limit=10
+GET /asset-groups?search=product&sortBy=groupName&sortOrder=asc
+GET /asset-groups?minAssets=5&maxAssets=100&hasAssets=true
+GET /asset-groups?minSize=1000000&maxSize=100000000&sortBy=totalSize&sortOrder=desc
+GET /asset-groups?createdAfter=2024-01-01&dateFilter=latest
+GET /asset-groups?search=marketing&hasAssets=true&minAssets=10&sortBy=groupName&sortOrder=asc
+```
+
+**Advanced Filtering Examples:**
+```bash
+# Large groups with many assets
+GET /asset-groups?minAssets=50&minSize=50000000&sortBy=totalSize&sortOrder=desc
+
+# Recently created groups with assets
+GET /asset-groups?hasAssets=true&createdAfter=2024-06-01&sortBy=createdAt&sortOrder=desc
+
+# Empty groups (for cleanup)
+GET /asset-groups?hasAssets=false&sortBy=groupName&sortOrder=asc
+
+# Groups in size range
+GET /asset-groups?minSize=100000&maxSize=10000000&sortBy=totalSize&sortOrder=desc
+
+# Search with asset count filter
+GET /asset-groups?search=brand&minAssets=1&maxAssets=20&hasAssets=true
+```
+
 **Success Response (200):**
 ```json
-[
-  {
-    "id": 1,
-    "groupName": "Product Images",
-    "createdDate": "2024-01-01T00:00:00.000Z",
-    "totalSize": 2097152,
-    "userId": 1,
-    "createdAt": "2024-01-01T00:00:00.000Z",
-    "updatedAt": "2024-01-01T00:00:00.000Z",
-    "_count": {
-      "assets": 5
+{
+  "data": [
+    {
+      "id": 1,
+      "name": "Product Images",
+      "description": "Images for product catalog",
+      "parentGroupId": null,
+      "createdDate": "2024-01-01T00:00:00.000Z",
+      "totalSize": 2097152,
+      "userId": 1,
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z",
+      "_count": {
+        "assets": 5
+      }
     }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 10,
+    "total": 25,
+    "totalPages": 3,
+    "hasNext": true,
+    "hasPrev": false
   }
-]
+}
 ```
+
+---
+
+#### Get Children of Asset Group
+Retrieve all child groups (sub-folders) of a specific asset group with advanced filtering, sorting, and pagination.
+
+**Endpoint:** `GET /asset-groups/:parentId/children`
+
+**Authentication:** Required (JWT token)
+
+**Parameters:**
+- `parentId`: Parent Asset Group ID (integer)
+
+**Query Parameters:**
+- `page`: Number (default: 1) - Page number
+- `limit`: Number (default: 10) - Items per page (maximum: 100)
+- `search`: String (optional) - Search in group name (case-insensitive)
+- `minAssets`: Number (optional) - Minimum number of assets in child groups
+- `maxAssets`: Number (optional) - Maximum number of assets in child groups
+- `minSize`: Number (optional) - Minimum total size of assets in child groups (bytes)
+- `maxSize`: Number (optional) - Maximum total size of assets in child groups (bytes)
+- `createdAfter`: String (optional) - Filter child groups created after date (ISO 8601 format)
+- `createdBefore`: String (optional) - Filter child groups created before date (ISO 8601 format)
+- `sortBy`: String (optional) - Field to sort by (groupName, createdAt, updatedAt, totalSize)
+- `sortOrder`: String (optional) - Sort order (asc, desc) - default: desc
+- `dateFilter`: String (optional) - Quick date filter (latest, oldest)
+- `hasAssets`: Boolean (optional) - Filter child groups with/without assets (true, false)
+
+**Examples:**
+```
+GET /asset-groups/1/children?page=1&limit=10
+GET /asset-groups/1/children?search=electronics&sortBy=name
+GET /asset-groups/1/children?hasAssets=true&minAssets=5&sortBy=totalSize&sortOrder=desc
+GET /asset-groups/1/children?createdAfter=2024-01-01&dateFilter=latest
+```
+
+**Advanced Filtering Examples:**
+```bash
+# Child groups with substantial content
+GET /asset-groups/1/children?hasAssets=true&minAssets=10&minSize=1000000&sortBy=totalSize&sortOrder=desc
+
+# Recently created child groups
+GET /asset-groups/1/children?createdAfter=2024-06-01&sortBy=createdAt&sortOrder=desc
+
+# Search within child groups
+GET /asset-groups/1/children?search=product&hasAssets=true&sortBy=groupName&sortOrder=asc
+```
+
+**Success Response (200):**
+Returns paginated list of child asset groups (same format as "Get All Root Asset Groups").
+
+**Error Responses:**
+- `404 Not Found` - Parent asset group not found
+- `403 Forbidden` - You can only access your own asset groups
 
 ---
 
@@ -1435,7 +2033,7 @@ Retrieve a specific asset group by its ID.
 ---
 
 #### Get Assets in Group
-Retrieve all assets within a specific asset group.
+Retrieve all assets within a specific asset group with advanced filtering, sorting, and pagination.
 
 **Endpoint:** `GET /asset-groups/:id/assets`
 
@@ -1444,8 +2042,42 @@ Retrieve all assets within a specific asset group.
 **Parameters:**
 - `id`: Asset Group ID (integer)
 
+**Query Parameters:**
+- `page`: Number (default: 1) - Page number
+- `limit`: Number (default: 10) - Items per page (maximum: 100)
+- `search`: String (optional) - Search in asset name or file name (case-insensitive)
+- `mimeType`: String (optional) - Filter by MIME type (e.g., image/jpeg, application/pdf)
+- `minSize`: Number (optional) - Minimum file size in bytes
+- `maxSize`: Number (optional) - Maximum file size in bytes
+- `sortBy`: String (optional) - Field to sort by (name, fileName, size, createdAt, updatedAt)
+- `sortOrder`: String (optional) - Sort order (asc, desc) - default: desc
+
+**Examples:**
+```
+GET /asset-groups/1/assets?page=1&limit=20
+GET /asset-groups/1/assets?mimeType=image/png&sortBy=name
+GET /asset-groups/1/assets?search=product&minSize=1000
+GET /asset-groups/1/assets?mimeType=image&sortBy=size&sortOrder=desc
+GET /asset-groups/1/assets?search=logo&minSize=50000&maxSize=2000000&sortBy=createdAt&sortOrder=desc
+```
+
+**Advanced Filtering Examples:**
+```bash
+# Large images in group
+GET /asset-groups/1/assets?mimeType=image&minSize=100000&sortBy=size&sortOrder=desc
+
+# Search for specific assets within group
+GET /asset-groups/1/assets?search=banner&sortBy=name&sortOrder=asc
+
+# Filter by file type and size range
+GET /asset-groups/1/assets?mimeType=application/pdf&minSize=10000&maxSize=5000000
+
+# Recently added assets in group
+GET /asset-groups/1/assets?sortBy=createdAt&sortOrder=desc&page=1&limit=10
+```
+
 **Success Response (200):**
-Array of assets (same format as Get All Assets response).
+Returns paginated list of assets (same format as "Get All Assets" response).
 
 **Error Responses:**
 - `404 Not Found` - Asset group not found
@@ -1500,6 +2132,197 @@ Delete an asset group (assets within the group will be unassigned, not deleted).
 **Error Responses:**
 - `404 Not Found` - Asset group not found
 - `403 Forbidden` - You can only access your own asset groups
+
+---
+
+### Notification Module
+
+The Notification module tracks all system activities and changes across different entities.
+
+#### Get All Notifications
+Retrieve notifications with filtering options.
+
+**Endpoint:** `GET /notifications`
+
+**Authentication:** Required (JWT token)
+
+**Query Parameters:**
+- `page`: Page number (default: 1)
+- `limit`: Number of items per page (default: 20)
+- `entityType`: Filter by entity type (product, asset, category, family, attribute, attributeGroup, assetGroup, productVariant, productAttribute)
+- `action`: Filter by action type (created, updated, deleted, bulk_created, bulk_updated, bulk_deleted, linked, unlinked)
+
+**Examples:**
+```
+GET /notifications?page=1&limit=20
+GET /notifications?entityType=product&action=created
+GET /notifications?entityType=asset&action=deleted&page=1&limit=10
+```
+
+**Success Response (200):**
+```json
+{
+  "data": [
+    {
+      "id": 1,
+      "entityType": "product",
+      "entityId": 15,
+      "action": "created",
+      "entityName": "iPhone 15 Pro",
+      "message": "Product 'iPhone 15 Pro' was created",
+      "metadata": {
+        "sku": "IPHONE15PRO128",
+        "categoryId": 3
+      },
+      "createdAt": "2024-01-01T00:00:00.000Z"
+    },
+    {
+      "id": 2,
+      "entityType": "asset",
+      "entityId": 23,
+      "action": "updated",
+      "entityName": "Product Image",
+      "message": "Asset 'Product Image' was updated",
+      "metadata": {
+        "fileName": "product-image.jpg",
+        "size": 1048576
+      },
+      "createdAt": "2024-01-01T00:00:00.000Z"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 20,
+    "total": 150,
+    "totalPages": 8,
+    "hasNext": true,
+    "hasPrev": false
+  }
+}
+```
+
+---
+
+#### Get Notification Statistics
+Retrieve aggregated statistics about notifications.
+
+**Endpoint:** `GET /notifications/stats`
+
+**Authentication:** Required (JWT token)
+
+**Success Response (200):**
+```json
+{
+  "totalNotifications": 150,
+  "byEntityType": {
+    "product": 45,
+    "asset": 32,
+    "category": 18,
+    "family": 12,
+    "attribute": 25,
+    "assetGroup": 8,
+    "attributeGroup": 10,
+    "productVariant": 5,
+    "productAttribute": 3
+  },
+  "byAction": {
+    "created": 65,
+    "updated": 52,
+    "deleted": 33,
+    "bulk_created": 10,
+    "bulk_updated": 8,
+    "bulk_deleted": 5,
+    "linked": 12,
+    "unlinked": 7
+  },
+  "recentActivity": 12
+}
+```
+
+---
+
+#### Cleanup Old Notifications
+Delete notifications older than the retention period (default: 90 days).
+
+**Endpoint:** `DELETE /notifications/cleanup`
+
+**Authentication:** Required (JWT token)
+
+**Success Response (200):**
+```json
+{
+  "message": "Successfully deleted 45 old notifications",
+  "deletedCount": 45
+}
+```
+
+---
+
+### Support Module
+
+The Support module handles customer support tickets with file attachment support.
+
+#### Create Support Ticket
+Submit a new support ticket with optional file attachments.
+
+**Endpoint:** `POST /api/support/tickets`
+
+**Authentication:** Not required
+
+**Content-Type:** `multipart/form-data` (if including attachments) or `application/json`
+
+**Request Body (JSON):**
+```json
+{
+  "name": "John Doe",
+  "email": "john.doe@example.com",
+  "subject": "Cannot upload assets",
+  "message": "I'm experiencing issues when trying to upload large image files. The upload fails after 50%.",
+  "category": "technical"
+}
+```
+
+**Request Body (Multipart with Attachments):**
+- `name`: String (required) - User's name
+- `email`: String (required) - Valid email address
+- `subject`: String (required) - Ticket subject
+- `message`: String (required) - Detailed description
+- `category`: String (optional) - Ticket category (technical, billing, general, etc.)
+- `attachments`: File[] (optional) - Up to 10 files, max 25MB each
+
+**Supported File Types for Attachments:**
+- Images: PNG, JPG, JPEG, WEBP
+- Documents: PDF
+- Spreadsheets: CSV, XLSX, XLS
+
+**Example with cURL:**
+```bash
+curl -X POST http://localhost:3000/api/support/tickets \
+  -F "name=Jane Smith" \
+  -F "email=jane.smith@example.com" \
+  -F "subject=Error Screenshots" \
+  -F "message=Please see attached screenshots of the error." \
+  -F "category=bug" \
+  -F "attachments=@/path/to/screenshot1.png" \
+  -F "attachments=@/path/to/screenshot2.png"
+```
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "Support ticket submitted successfully. We'll get back to you soon!",
+  "ticketId": "TICKET-20240101-001"
+}
+```
+
+**Error Responses:**
+- `400 Bad Request` - Invalid submission detected (spam/bot detection)
+- `400 Bad Request` - Invalid file type
+- `413 Payload Too Large` - File exceeds 25MB limit
+- `500 Internal Server Error` - Failed to submit support ticket
+
+---
 
 ## Rate Limiting
 
@@ -1666,6 +2489,20 @@ Currently, no rate limiting is implemented. For production deployment, consider 
   parentCategory: Category | null;
   subcategories: Category[];
   productCount?: number; // Available in some endpoints
+}
+```
+
+### Notification Object
+```typescript
+{
+  id: number;
+  entityType: string; // 'product', 'asset', 'category', 'family', 'attribute', 'attributeGroup', 'assetGroup', 'productVariant', 'productAttribute'
+  entityId: number | null;
+  action: string; // 'created', 'updated', 'deleted', 'bulk_created', 'bulk_updated', 'bulk_deleted', 'linked', 'unlinked'
+  entityName: string | null;
+  message: string;
+  metadata: any; // Additional context data (optional)
+  createdAt: string; // ISO 8601 date string
 }
 ```
 
@@ -1969,10 +2806,12 @@ Create a new product.
   "sku": "IPHONE15PRO128",
   "productLink": "https://apple.com/iphone-15-pro",
   "imageUrl": "https://example.com/images/iphone15pro.jpg",
+  "subImages": ["https://example.com/img1.jpg", "https://example.com/img2.jpg"],
   "status": "complete",
   "categoryId": 3,
   "attributeGroupId": 1,
   "familyId": 1,
+  "parentSku": "IPHONE15PRO",
   "familyAttributesWithValues": [
     {
       "attributeId": 10,
@@ -1997,10 +2836,12 @@ Create a new product.
 - `sku`: Required string, must be unique per user
 - `productLink`: Optional valid URL
 - `imageUrl`: Optional valid URL
+- `subImages`: Optional array of valid URLs
 - `status`: Optional string ("complete" or "incomplete", default: "incomplete")
 - `categoryId`: Optional integer (must belong to user)
 - `attributeGroupId`: Optional integer (must belong to user)
 - `familyId`: Optional integer (must belong to user)
+- `parentSku`: Optional string (4-40 characters) - Creates product as variant of parent product with this SKU
 - `familyAttributesWithValues`: Optional array of family attribute values (requires familyId)
 - `attributesWithValues`: Optional array of regular attribute values
 
@@ -2014,7 +2855,6 @@ Create a new product.
   "imageUrl": "https://example.com/images/iphone15pro.jpg",
   "status": "complete",
   "categoryId": 3,
-  "attributeId": 1,
   "attributeGroupId": 1,
   "familyId": 1,
   "userId": 1,
@@ -2024,12 +2864,6 @@ Create a new product.
     "id": 3,
     "name": "iPhone",
     "description": "Apple iPhone devices"
-  },
-  "attribute": {
-    "id": 1,
-    "name": "Brand",
-    "type": "string",
-    "defaultValue": null
   },
   "attributeGroup": {
     "id": 1,
@@ -2079,7 +2913,6 @@ Retrieve all products with filtering options.
     "imageUrl": "https://example.com/images/iphone15pro.jpg",
     "status": "complete",
     "categoryId": 3,
-    "attributeId": 1,
     "attributeGroupId": 1,
     "familyId": 1,
     "userId": 1,
@@ -2089,12 +2922,6 @@ Retrieve all products with filtering options.
       "id": 3,
       "name": "iPhone",
       "description": "Apple iPhone devices"
-    },
-    "attribute": {
-      "id": 1,
-      "name": "Brand",
-      "type": "string",
-      "defaultValue": null
     },
     "attributeGroup": {
       "id": 1,
@@ -2131,7 +2958,6 @@ Retrieve a specific product by its ID.
   "imageUrl": "https://example.com/images/iphone15pro.jpg",
   "status": "complete",
   "categoryId": 3,
-  "attributeId": 1,
   "attributeGroupId": 1,
   "familyId": 1,
   "userId": 1,
@@ -2141,12 +2967,6 @@ Retrieve a specific product by its ID.
     "id": 3,
     "name": "iPhone",
     "description": "Apple iPhone devices"
-  },
-  "attribute": {
-    "id": 1,
-    "name": "Brand",
-    "type": "string",
-    "defaultValue": null
   },
   "attributeGroup": {
     "id": 1,
@@ -2648,6 +3468,7 @@ curl -X POST http://localhost:3000/products \
     "imageUrl":"https://example.com/images/iphone15pro.jpg",
     "status":"complete",
     "categoryId":3,
+    "attributeGroupId":1,
     "familyId":1,
     "familyAttributesWithValues":[
       {"attributeId":10,"value":"Apple"},
@@ -2690,3 +3511,233 @@ curl -X POST http://localhost:3000/categories \
 curl -X GET http://localhost:3000/categories \
   -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
 ```
+
+### Get Notifications
+```bash
+# Get all notifications
+curl -X GET http://localhost:3000/notifications?page=1&limit=20 \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+
+# Filter by entity type
+curl -X GET "http://localhost:3000/notifications?entityType=product&action=created" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+```
+
+### Get Notification Statistics
+```bash
+curl -X GET http://localhost:3000/notifications/stats \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+```
+
+### Cleanup Old Notifications
+```bash
+curl -X DELETE http://localhost:3000/notifications/cleanup \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+```
+
+### Create Support Ticket
+```bash
+# Without attachments
+curl -X POST http://localhost:3000/api/support/tickets \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name":"John Doe",
+    "email":"john.doe@example.com",
+    "subject":"Cannot upload assets",
+    "message":"I am experiencing issues when trying to upload large image files.",
+    "category":"technical"
+  }'
+
+# With attachments
+curl -X POST http://localhost:3000/api/support/tickets \
+  -F "name=Jane Smith" \
+  -F "email=jane.smith@example.com" \
+  -F "subject=Error Screenshots" \
+  -F "message=Please see attached screenshots of the error." \
+  -F "category=bug" \
+  -F "attachments=@/path/to/screenshot.png"
+```
+
+### Export Assets
+```bash
+# Export as JSON
+curl -X POST http://localhost:3000/assets/export \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE" \
+  -d '{"format":"json","assetGroupId":1}'
+
+# Export as XML
+curl -X POST http://localhost:3000/assets/export \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE" \
+  -d '{"format":"xml","includeMetadata":true}'
+```
+
+### Download Assets as ZIP
+```bash
+curl -X POST http://localhost:3000/assets/zip \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE" \
+  -d '{
+    "files":[
+      "/uploads/assets/file1.jpg",
+      "/uploads/assets/file2.png"
+    ]
+  }'
+```
+
+### Get Asset Group Children
+```bash
+curl -X GET http://localhost:3000/asset-groups/1/children?page=1&limit=10 \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+```
+
+### Get Available Attribute Types
+```bash
+curl -X GET http://localhost:3000/attributes/types \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+```
+
+### Create Attribute
+```bash
+curl -X POST http://localhost:3000/attributes \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE" \
+  -d '{"name":"Brand","type":"text","description":"Product brand name","options":["Apple","Samsung","Google"]}'
+```
+
+### Get All Attributes
+```bash
+curl -X GET http://localhost:3000/attributes \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+
+# With filtering
+curl -X GET "http://localhost:3000/attributes?type=text&isRequired=false&search=brand&sortBy=name" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+```
+
+### Get Attribute by ID
+```bash
+curl -X GET http://localhost:3000/attributes/1 \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+```
+
+### Update Attribute
+```bash
+curl -X PATCH http://localhost:3000/attributes/1 \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE" \
+  -d '{"name":"Updated Brand","description":"Updated description"}'
+```
+
+### Delete Attribute
+```bash
+curl -X DELETE http://localhost:3000/attributes/1 \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+```
+
+### Create Attribute Group
+```bash
+curl -X POST http://localhost:3000/attribute-groups \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE" \
+  -d '{
+    "name":"Product Attributes",
+    "description":"Attributes related to product information.",
+    "attributes":[
+      {"attributeId":1,"required":true,"defaultValue":"Unknown"},
+      {"attributeId":2,"required":false,"defaultValue":"0"}
+    ]
+  }'
+```
+
+### Get All Attribute Groups
+```bash
+curl -X GET http://localhost:3000/attribute-groups \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+
+# With filtering
+curl -X GET "http://localhost:3000/attribute-groups?search=product&sortBy=name" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+```
+
+### Get Attribute Group by ID
+```bash
+curl -X GET http://localhost:3000/attribute-groups/1 \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+```
+
+### Update Attribute Group
+```bash
+curl -X PATCH http://localhost:3000/attribute-groups/1 \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE" \
+  -d '{
+    "name":"Updated Product Attributes",
+    "description":"Updated description",
+    "attributes":[
+      {"attributeId":1,"required":true,"defaultValue":"Default Brand"}
+    ]
+  }'
+```
+
+### Add Attribute to Group
+```bash
+curl -X POST http://localhost:3000/attribute-groups/1/attributes/5 \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+```
+
+### Remove Attribute from Group
+```bash
+curl -X DELETE http://localhost:3000/attribute-groups/1/attributes/5 \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+```
+
+### Delete Attribute Group
+```bash
+curl -X DELETE http://localhost:3000/attribute-groups/1 \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+```
+
+### Get Attributes with Product Counts
+```bash
+curl -X GET http://localhost:3000/attributes/with-product-counts?page=1&limit=20 \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+```
+
+### Get Attribute Suggestions
+```bash
+curl -X GET "http://localhost:3000/attributes/attribute-suggestions?productId=1&attributeId=1&query=Bl" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+```
+
+### Get Category Tree
+```bash
+curl -X GET http://localhost:3000/categories/tree \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+```
+
+### Get Subcategories
+```bash
+curl -X GET http://localhost:3000/categories/1/subcategories?page=1&limit=10 \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN_HERE"
+```
+
+---
+
+## Additional Resources
+
+- [Pagination Guide](./PAGINATION_GUIDE.md) - Detailed pagination implementation
+- [Filtering Guide](./FILTERING_GUIDE.md) - Advanced filtering options
+- [Asset Export Guide](./ASSET_EXPORT_GUIDE.md) - Asset export functionality
+- [Variant Import Guide](./VARIANT_IMPORT_GUIDE.md) - Product variant management
+- [CSV Import Guide](./CSV_IMPORT_GUIDE.md) - Bulk product import
+- [WooCommerce Integration](./WOOCOMMERCE_QUICK_START.md) - WooCommerce marketplace integration
+
+---
+
+**Last Updated:** November 2, 2025  
+**API Version:** 1.0  
+**Base URL:** http://localhost:3000
+
+For any questions or issues, please contact support or create a support ticket through the `/api/support/tickets` endpoint.

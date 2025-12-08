@@ -5,7 +5,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateAssetDto, UpdateAssetDto, ExportAssetsDto, ExportType } from './dto';
+import { CreateAssetDto, UpdateAssetDto, ExportAssetsDto, ExportType, ExportFormat } from './dto';
 import {
   CloudinaryUtil,
   CloudinaryUploadResult,
@@ -49,30 +49,6 @@ export class AssetService {
   }
 
   /**
-   * Convert local file path to URL for serving
-   */
-  private async convertLocalPathToUrl(localPath: string, userId: number): Promise<string> {
-    // Get user details
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { email: true },
-    });
-
-    if (!user) {
-      return localPath; // fallback
-    }
-
-    const username = user.email.replace(/[^a-zA-Z0-9]/g, '_');
-    const userFolder = `${userId}_${username}`;
-    const uploadsPath = path.join(process.cwd(), 'uploads', userFolder);
-
-    // Get relative path from user folder
-    const relativePath = path.relative(uploadsPath, localPath);
-
-    return `/uploads/${userFolder}/${relativePath.replace(/\\/g, '/')}`;
-  }
-
-  /**
    * Build the asset group path including parent folders
    */
   private async buildAssetGroupPath(assetGroupId: number, userId: number): Promise<string> {
@@ -103,7 +79,7 @@ export class AssetService {
     return path.join(...groups);
   }
   // Utility to recursively convert BigInt values to strings while preserving dates
-  private static convertBigIntToString(obj: any): any {
+  private static convertBigIntToString = (obj: any): any => {
     if (typeof obj === 'bigint') {
       return obj.toString();
     }
@@ -121,7 +97,7 @@ export class AssetService {
       return newObj;
     }
     return obj;
-  }
+  };
 
   async create(
     createAssetDto: CreateAssetDto,
@@ -201,15 +177,13 @@ export class AssetService {
       }
     }
 
-    // Convert local path to URL format for serving
-    const fileUrl = await this.convertLocalPathToUrl(localFilePath, userId);
-
-    // Store local file path in database
+    // Store relative file path in database with /uploads/ prefix
+    const relativeFilePath = path.relative(path.join(process.cwd(), 'uploads'), localFilePath).replace(/\\/g, '/');
     const asset = await this.prisma.asset.create({
       data: {
         name: createAssetDto.name,
         fileName: uniqueFileName,
-        filePath: localFilePath, // Store local file path
+        filePath: `/uploads/${relativeFilePath}`, // Store file path with /uploads/ prefix
         mimeType: file.mimetype,
         size: BigInt(file.size),
         userId,
@@ -228,7 +202,7 @@ export class AssetService {
     return {
       ...AssetService.convertBigIntToString(asset),
       size: Number(asset.size),
-      url: fileUrl, // Local file URL
+      url: asset.filePath, // filePath already includes /uploads/ prefix
       formattedSize: CloudinaryUtil.formatFileSize(Number(asset.size)),
     };
   }
@@ -328,12 +302,15 @@ export class AssetService {
       this.prisma.asset.count({ where: whereCondition }),
     ]);
 
-    const transformedAssets = await Promise.all(assets.map(async (asset) => ({
-      ...AssetService.convertBigIntToString(asset),
-      size: Number(asset.size),
-      url: await this.convertLocalPathToUrl(asset.filePath, userId), // Convert to URL
-      formattedSize: CloudinaryUtil.formatFileSize(Number(asset.size)),
-    })));
+    const transformedAssets = await Promise.all(assets.map(async (asset) => {
+      const converted = AssetService.convertBigIntToString(asset);
+      return {
+        ...converted,
+        size: Number(asset.size),
+        url: asset.filePath, // filePath already includes /uploads/ prefix
+        formattedSize: CloudinaryUtil.formatFileSize(Number(asset.size)),
+      };
+    }));
 
     return PaginationUtils.createPaginatedResponse(
       transformedAssets,
@@ -365,7 +342,7 @@ export class AssetService {
     return {
       ...AssetService.convertBigIntToString(asset),
       size: Number(asset.size),
-      url: asset.filePath, // Cloudinary URL
+      url: asset.filePath, // filePath already includes /uploads/ prefix
       formattedSize: CloudinaryUtil.formatFileSize(Number(asset.size)),
     };
   }
@@ -435,7 +412,7 @@ export class AssetService {
     return {
       ...AssetService.convertBigIntToString(updatedAsset),
       size: Number(updatedAsset.size),
-      url: await this.convertLocalPathToUrl(updatedAsset.filePath, userId), // Convert to URL
+      url: updatedAsset.filePath, // filePath already includes /uploads/ prefix
       formattedSize: CloudinaryUtil.formatFileSize(Number(updatedAsset.size)),
     };
   }
@@ -558,7 +535,7 @@ export class AssetService {
     const exportData = await Promise.all(assets.map(async (asset) => ({
       id: asset.id.toString(),
       name: asset.name,
-      url: await this.convertLocalPathToUrl(asset.filePath, userId), // Convert to URL
+      url: asset.filePath, // filePath already includes /uploads/ prefix
       fileName: asset.fileName,
       mimeType: asset.mimeType,
       size: asset.size.toString(),
@@ -574,7 +551,7 @@ export class AssetService {
     })));
 
     // Return in requested format
-    if (format === 'xml') {
+    if (format === ExportFormat.XML) {
       return this.convertToXml(exportData);
     }
 
@@ -692,7 +669,7 @@ export class AssetService {
     const exportData = await Promise.all(assets.map(async (asset) => ({
       id: asset.id.toString(),
       name: asset.name,
-      url: await this.convertLocalPathToUrl(asset.filePath, userId), // Convert to URL
+      url: asset.filePath, // filePath already includes /uploads/ prefix
       fileName: asset.fileName,
       mimeType: asset.mimeType,
       size: asset.size.toString(),
@@ -801,7 +778,7 @@ export class AssetService {
       asset: {
         ...AssetService.convertBigIntToString(restoredAsset),
         size: Number(restoredAsset.size),
-        url: await this.convertLocalPathToUrl(restoredAsset.filePath, userId),
+        url: restoredAsset.filePath, // filePath already includes /uploads/ prefix
         formattedSize: CloudinaryUtil.formatFileSize(Number(restoredAsset.size)),
       }
     };
@@ -838,12 +815,15 @@ export class AssetService {
       this.prisma.asset.count({ where: whereCondition }),
     ]);
 
-    const transformedAssets = await Promise.all(assets.map(async (asset) => ({
-      ...AssetService.convertBigIntToString(asset),
-      size: Number(asset.size),
-      url: await this.convertLocalPathToUrl(asset.filePath, userId),
-      formattedSize: CloudinaryUtil.formatFileSize(Number(asset.size)),
-    })));
+    const transformedAssets = await Promise.all(assets.map(async (asset) => {
+      const converted = AssetService.convertBigIntToString(asset);
+      return {
+        ...converted,
+        size: Number(asset.size),
+        url: asset.filePath, // filePath already includes /uploads/ prefix
+        formattedSize: CloudinaryUtil.formatFileSize(Number(asset.size)),
+      };
+    }));
 
     return PaginationUtils.createPaginatedResponse(
       transformedAssets,
@@ -863,8 +843,7 @@ export class AssetService {
     const asset = await this.prisma.asset.findFirst({
       where: { 
         id, 
-        userId,
-        isDeleted: true 
+        userId
       },
     });
 
@@ -874,7 +853,10 @@ export class AssetService {
 
     // Delete local file
     try {
-      await fs.unlink(asset.filePath);
+      // filePath now includes /uploads/ prefix, so strip it to get file system path
+      const relativePath = asset.filePath.replace(/^\/uploads\//, '');
+      const fullPath = path.join(process.cwd(), 'uploads', relativePath);
+      await fs.unlink(fullPath);
     } catch (error) {
       console.error('Error deleting local file:', error);
     }

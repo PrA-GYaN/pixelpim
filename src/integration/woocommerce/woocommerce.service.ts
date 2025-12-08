@@ -864,7 +864,7 @@ export class WooCommerceService extends BaseIntegrationService {
 
         // Check if term already exists (case-insensitive)
         const existingTerm = existingTerms.find(
-          (term: any) => term.name.toLowerCase() === termName.toLowerCase()
+          (term) => term.name.toLowerCase() === termName.toLowerCase()
         );
 
         if (!existingTerm) {

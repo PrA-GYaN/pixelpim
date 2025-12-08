@@ -456,6 +456,7 @@ export class ProductUtilService {
         name: asset.name,
         fileName: asset.fileName,
         filePath: asset.filePath,
+        url: asset.filePath,
         mimeType: asset.mimeType,
         size: Number(asset.size), // Convert BigInt to number
         uploadDate: asset.uploadDate,

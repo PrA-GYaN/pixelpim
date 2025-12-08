@@ -17,7 +17,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { AssetService } from './asset.service';
-import { CreateAssetDto, UpdateAssetDto, ExportAssetsDto } from './dto';
+import { CreateAssetDto, UpdateAssetDto, ExportAssetsDto, ExportFormat } from './dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OwnershipGuard } from '../auth/guards/ownership.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
@@ -34,30 +34,8 @@ import type { User } from '@prisma/client';
 export class AssetController {
   constructor(private readonly assetService: AssetService) {}
 
-  @Post('upload')
-  @RequirePermissions({ resource: 'assets', action: 'create' })
-  @UseInterceptors(
-    FileInterceptor('file', {
-      limits: {
-        fileSize: 50 * 1024 * 1024, // 50MB limit
-      },
-    }),
-  )
-  async uploadAsset(
-    @UploadedFile() file: Express.Multer.File,
-    @Body() createAssetDto: CreateAssetDto,
-    @GetUser() user: User,
-    @EffectiveUserId() effectiveUserId: number,
-  ) {
-    return this.assetService.create(createAssetDto, file, effectiveUserId);
-  }
-
-  @Post('zip')
-  @RequirePermissions({ resource: 'assets', action: 'read' })
-  async downloadZip(@Body('files') files: string[], @Res() res: Response) {
-    await FileUploadUtil.downloadFilesAsZip(files, res, 'my-assets.zip');
-  }
-
+  // ==================== LIST ENDPOINT (MUST BE FIRST) ====================
+  
   @Get()
   @RequirePermissions({ resource: 'assets', action: 'read' })
   async findAll(
@@ -98,15 +76,98 @@ export class AssetController {
     return this.assetService.findAll(effectiveUserId, groupId, pageNum, limitNum, filters);
   }
 
-  @Get(':id')
+  // ==================== STATIC/SPECIFIC GET ROUTES ====================
+
+  @Get('deleted')
+  @RequirePermissions({ resource: 'assets', action: 'delete' })
+  async getSoftDeletedAssets(
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const pageNum = page ? parseInt(page) : 1;
+    const limitNum = limit ? parseInt(limit) : 10;
+    
+    return this.assetService.getSoftDeletedAssets(effectiveUserId, pageNum, limitNum);
+  }
+
+  @Get('export/json')
+  @RequirePermissions({ resource: 'assets', action: 'export' })
+  async exportAsJson(
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+    @Query('assetGroupId') assetGroupId?: string,
+  ) {
+    const groupId = assetGroupId ? parseInt(assetGroupId, 10) : undefined;
+    return this.assetService.exportAsJson(effectiveUserId, groupId);
+  }
+
+  // ==================== POST ROUTES ====================
+
+  @Post('upload')
+  @RequirePermissions({ resource: 'assets', action: 'create' })
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: {
+        fileSize: 50 * 1024 * 1024, // 50MB limit
+      },
+    }),
+  )
+  async uploadAsset(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() createAssetDto: CreateAssetDto,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    return this.assetService.create(createAssetDto, file, effectiveUserId);
+  }
+
+  @Post('zip')
   @RequirePermissions({ resource: 'assets', action: 'read' })
-  async findOne(
+  async downloadZip(@Body('files') files: string[], @Res() res: Response) {
+    await FileUploadUtil.downloadFilesAsZip(files, res, 'my-assets.zip');
+  }
+
+  @Post('export')
+  @RequirePermissions({ resource: 'assets', action: 'export' })
+  async exportAssets(
+    @Body() exportDto: ExportAssetsDto,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+    @Res() res: Response,
+  ) {
+    const result = await this.assetService.exportAssets(effectiveUserId, exportDto);
+
+    // Set appropriate content type and headers based on format
+    if (exportDto.format === ExportFormat.XML) {
+      res.setHeader('Content-Type', 'application/xml');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="assets-export-${Date.now()}.xml"`,
+      );
+      return res.send(result);
+    } else if (exportDto.format === ExportFormat.JSON) {
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="assets-export-${Date.now()}.json"`,
+      );
+      return res.json(result);
+    }
+  }
+
+  @Post(':id/restore')
+  @RequirePermissions({ resource: 'assets', action: 'create' })
+  async restoreAsset(
     @Param('id', ParseIntPipe) id: number,
     @GetUser() user: User,
     @EffectiveUserId() effectiveUserId: number,
   ) {
-    return this.assetService.findOne(id, effectiveUserId);
+    return this.assetService.restoreAsset(id, effectiveUserId);
   }
+
+  // ==================== PATCH ROUTES ====================
 
   @Patch(':id')
   @RequirePermissions({ resource: 'assets', action: 'update' })
@@ -148,80 +209,7 @@ export class AssetController {
       }
   }
 
-  @Delete(':id')
-  @RequirePermissions({ resource: 'assets', action: 'delete' })
-  async remove(
-    @Param('id', ParseIntPipe) id: number,
-    @GetUser() user: User,
-    @EffectiveUserId() effectiveUserId: number,
-  ) {
-    return this.assetService.remove(id, effectiveUserId);
-  }
-
-  @Get('export/json')
-  @RequirePermissions({ resource: 'assets', action: 'export' })
-  async exportAsJson(
-    @GetUser() user: User,
-    @EffectiveUserId() effectiveUserId: number,
-    @Query('assetGroupId') assetGroupId?: string,
-  ) {
-    const groupId = assetGroupId ? parseInt(assetGroupId, 10) : undefined;
-    return this.assetService.exportAsJson(effectiveUserId, groupId);
-  }
-
-  @Post('export')
-  @RequirePermissions({ resource: 'assets', action: 'export' })
-  async exportAssets(
-    @Body() exportDto: ExportAssetsDto,
-    @GetUser() user: User,
-    @EffectiveUserId() effectiveUserId: number,
-    @Res() res: Response,
-  ) {
-    const result = await this.assetService.exportAssets(effectiveUserId, exportDto);
-
-    // Set appropriate content type and headers based on format
-    if (exportDto.format === 'xml') {
-      res.setHeader('Content-Type', 'application/xml');
-      res.setHeader(
-        'Content-Disposition',
-        `attachment; filename="assets-export-${Date.now()}.xml"`,
-      );
-      return res.send(result);
-    } else {
-      res.setHeader('Content-Type', 'application/json');
-      res.setHeader(
-        'Content-Disposition',
-        `attachment; filename="assets-export-${Date.now()}.json"`,
-      );
-      return res.json(result);
-    }
-  }
-
-  // Soft Delete Endpoints
-
-  @Get('deleted')
-  @RequirePermissions({ resource: 'assets', action: 'delete' })
-  async getSoftDeletedAssets(
-    @GetUser() user: User,
-    @EffectiveUserId() effectiveUserId: number,
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-  ) {
-    const pageNum = page ? parseInt(page) : 1;
-    const limitNum = limit ? parseInt(limit) : 10;
-    
-    return this.assetService.getSoftDeletedAssets(effectiveUserId, pageNum, limitNum);
-  }
-
-  @Post(':id/restore')
-  @RequirePermissions({ resource: 'assets', action: 'create' })
-  async restoreAsset(
-    @Param('id', ParseIntPipe) id: number,
-    @GetUser() user: User,
-    @EffectiveUserId() effectiveUserId: number,
-  ) {
-    return this.assetService.restoreAsset(id, effectiveUserId);
-  }
+  // ==================== DELETE ROUTES ====================
 
   @Delete(':id/permanent')
   @RequirePermissions({ resource: 'assets', action: 'delete' })
@@ -231,5 +219,28 @@ export class AssetController {
     @EffectiveUserId() effectiveUserId: number,
   ) {
     return this.assetService.permanentlyDeleteAsset(id, effectiveUserId);
+  }
+
+  @Delete(':id')
+  @RequirePermissions({ resource: 'assets', action: 'delete' })
+  async remove(
+    @Param('id', ParseIntPipe) id: number,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    // return this.assetService.remove(id, effectiveUserId);
+    return this.assetService.permanentlyDeleteAsset(id, effectiveUserId);
+  }
+
+  // ==================== DYNAMIC GET ROUTE (MUST BE LAST) ====================
+
+  @Get(':id')
+  @RequirePermissions({ resource: 'assets', action: 'read' })
+  async findOne(
+    @Param('id', ParseIntPipe) id: number,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    return this.assetService.findOne(id, effectiveUserId);
   }
 }

@@ -45,6 +45,13 @@ export class CategoryService {
       });
 
       this.logger.log(`Successfully created category with ID: ${result.id}`);
+      // Log notification for category creation
+      try {
+        await this.notificationService.logCategoryCreation(userId, result.name, result.id);
+      } catch (err) {
+        this.logger.error('Failed to create category notification', err);
+      }
+
       return this.transformCategoryForResponse(result);
     } catch (error) {
       this.handleDatabaseError(error, 'create');
@@ -295,6 +302,12 @@ export class CategoryService {
       });
 
       this.logger.log(`Successfully updated category with ID: ${id}`);
+      // Log notification for category update
+      try {
+        await this.notificationService.logCategoryUpdate(userId, result.name, result.id);
+      } catch (err) {
+        this.logger.error('Failed to update category notification', err);
+      }
       return this.transformCategoryForResponse(result);
     } catch (error) {
       if (error instanceof NotFoundException || error instanceof BadRequestException) {
@@ -306,8 +319,8 @@ export class CategoryService {
 
   async remove(id: number, userId: number): Promise<{ message: string }> {
     try {
-      // Verify ownership first
-      await this.findOne(id, userId);
+      // Verify ownership first and return the existing category so we can log notifications
+      const existingCategory = await this.findOne(id, userId);
 
       // Check if category has subcategories
       const subcategoriesCount = await this.prisma.category.count({
@@ -327,6 +340,12 @@ export class CategoryService {
       });
 
       this.logger.log(`Successfully deleted category with ID: ${id}`);
+      // Log notification for category deletion
+      try {
+        await this.notificationService.logCategoryDeletion(userId, existingCategory.name);
+      } catch (err) {
+        this.logger.error('Failed to create delete category notification', err);
+      }
       return { message: 'Category successfully deleted' };
     } catch (error) {
       if (error instanceof NotFoundException || error instanceof BadRequestException) {

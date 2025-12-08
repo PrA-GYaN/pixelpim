@@ -349,7 +349,7 @@ export class ImageUploadHelper {
       );
 
       // Return the uploaded asset URL
-      return uploadResult.url || uploadResult.filePath || uploadResult.assetUrl || null;
+      return (uploadResult as any).url || (uploadResult as any).filePath || (uploadResult as any).assetUrl || null;
     } catch (error) {
       this.logger.error(`Failed to process external image URL ${trimmed}:`, error);
       

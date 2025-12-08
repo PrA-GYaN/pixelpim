@@ -23,7 +23,7 @@ export class UpdateProductDto extends PartialType(CreateProductDto) {
 
   @IsOptional()
   @IsString()
-  @IsUrl({}, { message: 'Image URL must be a valid URL' })
+  // @IsUrl({}, { message: 'Image URL must be a valid URL' })
   imageUrl?: string;
 
   @IsOptional()

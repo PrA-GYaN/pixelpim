@@ -834,9 +834,9 @@ export class CsvImportService {
           value: String(columnValue).trim()
         });
 
-        this.logger.debug(`Processed attribute: ${attributeName} (ID: ${attributeId}) with value: ${columnValue}`);
+        this.logger.debug(`Processed attribute: ${attributeName} (ID: ${attributeId}) with value: ${String(columnValue)}`);
       } catch (error) {
-        this.logger.error(`Failed to process attribute ${columnName}: ${error.message}`);
+        this.logger.error(`Failed to process attribute ${columnName}: ${error.message}. Value type: ${typeof columnValue}`);
         // Continue processing other attributes instead of failing the entire import
       }
     }

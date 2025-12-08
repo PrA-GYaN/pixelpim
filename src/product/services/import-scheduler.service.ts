@@ -517,7 +517,7 @@ export class ImportSchedulerService implements OnModuleInit, OnModuleDestroy {
       description: scheduledImport.description,
       cronExpression: scheduledImport.cronExpression,
       csvUrl: scheduledImport.csvUrl,
-      status: scheduledImport.status as ImportStatus,
+      status: scheduledImport.status as any as ImportStatus,
       isActive: scheduledImport.isActive,
       lastRun: scheduledImport.lastRun,
       nextRun: scheduledImport.nextRun,
@@ -540,7 +540,7 @@ export class ImportSchedulerService implements OnModuleInit, OnModuleDestroy {
     return {
       id: executionLog.id,
       scheduledImportId: executionLog.scheduledImportId,
-      status: executionLog.status as ExecutionStatus,
+      status: executionLog.status as any as ExecutionStatus,
       startTime: executionLog.startTime,
       endTime: executionLog.endTime,
       itemsProcessed: executionLog.itemsProcessed,

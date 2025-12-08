@@ -361,7 +361,7 @@ export async function parseExcel(buffer: Buffer | ArrayBuffer | Uint8Array): Pro
       if (str === '{}' || str === 'null') return null;
       return str;
     } catch (err) {
-      return String(val);
+      return null; // Return null for unhandled object types
     }
   }
 
@@ -430,13 +430,14 @@ export function convertValueToType(value: any, dataType: AttributeDataType): any
   
   try {
     switch (dataType) {
-      case AttributeDataType.BOOLEAN:
+      case AttributeDataType.BOOLEAN: {
         if (typeof value === 'boolean') return value;
         if (typeof value === 'number') return value !== 0;
         const strVal = String(value).toLowerCase().trim();
         return strVal === 'true' || strVal === 'yes' || strVal === '1';
+      }
       
-      case AttributeDataType.DATE:
+      case AttributeDataType.DATE: {
         if (value instanceof Date) return value.toISOString();
         // Excel serial date number
         if (typeof value === 'number') {
@@ -449,6 +450,7 @@ export function convertValueToType(value: any, dataType: AttributeDataType): any
           return parsed.toISOString();
         }
         return null;
+      }
       
       case AttributeDataType.NUMBER:
         return Math.floor(Number(value));

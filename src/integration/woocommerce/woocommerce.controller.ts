@@ -129,7 +129,7 @@ export class WooCommerceController {
     this.logger.log('Received WooCommerce webhook');
 
     // Validate webhook signature
-    const isValid = this.woocommerceService.validateWebhookSignature(headers, body);
+    const isValid = await this.woocommerceService.validateWebhookSignature(headers, body);
     
     if (!isValid) {
       this.logger.warn('Invalid webhook signature');
