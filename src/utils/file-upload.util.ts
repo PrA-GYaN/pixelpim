@@ -1,6 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { diskStorage } from 'multer';
-import { extname, join } from 'path';
+import { extname, join, isAbsolute } from 'path';
 import { promises as fsPromises } from 'fs';
 import * as fs from 'fs';
 import { Request, Response } from 'express';
@@ -259,8 +259,11 @@ export class FileUploadUtil {
 
       for (const url of files) {
         try {
-          // Handle both relative paths (/uploads/...) and full URLs
-          let filePath: string;
+          // Handle different URL/path formats:
+          // - Full URLs (http(s)://) => use axios to fetch
+          // - Data URLs (data:...) => decode and add
+          // - Absolute or relative local file paths (/uploads/..., uploads/..., relative path) => read from disk
+          let filePath: string | undefined;
           
           if (url.startsWith('http://') || url.startsWith('https://')) {
             // Full URL - fetch via HTTP (e.g., Cloudinary)
@@ -268,9 +271,28 @@ export class FileUploadUtil {
             const fileName = url.split('/').pop() || 'file';
             archive.append(response.data, { name: fileName });
             continue;
+          } else if (url.startsWith('data:')) {
+            // Data URL (base64) => decode and append
+            const match = url.match(/^data:(.+);base64,(.+)$/);
+            if (match) {
+              const [, mimeType, b64] = match;
+              const csv = Buffer.from(b64, 'base64');
+              const fileName = `file-${Date.now()}`;
+              archive.append(csv, { name: fileName });
+              continue;
+            } else {
+              console.warn(`Invalid data URL: ${url}`);
+              continue;
+            }
           } else if (url.startsWith('/uploads/')) {
             // Relative path with /uploads/ prefix - convert to file system path
             filePath = join(process.cwd(), url.replace(/^\//, ''));
+          } else if (isAbsolute(url)) {
+            // Absolute file path on disk
+            filePath = url;
+          } else if (url.startsWith('uploads/')) {
+            // paths like uploads/foo
+            filePath = join(process.cwd(), url);
           } else {
             // Already a relative path without leading slash
             filePath = join(process.cwd(), 'uploads', url);

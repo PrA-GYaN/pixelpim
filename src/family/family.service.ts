@@ -435,37 +435,170 @@ export class FamilyService {
     }
 
     try {
-      return await this.prisma.family.update({
-        where: { id },
-        data: {
-          ...(name && { name }),
-          ...(allAttributeIds.length > 0 && {
-            familyAttributes: {
-              deleteMany: {},
-              create: [
-                  ...requiredAttributes.map(attr => ({
-                    attributeId: attr.attributeId,
-                    isRequired: true,
-                    additionalValue: attr.additionalValue !== undefined ? String(attr.additionalValue) : null,
-                  })),
-                  ...otherAttributes.map(attr => ({
-                    attributeId: attr.attributeId,
-                    isRequired: false,
-                    additionalValue: attr.additionalValue !== undefined ? String(attr.additionalValue) : null,
-                  })),
-              ],
+      // Get existing family attributes
+      const existingFamilyAttributes = await this.prisma.familyAttribute.findMany({
+        where: { familyId: id },
+        select: { id: true, attributeId: true, isRequired: true, additionalValue: true },
+      });
+
+      // console.log(`[Family Update] Existing FamilyAttributes:`, existingFamilyAttributes);
+
+      // Create a map of existing attributes: attributeId -> familyAttribute
+      const existingAttrMap = new Map(
+        existingFamilyAttributes.map(fa => [fa.attributeId, fa])
+      );
+
+      // Build maps for incoming attributes
+      const incomingAttrMap = new Map<number, { isRequired: boolean; additionalValue: string | null }>();
+      
+      for (const attr of allAttributes) {
+        const isRequired = requiredAttributes.some(ra => ra.attributeId === attr.attributeId);
+        const additionalValue = attr.additionalValue !== undefined ? String(attr.additionalValue) : null;
+        incomingAttrMap.set(attr.attributeId, { isRequired, additionalValue });
+      }
+
+      // console.log(`[Family Update] Incoming attributes:`, Array.from(incomingAttrMap.entries()));
+
+      // Categorize operations
+      const toUpdate: Array<{ familyAttributeId: number; attributeId: number; isRequired: boolean; additionalValue: string | null }> = [];
+      const toCreate: Array<{ attributeId: number; isRequired: boolean; additionalValue: string | null }> = [];
+      const toDelete: Array<{ familyAttributeId: number; attributeId: number }> = [];
+
+      // Check what needs to be updated or kept
+      for (const [attributeId, incoming] of incomingAttrMap.entries()) {
+        const existing = existingAttrMap.get(attributeId);
+        
+        if (existing) {
+          // Attribute exists - check if it needs updating
+          if (existing.isRequired !== incoming.isRequired || existing.additionalValue !== incoming.additionalValue) {
+            toUpdate.push({
+              familyAttributeId: existing.id,
+              attributeId,
+              isRequired: incoming.isRequired,
+              additionalValue: incoming.additionalValue,
+            });
+          } else {
+            // console.log(`[Family Update] Attribute ${attributeId} unchanged, skipping`);
+          }
+        } else {
+          // New attribute - needs to be created
+          toCreate.push({
+            attributeId,
+            isRequired: incoming.isRequired,
+            additionalValue: incoming.additionalValue,
+          });
+        }
+      }
+
+      // Check what needs to be deleted
+      for (const existing of existingFamilyAttributes) {
+        if (!incomingAttrMap.has(existing.attributeId)) {
+          toDelete.push({
+            familyAttributeId: existing.id,
+            attributeId: existing.attributeId,
+          });
+        }
+      }
+
+      // console.log(`[Family Update] Operations planned:`, {
+      //   toUpdate: toUpdate.length,
+      //   toCreate: toCreate.length,
+      //   toDelete: toDelete.length,
+      // });
+      // console.log(`[Family Update] Details:`, { toUpdate, toCreate, toDelete });
+
+      // Use a transaction to perform all operations
+      return await this.prisma.$transaction(async (tx) => {
+        // console.log(`[Family Update] Starting transaction`);
+
+        // 1. Update the family name if needed
+        if (name && name !== existingFamily.name) {
+          // console.log(`[Family Update] Updating family name from "${existingFamily.name}" to "${name}"`);
+          await tx.family.update({
+            where: { id },
+            data: { name },
+          });
+        }
+
+        // 2. Update existing FamilyAttribute rows in place (PRESERVES familyAttributeId)
+        for (const attr of toUpdate) {
+          // console.log(`[Family Update] Updating FamilyAttribute ID ${attr.familyAttributeId} (attributeId: ${attr.attributeId})`);
+          await tx.familyAttribute.update({
+            where: { 
+              familyId_attributeId: {
+                familyId: id,
+                attributeId: attr.attributeId,
+              },
             },
-          }),
-        },
-        include: {
-          familyAttributes: {
-            include: {
-              attribute: true,
+            data: {
+              isRequired: attr.isRequired,
+              additionalValue: attr.additionalValue,
+            },
+          });
+        }
+
+        // 3. Create new FamilyAttribute rows
+        for (const attr of toCreate) {
+          // console.log(`[Family Update] Creating new FamilyAttribute for attributeId ${attr.attributeId}`);
+          await tx.familyAttribute.create({
+            data: {
+              familyId: id,
+              attributeId: attr.attributeId,
+              isRequired: attr.isRequired,
+              additionalValue: attr.additionalValue,
+            },
+          });
+        }
+
+        // 4. Delete removed FamilyAttribute rows (WARNING: This will cascade delete ProductAttributes!)
+        if (toDelete.length > 0) {
+          // console.log(`[Family Update] WARNING: Deleting ${toDelete.length} FamilyAttributes, which will CASCADE DELETE related ProductAttributes`);
+          
+          for (const attr of toDelete) {
+            // Check if there are ProductAttributes that will be affected
+            const affectedProducts = await tx.productAttribute.count({
+              where: { familyAttributeId: attr.familyAttributeId },
+            });
+            
+            if (affectedProducts > 0) {
+              // console.log(`[Family Update] WARNING: Deleting FamilyAttribute ${attr.familyAttributeId} (attributeId: ${attr.attributeId}) will delete ${affectedProducts} ProductAttribute values`);
+            }
+            
+            await tx.familyAttribute.delete({
+              where: {
+                familyId_attributeId: {
+                  familyId: id,
+                  attributeId: attr.attributeId,
+                },
+              },
+            });
+          }
+        }
+
+        // console.log(`[Family Update] Transaction completed successfully`);
+
+        // 5. Fetch and return the updated family with all relations
+        const updatedFamily = await tx.family.findUnique({
+          where: { id },
+          include: {
+            familyAttributes: {
+              include: {
+                attribute: true,
+              },
             },
           },
-        },
+        });
+
+        if (!updatedFamily) {
+          throw new NotFoundException(`Family with ID ${id} not found`);
+        }
+
+        // console.log(`[Family Update] Final FamilyAttributes:`, updatedFamily.familyAttributes.map(fa => ({ id: fa.id, attributeId: fa.attributeId })));
+
+        return updatedFamily;
       });
     } catch (error) {
+      console.error(`[Family Update] Error during update:`, error);
       if (error.code === 'P2002') {
         throw new ConflictException('Family with this name already exists');
       }
