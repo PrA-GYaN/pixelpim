@@ -8,7 +8,6 @@ import { OwnerController } from './owner.controller';
 import { EmailService } from './email.service';
 import { UserManagementService } from './user-management.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
-import { GoogleStrategy } from './strategies/google.strategy';
 import { RolesGuard } from './guards/roles.guard';
 import { PermissionsGuard } from './guards/permissions.guard';
 import { OwnershipGuard } from './guards/ownership.guard';
@@ -29,7 +28,6 @@ import { PrismaModule } from '../prisma/prisma.module';
     EmailService, 
     UserManagementService,
     JwtStrategy, 
-    GoogleStrategy,
     RolesGuard,
     PermissionsGuard,
     OwnershipGuard,

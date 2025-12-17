@@ -45,6 +45,7 @@ model User {
   importExecutionLogs ImportExecutionLog[] @relation("UserImportExecutionLogs")
   integrationLogs     IntegrationLog[]    @relation("UserIntegrationLogs")
   integrationCredentials UserIntegrationCredentials[] @relation("UserIntegrationCredentials")
+  wooConnections      WooCommerceConnection[] @relation("UserWooConnections")
   webhooks           Webhook[]           @relation("UserWebhooks")
   shareLinks         ShareLink[]         @relation("UserShareLinks")
 }
@@ -362,7 +363,84 @@ model UserIntegrationCredentials {
   user          User     @relation("UserIntegrationCredentials", fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, integrationType])
+  @@unique([userId, integrationType])
+}
+
+// Multi-WooCommerce store connections with field mappings
+model WooCommerceConnection {
+  id              Int      @id @default(autoincrement())
+  userId          Int
+  storeName       String   // User-friendly name for the store
+  storeUrl        String   // WooCommerce store URL
+  consumerKey     String   // API consumer key
+  consumerSecret  String   // API consumer secret
+  webhookSecret   String?  // Optional webhook secret
+  isActive        Boolean  @default(true)
+  isDefault       Boolean  @default(false) // Default connection for quick operations
+  lastSyncedAt    DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User     @relation("UserWooConnections", fields: [userId], references: [id], onDelete: Cascade)
+  exportMappings  WooCommerceExportMapping[]
+  importMappings  WooCommerceImportMapping[]
+  productSyncs    WooCommerceProductSync[]
+
   @@unique([userId, storeUrl])
+  @@index([userId, isActive])
+  @@index([userId, isDefault])
+}
+
+// Export field mappings per connection
+model WooCommerceExportMapping {
+  id              Int      @id @default(autoincrement())
+  connectionId    Int
+  fieldMappings   Json     // Maps internal fields to WooCommerce fields
+  selectedFields  String[] // List of fields to export (e.g., ["name", "sku", "width", "height", "color"])
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  connection      WooCommerceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([connectionId, isActive])
+}
+
+// Import attribute mappings per connection
+model WooCommerceImportMapping {
+  id              Int      @id @default(autoincrement())
+  connectionId    Int
+  attributeMappings Json   // Maps WooCommerce attributes to internal attributes
+  fieldMappings   Json     // Maps WooCommerce fields to internal fields
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  connection      WooCommerceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([connectionId, isActive])
+}
+
+// Track product sync status per connection
+model WooCommerceProductSync {
+  id                 Int      @id @default(autoincrement())
+  connectionId       Int
+  productId          Int?     // Nullable - can be null for failed imports
+  wooProductId       Int      // WooCommerce product ID
+  lastExportedAt     DateTime?
+  lastImportedAt     DateTime?
+  lastModifiedFields Json?    // Track which fields were last modified
+  syncStatus         String   @default("synced") // synced, pending, error
+  errorMessage       String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  connection         WooCommerceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@unique([connectionId, productId])
+  @@unique([connectionId, wooProductId])
+  @@index([connectionId, syncStatus])
+  @@index([productId])
 }
 
 model Webhook {

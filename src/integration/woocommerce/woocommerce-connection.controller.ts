@@ -1,0 +1,316 @@
+import {
+  Controller,
+  Post,
+  Get,
+  Put,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+  Logger,
+  HttpCode,
+  HttpStatus,
+  ParseIntPipe,
+} from '@nestjs/common';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { OwnershipGuard } from '../../auth/guards/ownership.guard';
+import { PermissionsGuard } from '../../auth/guards/permissions.guard';
+import { RequirePermissions } from '../../auth/decorators/permissions.decorator';
+import { User as GetUser } from '../../auth/decorators/user.decorator';
+import { EffectiveUserId } from '../../auth/decorators/effective-user-id.decorator';
+import type { User } from '@prisma/client';
+import { WooCommerceConnectionService } from './woocommerce-connection.service';
+import { WooCommerceMultiStoreService } from './woocommerce-multistore.service';
+import {
+  CreateWooCommerceConnectionDto,
+  UpdateWooCommerceConnectionDto,
+  TestConnectionDto,
+  CreateExportMappingDto,
+  UpdateExportMappingDto,
+  CreateImportMappingDto,
+  UpdateImportMappingDto,
+  ExportProductsDto,
+  ImportProductsDto,
+} from './dto/woocommerce-connection.dto';
+import { PaginationDto } from '../../common/dto/pagination.dto';
+
+@Controller('integration/woocommerce/connections')
+@UseGuards(JwtAuthGuard, OwnershipGuard, PermissionsGuard)
+export class WooCommerceConnectionController {
+  private readonly logger = new Logger(WooCommerceConnectionController.name);
+
+  constructor(
+    private readonly connectionService: WooCommerceConnectionService,
+    private readonly multiStoreService: WooCommerceMultiStoreService,
+  ) {}
+
+  // ===== Connection Management =====
+
+  @Post()
+  @HttpCode(HttpStatus.CREATED)
+  @RequirePermissions({ resource: 'integration', action: 'create' })
+  async createConnection(
+    @Body() dto: CreateWooCommerceConnectionDto,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    this.logger.log(
+      `User ${user.id} creating WooCommerce connection: ${dto.storeName}`,
+    );
+    return this.connectionService.createConnection(effectiveUserId, dto);
+  }
+
+  @Get()
+  @RequirePermissions({ resource: 'integration', action: 'read' })
+  async getConnections(
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    return this.connectionService.getConnections(effectiveUserId);
+  }
+
+  @Get('default')
+  @RequirePermissions({ resource: 'integration', action: 'read' })
+  async getDefaultConnection(
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    return this.connectionService.getDefaultConnection(effectiveUserId);
+  }
+
+  @Get(':connectionId')
+  @RequirePermissions({ resource: 'integration', action: 'read' })
+  async getConnection(
+    @Param('connectionId', ParseIntPipe) connectionId: number,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    return this.connectionService.getConnection(effectiveUserId, connectionId);
+  }
+
+  @Put(':connectionId')
+  @RequirePermissions({ resource: 'integration', action: 'update' })
+  async updateConnection(
+    @Param('connectionId', ParseIntPipe) connectionId: number,
+    @Body() dto: UpdateWooCommerceConnectionDto,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    this.logger.log(`User ${user.id} updating connection ${connectionId}`);
+    return this.connectionService.updateConnection(effectiveUserId, connectionId, dto);
+  }
+  
+  @Delete(':connectionId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RequirePermissions({ resource: 'integration', action: 'delete' })
+  async deleteConnection(
+    @Param('connectionId', ParseIntPipe) connectionId: number,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    this.logger.log(`User ${user.id} deleting connection ${connectionId}`);
+    await this.connectionService.deleteConnection(effectiveUserId, connectionId);
+  }
+
+  @Post('test')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions({ resource: 'integration', action: 'read' })
+  async testConnection(@Body() dto: TestConnectionDto) {
+    return this.connectionService.testConnection(dto);
+  }
+
+  // ===== Export Mapping Management =====
+
+  @Post(':connectionId/export-mappings')
+  @HttpCode(HttpStatus.CREATED)
+  @RequirePermissions({ resource: 'integration', action: 'create' })
+  async createExportMapping(
+    @Param('connectionId', ParseIntPipe) connectionId: number,
+    @Body() dto: CreateExportMappingDto,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    this.logger.log(
+      `User ${user.id} creating export mapping for connection ${connectionId}`,
+    );
+    dto.connectionId = connectionId; // Ensure consistency
+    return this.connectionService.createExportMapping(effectiveUserId, dto);
+  }
+
+  @Get(':connectionId/export-mappings')
+  @RequirePermissions({ resource: 'integration', action: 'read' })
+  async getExportMappings(
+    @Param('connectionId', ParseIntPipe) connectionId: number,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    return this.connectionService.getExportMappings(effectiveUserId, connectionId);
+  }
+
+  @Get(':connectionId/export-mappings/active')
+  @RequirePermissions({ resource: 'integration', action: 'read' })
+  async getActiveExportMapping(
+    @Param('connectionId', ParseIntPipe) connectionId: number,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    return this.connectionService.getActiveExportMapping(effectiveUserId, connectionId);
+  }
+
+  @Put('export-mappings/:mappingId')
+  @RequirePermissions({ resource: 'integration', action: 'update' })
+  async updateExportMapping(
+    @Param('mappingId', ParseIntPipe) mappingId: number,
+    @Body() dto: UpdateExportMappingDto,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    this.logger.log(`User ${user.id} updating export mapping ${mappingId}`);
+    return this.connectionService.updateExportMapping(effectiveUserId, mappingId, dto);
+  }
+
+  @Delete('export-mappings/:mappingId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RequirePermissions({ resource: 'integration', action: 'delete' })
+  async deleteExportMapping(
+    @Param('mappingId', ParseIntPipe) mappingId: number,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    this.logger.log(`User ${user.id} deleting export mapping ${mappingId}`);
+    await this.connectionService.deleteExportMapping(effectiveUserId, mappingId);
+  }
+
+  // ===== Import Mapping Management =====
+
+  @Post(':connectionId/import-mappings')
+  @HttpCode(HttpStatus.CREATED)
+  @RequirePermissions({ resource: 'integration', action: 'create' })
+  async createImportMapping(
+    @Param('connectionId', ParseIntPipe) connectionId: number,
+    @Body() dto: CreateImportMappingDto,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    this.logger.log(
+      `User ${user.id} creating import mapping for connection ${connectionId}`,
+    );
+    dto.connectionId = connectionId; // Ensure consistency
+    return this.connectionService.createImportMapping(effectiveUserId, dto);
+  }
+
+  @Get(':connectionId/import-mappings')
+  @RequirePermissions({ resource: 'integration', action: 'read' })
+  async getImportMappings(
+    @Param('connectionId', ParseIntPipe) connectionId: number,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    return this.connectionService.getImportMappings(effectiveUserId, connectionId);
+  }
+
+  @Get(':connectionId/import-mappings/active')
+  @RequirePermissions({ resource: 'integration', action: 'read' })
+  async getActiveImportMapping(
+    @Param('connectionId', ParseIntPipe) connectionId: number,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    return this.connectionService.getActiveImportMapping(effectiveUserId, connectionId);
+  }
+
+  @Put('import-mappings/:mappingId')
+  @RequirePermissions({ resource: 'integration', action: 'update' })
+  async updateImportMapping(
+    @Param('mappingId', ParseIntPipe) mappingId: number,
+    @Body() dto: UpdateImportMappingDto,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    this.logger.log(`User ${user.id} updating import mapping ${mappingId}`);
+    return this.connectionService.updateImportMapping(effectiveUserId, mappingId, dto);
+  }
+
+  @Delete('import-mappings/:mappingId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RequirePermissions({ resource: 'integration', action: 'delete' })
+  async deleteImportMapping(
+    @Param('mappingId', ParseIntPipe) mappingId: number,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    this.logger.log(`User ${user.id} deleting import mapping ${mappingId}`);
+    await this.connectionService.deleteImportMapping(effectiveUserId, mappingId);
+  }
+
+  // ===== Product Sync Operations =====
+
+  @Post('export')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions({ resource: 'integration', action: 'export' })
+  async exportProducts(
+    @Body() dto: ExportProductsDto,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    this.logger.log(
+      `User ${user.id} exporting ${dto.productIds.length} products to connection ${dto.connectionId}`,
+    );
+    return this.multiStoreService.exportProducts(effectiveUserId, dto);
+  }
+
+  @Post('import')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions({ resource: 'integration', action: 'import' })
+  async importProducts(
+    @Body() dto: ImportProductsDto,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    this.logger.log(
+      `User ${user.id} importing products from connection ${dto.connectionId}`,
+    );
+    return this.multiStoreService.importProducts(effectiveUserId, dto);
+  }
+
+  @Put(':connectionId/products/:productId')
+  @RequirePermissions({ resource: 'integration', action: 'update' })
+  async updateProduct(
+    @Param('connectionId', ParseIntPipe) connectionId: number,
+    @Param('productId', ParseIntPipe) productId: number,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    this.logger.log(
+      `User ${user.id} updating product ${productId} in connection ${connectionId}`,
+    );
+    return this.multiStoreService.updateProduct(effectiveUserId, connectionId, productId);
+  }
+
+  @Delete(':connectionId/products/:productId')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions({ resource: 'integration', action: 'delete' })
+  async deleteProduct(
+    @Param('connectionId', ParseIntPipe) connectionId: number,
+    @Param('productId', ParseIntPipe) productId: number,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    this.logger.log(
+      `User ${user.id} deleting product ${productId} from connection ${connectionId}`,
+    );
+    return this.multiStoreService.deleteProduct(effectiveUserId, connectionId, productId);
+  }
+
+  @Get(':connectionId/sync-status')
+  @RequirePermissions({ resource: 'integration', action: 'read' })
+  async getSyncStatus(
+    @Param('connectionId', ParseIntPipe) connectionId: number,
+    @Query() paginationDto: PaginationDto,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    return this.multiStoreService.getSyncStatus(effectiveUserId, connectionId, undefined, paginationDto);
+  }
+}
