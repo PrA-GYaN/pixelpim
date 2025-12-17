@@ -303,6 +303,16 @@ export class WooCommerceConnectionController {
     return this.multiStoreService.deleteProduct(effectiveUserId, connectionId, productId);
   }
 
+  @Get(':connectionId/sync-stats')
+  @RequirePermissions({ resource: 'integration', action: 'read' })
+  async getSyncStats(
+    @Param('connectionId', ParseIntPipe) connectionId: number,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    return this.multiStoreService.getSyncStats(effectiveUserId, connectionId);
+  }
+
   @Get(':connectionId/sync-status')
   @RequirePermissions({ resource: 'integration', action: 'read' })
   async getSyncStatus(

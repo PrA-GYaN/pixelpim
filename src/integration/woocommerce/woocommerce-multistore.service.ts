@@ -617,6 +617,60 @@ export class WooCommerceMultiStoreService {
   }
 
   /**
+   * Get aggregated sync statistics
+   */
+  async getSyncStats(
+    userId: number,
+    connectionId: number,
+  ): Promise<any> {
+    // Verify connection ownership
+    await this.connectionService.getConnection(userId, connectionId);
+
+    const where: any = { connectionId };
+
+    // Get all sync records to calculate stats
+    const allSyncs = await this.prisma.wooCommerceProductSync.findMany({
+      where,
+      select: {
+        syncStatus: true,
+        errorMessage: true,
+        lastExportedAt: true,
+        lastImportedAt: true,
+      },
+    });
+
+    const totalProducts = allSyncs.length;
+    const syncedProducts = allSyncs.filter((s) => s.syncStatus === 'synced').length;
+    const errorProducts = allSyncs.filter(
+      (s) => s.syncStatus === 'error' || !!s.errorMessage,
+    ).length;
+    const pendingProducts = Math.max(
+      0,
+      totalProducts - syncedProducts - errorProducts,
+    );
+
+    // Get most recent sync time
+    const allDates = allSyncs
+      .flatMap((s) => [s.lastExportedAt, s.lastImportedAt])
+      .filter((d): d is Date => d !== null && d !== undefined)
+      .map((d) => new Date(d).getTime())
+      .filter((t) => !Number.isNaN(t));
+
+    const lastSyncedAt = allDates.length
+      ? new Date(Math.max(...allDates)).toISOString()
+      : null;
+
+    return {
+      connectionId,
+      totalProducts,
+      syncedProducts,
+      pendingProducts,
+      errorProducts,
+      lastSyncedAt,
+    };
+  }
+
+  /**
    * Get sync status for products
    */
   async getSyncStatus(
