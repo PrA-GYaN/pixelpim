@@ -430,6 +430,8 @@ model WooCommerceProductSync {
   lastExportedAt     DateTime?
   lastImportedAt     DateTime?
   lastModifiedFields Json?    // Track which fields were last modified
+  lastSyncedImages   Json?    // Track last synced image URLs to avoid re-downloading
+  lastSyncedAssets   Json?    // Track last synced asset URLs to avoid re-downloading
   syncStatus         String   @default("synced") // synced, pending, error
   errorMessage       String?
   createdAt          DateTime @default(now())

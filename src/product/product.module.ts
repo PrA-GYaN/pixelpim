@@ -10,10 +10,18 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { AssetModule } from '../asset/asset.module';
 import { NotificationModule } from '../notification/notification.module';
 import { WebhookModule } from '../webhook/webhook.module';
+import { IntegrationModule } from '../integration/integration.module';
 import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
-  imports: [PrismaModule, AssetModule, NotificationModule, WebhookModule, ScheduleModule.forRoot()],
+  imports: [
+    PrismaModule, 
+    AssetModule, 
+    NotificationModule, 
+    WebhookModule, 
+    forwardRef(() => IntegrationModule),
+    ScheduleModule.forRoot()
+  ],
   controllers: [ProductController],
   providers: [
     ProductService,

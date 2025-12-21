@@ -1,4 +1,5 @@
 import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { WooCommerceConnectionService } from './woocommerce-connection.service';
 import {
@@ -9,17 +10,33 @@ import {
   ImportProductsResponseDto,
 } from './dto/woocommerce-connection.dto';
 
+
 @Injectable()
 export class WooCommerceMultiStoreService {
   private readonly logger = new Logger(WooCommerceMultiStoreService.name);
+  private readonly baseUrl: string;
 
   constructor(
     private prisma: PrismaService,
     private connectionService: WooCommerceConnectionService,
-  ) {}
+    private configService: ConfigService,
+  ) {
+    // Get base URL from environment or use default
+    const port = this.configService.get<string>('PORT') || '3000';
+    this.baseUrl = this.configService.get<string>('BASE_URL') || `http://localhost:${port}`;
+  }
 
   /**
    * Export products to a specific WooCommerce connection with selective fields
+   * 
+   * @legacy This method is now primarily used for initial product sync.
+   * Once a product is synced, subsequent updates are handled automatically
+   * by WooCommerceAutoSyncService when the product is updated.
+   * 
+   * Use this for:
+   * - Initial product export to WooCommerce
+   * - Bulk export operations
+   * - Manual re-sync when needed
    */
   async exportProducts(
     userId: number,
@@ -111,6 +128,17 @@ export class WooCommerceMultiStoreService {
         // this.logger.log(`Found Existing Sync:${JSON.stringify(existingSync)}`);
         // this.logger.log(`WooCommerce Data:${JSON.stringify(wooProductData)}`);
         
+        // Collect current image and asset URLs for tracking
+        const currentImageUrls: string[] = [];
+        if (product.imageUrl) currentImageUrls.push(product.imageUrl);
+        if (product.subImages && product.subImages.length > 0) {
+          currentImageUrls.push(...product.subImages);
+        }
+        
+        const currentAssetUrls = product.assets?.map((assetRelation: any) => 
+          assetRelation.asset?.filePath
+        ).filter(Boolean) || [];
+
         if (existingSync && existingSync.wooProductId && existingSync.wooProductId > 0) {
           // Update existing product (only if wooProductId is valid)
           this.logger.log(
@@ -123,12 +151,14 @@ export class WooCommerceMultiStoreService {
           );
           wooProductId = response.data.id;
 
-          // Update sync record
+          // Update sync record with image/asset tracking
           await this.prisma.wooCommerceProductSync.update({
             where: { id: existingSync.id },
             data: {
               lastExportedAt: new Date(),
               lastModifiedFields: fieldsToExport,
+              lastSyncedImages: currentImageUrls,
+              lastSyncedAssets: currentAssetUrls,
               syncStatus: 'synced',
               errorMessage: null,
             },
@@ -150,6 +180,8 @@ export class WooCommerceMultiStoreService {
                 wooProductId,
                 lastExportedAt: new Date(),
                 lastModifiedFields: fieldsToExport,
+                lastSyncedImages: currentImageUrls,
+                lastSyncedAssets: currentAssetUrls,
                 syncStatus: 'synced',
                 errorMessage: null,
               },
@@ -163,6 +195,8 @@ export class WooCommerceMultiStoreService {
                 wooProductId,
                 lastExportedAt: new Date(),
                 lastModifiedFields: fieldsToExport,
+                lastSyncedImages: currentImageUrls,
+                lastSyncedAssets: currentAssetUrls,
                 syncStatus: 'synced',
               },
             });
@@ -526,17 +560,33 @@ export class WooCommerceMultiStoreService {
       fieldMappings,
       sync.lastModifiedFields as any,
       wooClient,
+      sync, // Pass sync record to check for image/asset changes
     );
 
+
+    this.logger.log(`Product Data In WooCommerce Format:${JSON.stringify(wooProductData)}`);
     try {
       await wooClient.put(`products/${sync.wooProductId}`, wooProductData);
 
-      // Update sync record
+      // Collect current image and asset URLs for tracking
+      const currentImageUrls: string[] = [];
+      if (product.imageUrl) currentImageUrls.push(product.imageUrl);
+      if (product.subImages && product.subImages.length > 0) {
+        currentImageUrls.push(...product.subImages);
+      }
+      
+      const currentAssetUrls = product.assets?.map((assetRelation: any) => 
+        assetRelation.asset?.filePath
+      ).filter(Boolean) || [];
+
+      // Update sync record with image/asset tracking
       await this.prisma.wooCommerceProductSync.update({
         where: { id: sync.id },
         data: {
           lastExportedAt: new Date(),
           lastModifiedFields: fieldsToExport,
+          lastSyncedImages: currentImageUrls,
+          lastSyncedAssets: currentAssetUrls,
           syncStatus: 'synced',
           errorMessage: null,
         },
@@ -736,11 +786,16 @@ export class WooCommerceMultiStoreService {
     fieldMappings: Record<string, any>,
     lastModifiedFields: string[] | null,
     wooClient: any,
+    syncRecord?: any, // Optional sync record to check for image/asset changes
   ): Promise<any> {
     // Validate required fields
     if (!product.name || !product.sku) {
       throw new BadRequestException('Product must have name and sku');
     }
+
+    this.logger.log(`Build Data Field Mappings:${JSON.stringify(fieldMappings)}`);
+    this.logger.log(`Build Data Field to Export:${fieldsToExport}`);
+    this.logger.log(`Build Data Last Modified Field:${lastModifiedFields}`);
 
     // Helper function to sanitize HTML
     const sanitizeHtml = (html: string): string => {
@@ -778,6 +833,8 @@ export class WooCommerceMultiStoreService {
       return true;
     };
 
+    // this.logger.log(`Included Filed:${JSON.stringify(shouldIncludeField('regular_price'))}`);
+
     // Check if field is an attribute field (not a standard WooCommerce field)
     const isAttributeField = (field: string): boolean => {
       const standardFields = ['name', 'sku', 'price', 'sale_price', 'weight', 'dimensions', 'stock_status', 'description', 'images', 'categories', 'tags', 'status', 'type'];
@@ -800,36 +857,78 @@ export class WooCommerceMultiStoreService {
     }
 
     // Optional fields
-    // Images
-    if (shouldIncludeField('images')) {
+    // Images - check for imageUrl field or any field that maps to 'images'
+    const imageFieldNames = fieldsToExport.filter(field => 
+      fieldMappings[field] === 'images' || field === 'images' || field === 'imageUrl'
+    );
+    if (imageFieldNames.length > 0 || shouldIncludeField('images') || shouldIncludeField('imageUrl')) {
       const images: Array<{ src: string; alt: string }> = [];
       if (product.imageUrl) {
-        images.push({ src: product.imageUrl, alt: product.name });
+        images.push({ src: this.getAbsoluteUrl(product.imageUrl), alt: product.name });
       }
       if (product.subImages && product.subImages.length > 0) {
         product.subImages.forEach((url: string, index: number) => {
-          images.push({ src: url, alt: `${product.name} - Gallery ${index + 1}` });
+          images.push({ src: this.getAbsoluteUrl(url), alt: `${product.name} - Gallery ${index + 1}` });
         });
       }
+      
+      // Only include images if they have changed
       if (images.length > 0) {
-        wooProduct[getMappedField('images')] = images;
+        const currentImageUrls = images.map(img => img.src);
+        const lastSyncedImages = syncRecord?.lastSyncedImages as string[] | null;
+        
+        this.logger.log(`[Image Comparison] Product ${product.id}:`);
+        this.logger.log(`  Current images (${currentImageUrls.length}): ${JSON.stringify(currentImageUrls)}`);
+        this.logger.log(`  Last synced images (${lastSyncedImages?.length || 0}): ${JSON.stringify(lastSyncedImages)}`);
+        
+        // Normalize URLs to relative paths for comparison (handles both relative and absolute URLs)
+        const normalizedCurrentUrls = currentImageUrls.map(url => this.normalizeUrlForComparison(url));
+        const normalizedLastSyncedUrls = lastSyncedImages?.map(url => this.normalizeUrlForComparison(url)) || [];
+        
+        this.logger.log(`  Normalized current: ${JSON.stringify(normalizedCurrentUrls)}`);
+        this.logger.log(`  Normalized last synced: ${JSON.stringify(normalizedLastSyncedUrls)}`);
+        
+        // Check if images have changed
+        const imagesChanged = !lastSyncedImages || 
+          normalizedLastSyncedUrls.length !== normalizedCurrentUrls.length ||
+          !normalizedLastSyncedUrls.every((url, index) => url === normalizedCurrentUrls[index]);
+        
+        if (imagesChanged) {
+          wooProduct['images'] = images;
+          this.logger.log(`  ✓ Images CHANGED - including in sync`);
+          if (!lastSyncedImages) {
+            this.logger.log(`    Reason: No previous sync record`);
+          } else if (normalizedLastSyncedUrls.length !== normalizedCurrentUrls.length) {
+            this.logger.log(`    Reason: Image count changed (${normalizedLastSyncedUrls.length} → ${normalizedCurrentUrls.length})`);
+          } else {
+            this.logger.log(`    Reason: Image URLs changed`);
+          }
+        } else {
+          this.logger.log(`  ✗ Images UNCHANGED - skipping image sync`);
+        }
       }
     }
 
-    // Pricing
-    if (shouldIncludeField('price') || shouldIncludeField('regular_price')) {
-      const regularPriceAttr = findAttribute(['regular_price', 'price', 'regular price']);
+    // Pricing - check for custom attribute names that map to price fields
+    const regularPriceFieldNames = fieldsToExport.filter(field => 
+      fieldMappings[field] === 'regular_price' || field === 'regular_price' || field === 'price'
+    );
+    if (regularPriceFieldNames.length > 0) {
+      const regularPriceAttr = findAttribute([...regularPriceFieldNames, 'regular_price', 'price', 'regular price']);
       const regularPrice = regularPriceAttr ? extractNumeric(regularPriceAttr.value) : '';
       if (regularPrice) {
-        wooProduct[getMappedField('regular_price')] = regularPrice;
+        wooProduct['regular_price'] = regularPrice;
       }
     }
 
-    if (shouldIncludeField('sale_price')) {
-      const salePriceAttr = findAttribute(['sale_price', 'sale price', 'discount price']);
+    const salePriceFieldNames = fieldsToExport.filter(field => 
+      fieldMappings[field] === 'sale_price' || field === 'sale_price'
+    );
+    if (salePriceFieldNames.length > 0) {
+      const salePriceAttr = findAttribute([...salePriceFieldNames, 'sale_price', 'sale price', 'discount price']);
       const salePrice = salePriceAttr ? extractNumeric(salePriceAttr.value) : '';
       if (salePrice) {
-        wooProduct[getMappedField('sale_price')] = salePrice;
+        wooProduct['sale_price'] = salePrice;
       }
     }
 
@@ -891,8 +990,20 @@ export class WooCommerceMultiStoreService {
       if (descriptionAttr?.value) {
         description += sanitizeHtml(`<div class="product-description">${descriptionAttr.value}</div>`);
       }
-      // Add assets as media in description
-      if (product.assets && product.assets.length > 0) {
+      
+      // Check if assets have changed before adding them to description
+      const currentAssetUrls = product.assets?.map((assetRelation: any) => 
+        assetRelation.asset?.filePath
+      ).filter(Boolean) || [];
+      
+      const lastSyncedAssets = syncRecord?.lastSyncedAssets as string[] | null;
+      const assetsChanged = !lastSyncedAssets || 
+        lastSyncedAssets.length !== currentAssetUrls.length ||
+        !lastSyncedAssets.every((url, index) => url === currentAssetUrls[index]);
+      
+      // Add assets as media in description only if they've changed or it's first sync
+      if (product.assets && product.assets.length > 0 && (assetsChanged || !syncRecord)) {
+        this.logger.log(`Assets changed for product ${product.id}, including in description`);
         description += '<h3>Additional Media:</h3><div class="product-media">';
         product.assets.forEach((assetRelation: any) => {
           if (assetRelation.asset) {
@@ -906,7 +1017,10 @@ export class WooCommerceMultiStoreService {
           }
         });
         description += '</div>';
+      } else if (product.assets && product.assets.length > 0) {
+        this.logger.log(`Assets unchanged for product ${product.id}, skipping asset URLs in description`);
       }
+      
       if (description) {
         wooProduct[getMappedField('description')] = description;
       }
@@ -942,12 +1056,18 @@ export class WooCommerceMultiStoreService {
       'stock_status', 'stock status', 'availability', 'description', 'desc', 'long description',
       'tags', 'product tags', 'categories', 'category'
     ];
+    
+    // Get list of attribute names that are mapped to WooCommerce fields via fieldMappings
+    const attributesMappedToWooFields = Object.keys(fieldMappings).filter(key => 
+      fieldMappings[key] && typeof fieldMappings[key] === 'string'
+    );
 
     if (product.attributes && product.attributes.length > 0) {
       for (const attr of product.attributes) {
         const attrName = attr.attribute.name.toLowerCase();
         const isMapped = mappedAttributeNames.some(name => attrName.includes(name.toLowerCase()));
-        if (!isMapped && shouldIncludeField(attr.attribute.name) && attr.value) {
+        const isMappedViaFieldMapping = attributesMappedToWooFields.includes(attr.attribute.name);
+        if (!isMapped && !isMappedViaFieldMapping && shouldIncludeField(attr.attribute.name) && attr.value) {
           let options: string[] = [];
           try {
             if (typeof attr.value === 'string' && attr.value.trim().startsWith('[')) {
@@ -1383,5 +1503,47 @@ export class WooCommerceMultiStoreService {
     }
 
     return allProducts;
+  }
+
+  /**
+   * Convert relative URL to absolute URL
+   * If URL is already absolute, return as is
+   */
+  private getAbsoluteUrl(url: string): string {
+    if (!url) return url;
+    
+    // If URL is already absolute (starts with http:// or https://), return as is
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return url;
+    }
+    
+    // If URL is relative, prepend base URL
+    if (url.startsWith('/')) {
+      return `${this.baseUrl}${url}`;
+    }
+    
+    // If URL doesn't start with /, add it
+    return `${this.baseUrl}/${url}`;
+  }
+
+  /**
+   * Normalize URL to relative path for comparison
+   * Strips the base URL if present to ensure consistent comparison
+   */
+  private normalizeUrlForComparison(url: string): string {
+    if (!url) return '';
+    
+    // If URL is absolute, strip the base URL to get relative path
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      try {
+        const urlObj = new URL(url);
+        return urlObj.pathname; // Returns just the path part (e.g., /uploads/...)
+      } catch {
+        return url; // If parsing fails, return as is
+      }
+    }
+    
+    // Already relative
+    return url;
   }
 }

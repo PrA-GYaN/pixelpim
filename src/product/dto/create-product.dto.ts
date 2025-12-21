@@ -36,7 +36,6 @@ export class CreateProductDto {
     @IsOptional()
     @IsArray()
     @IsString({ each: true })
-    @IsUrl({}, { each: true, message: 'Each sub image must be a valid URL' })
     @Type(() => String)
     subImages: string[] = [];
 

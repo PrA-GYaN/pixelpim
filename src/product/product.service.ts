@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException, Logger, forwardRef, Inject } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException, Logger, forwardRef, Inject, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationService } from '../notification/notification.service';
 import { WebhookService } from '../webhook/webhook.service';
@@ -16,6 +16,7 @@ import { ScheduleImportDto, UpdateScheduledImportDto, ImportJobResponseDto } fro
 import { CsvImportService } from './services/csv-import.service';
 import { ImportSchedulerService } from './services/import-scheduler.service';
 import { ExcelImportService } from './services/excel-import.service';
+import { WooCommerceAutoSyncService } from '../integration/woocommerce/woocommerce-auto-sync.service';
 import { PaginatedResponse, PaginationUtils } from '../common';
 import { getUserFriendlyType } from '../types/user-attribute-type.enum';
 import { SkuPatternHelper } from '../utils/sku-pattern.helper';
@@ -106,6 +107,9 @@ export class ProductService {
     private readonly importSchedulerService: ImportSchedulerService,
     @Inject(forwardRef(() => ExcelImportService))
     private readonly excelImportService: ExcelImportService,
+    @Optional()
+    @Inject(forwardRef(() => WooCommerceAutoSyncService))
+    private readonly wooAutoSyncService?: WooCommerceAutoSyncService,
   ) {}
 
   // How long to retain the last progress snapshot after completion so clients
@@ -1631,8 +1635,10 @@ export class ProductService {
         data: updateData,
       });
 
-      // If family was changed, update all variants to inherit the new family
-      if (updateProductDto.familyId !== undefined) {
+      // If family was changed, link existing custom attributes to the family
+      // and update all variants to inherit the new family
+      if (updateProductDto.familyId !== undefined && updateProductDto.familyId !== null) {
+        await this.linkExistingAttributesToFamily(id, updateProductDto.familyId);
         await this.updateVariantsFamilyAndAttributes(id, userId);
       }
 
@@ -1666,17 +1672,20 @@ export class ProductService {
           filteredAttributes = newFilteredAttributes;
         }
 
-        // Delete only non-family attributes before recreating
-        await this.prisma.productAttribute.deleteMany({ 
-          where: { 
-            productId: id,
-            familyAttributeId: null // Only delete non-family attributes
-          } 
-        });
-        if (filteredAttributes.length > 0) {
-          await this.prisma.productAttribute.createMany({
-            data: filteredAttributes.map(attributeId => ({ productId: id, attributeId })),
-            skipDuplicates: true,
+        // Use upsert to merge attributes instead of replacing them
+        for (const attributeId of filteredAttributes) {
+          await this.prisma.productAttribute.upsert({
+            where: {
+              productId_attributeId: {
+                productId: id,
+                attributeId,
+              },
+            },
+            update: {},
+            create: {
+              productId: id,
+              attributeId,
+            },
           });
         }
       }
@@ -1717,31 +1726,7 @@ export class ProductService {
             );
           }
 
-          // First, delete existing non-family ProductAttribute entries that aren't in the new list
-          const currentProductAttributes = await this.prisma.productAttribute.findMany({
-            where: { 
-              productId: id,
-              familyAttributeId: null // Only get non-family attributes
-            },
-            select: { attributeId: true },
-          });
-          
-          const newAttributeIds = filteredAttributesWithValues.map(av => av.attributeId);
-          const attributesToDelete = currentProductAttributes
-            .filter(pa => !newAttributeIds.includes(pa.attributeId))
-            .map(pa => pa.attributeId);
-
-          if (attributesToDelete.length > 0) {
-            await this.prisma.productAttribute.deleteMany({
-              where: {
-                productId: id,
-                attributeId: { in: attributesToDelete },
-                familyAttributeId: null // Only delete non-family attributes
-              },
-            });
-          }
-
-          // Create or update ProductAttribute entries with values using upsert
+          // Use upsert to merge attributes - only updates the provided attributes
           for (const { attributeId, value } of filteredAttributesWithValues) {
             await this.prisma.productAttribute.upsert({
               where: {
@@ -1760,14 +1745,6 @@ export class ProductService {
               },
             });
           }
-        } else {
-          // If empty array provided, delete all non-family ProductAttribute entries
-          await this.prisma.productAttribute.deleteMany({ 
-            where: { 
-              productId: id,
-              familyAttributeId: null // Only delete non-family attributes
-            } 
-          });
         }
       }
 
@@ -1806,31 +1783,7 @@ export class ProductService {
             }
           }
 
-          // First, delete existing family ProductAttribute entries that aren't in the new list
-          const currentFamilyAttributes = await this.prisma.productAttribute.findMany({
-            where: { 
-              productId: id,
-              familyAttributeId: { not: null }
-            },
-            select: { attributeId: true, familyAttributeId: true },
-          });
-          
-          const newFamilyAttributeIds = updateProductDto.familyAttributesWithValues.map(av => av.attributeId);
-          const familyAttributesToDelete = currentFamilyAttributes
-            .filter(pa => !newFamilyAttributeIds.includes(pa.attributeId))
-            .map(pa => pa.attributeId);
-
-          if (familyAttributesToDelete.length > 0) {
-            await this.prisma.productAttribute.deleteMany({
-              where: {
-                productId: id,
-                attributeId: { in: familyAttributesToDelete },
-                familyAttributeId: { not: null }
-              },
-            });
-          }
-
-          // Create or update ProductAttribute entries for family attributes with values
+          // Use upsert to merge family attributes - only updates the provided attributes
           for (const { attributeId, value } of updateProductDto.familyAttributesWithValues) {
             const familyAttributeId = familyAttributeMap.get(attributeId);
             
@@ -1901,6 +1854,13 @@ export class ProductService {
       for (const webhook of webhooks) {
         const payload = this.webhookFormatterService.formatProductUpdated(result);
         this.webhookService.deliverWebhook(webhook.id, 'product.updated', payload);
+      }
+      
+      // Auto-sync to WooCommerce if product was previously synced
+      if (this.wooAutoSyncService) {
+        this.wooAutoSyncService.autoSyncProductUpdate(id, userId).catch((error: any) => {
+          this.logger.error(`Auto-sync to WooCommerce failed for product ${id}: ${error.message}`);
+        });
       }
       
       return {
@@ -3642,6 +3602,13 @@ export class ProductService {
         data: { status } 
       });
 
+      // Auto-sync to WooCommerce if product was previously synced
+      if (this.wooAutoSyncService) {
+        this.wooAutoSyncService.autoSyncAttributeUpdate(productId, userId).catch((error: any) => {
+          this.logger.error(`Auto-sync to WooCommerce failed after attribute update for product ${productId}: ${error.message}`);
+        });
+      }
+
       // Return updated product
       return this.findOne(productId, userId);
     } catch (error) {
@@ -3653,7 +3620,7 @@ export class ProductService {
   }
 
   /**
-   * Get product attribute values
+   * Get attribute values for a specific product
    */
   async getProductAttributeValues(
     productId: number,
@@ -3780,6 +3747,13 @@ export class ProductService {
         data: { status } 
       });
 
+      // Auto-sync to WooCommerce if product was previously synced
+      if (this.wooAutoSyncService) {
+        this.wooAutoSyncService.autoSyncAttributeUpdate(productId, userId).catch((error: any) => {
+          this.logger.error(`Auto-sync to WooCommerce failed after family attribute update for product ${productId}: ${error.message}`);
+        });
+      }
+
       // Return updated product
       return this.findOne(productId, userId);
     } catch (error) {
@@ -3791,9 +3765,8 @@ export class ProductService {
   }
 
   /**
-   * Get family attribute values for a specific product
-   * Returns only the attributes that belong to the product's family
-   */
+   * Gif (this.wooAutoSyncService) {
+        this.wooAut
   async getProductFamilyAttributeValues(
     productId: number,
     userId: number
@@ -4282,6 +4255,76 @@ export class ProductService {
   }
 
   /**
+   * Helper: Link existing custom ProductAttribute records to FamilyAttribute records
+   * when a family is assigned to a product. This ensures existing attribute values
+   * are preserved and properly linked to the family.
+   */
+  private async linkExistingAttributesToFamily(productId: number, familyId: number): Promise<void> {
+    try {
+      this.logger.log(`[linkExistingAttributesToFamily] Linking attributes for product ${productId} to family ${familyId}`);
+
+      // Get all family attributes for this family
+      const familyAttributes = await this.prisma.familyAttribute.findMany({
+        where: { familyId },
+        select: {
+          id: true,
+          attributeId: true,
+        },
+      });
+
+      if (familyAttributes.length === 0) {
+        this.logger.log(`[linkExistingAttributesToFamily] No family attributes found for family ${familyId}`);
+        return;
+      }
+
+      // Create a map of attributeId -> familyAttributeId
+      const attributeToFamilyMap = new Map(
+        familyAttributes.map(fa => [fa.attributeId, fa.id])
+      );
+
+      // Get all existing ProductAttribute records for this product that match family attributes
+      const existingProductAttributes = await this.prisma.productAttribute.findMany({
+        where: {
+          productId,
+          attributeId: { in: Array.from(attributeToFamilyMap.keys()) },
+          familyAttributeId: null, // Only link attributes that aren't already linked
+        },
+      });
+
+      if (existingProductAttributes.length === 0) {
+        this.logger.log(`[linkExistingAttributesToFamily] No existing custom attributes to link`);
+        return;
+      }
+
+      // Update each ProductAttribute to link it to the corresponding FamilyAttribute
+      const updatePromises = existingProductAttributes.map(pa => {
+        const familyAttributeId = attributeToFamilyMap.get(pa.attributeId);
+        return this.prisma.productAttribute.update({
+          where: {
+            productId_attributeId: {
+              productId: pa.productId,
+              attributeId: pa.attributeId,
+            },
+          },
+          data: {
+            familyAttributeId,
+          },
+        });
+      });
+
+      await Promise.all(updatePromises);
+
+      this.logger.log(
+        `[linkExistingAttributesToFamily] Successfully linked ${existingProductAttributes.length} attributes to family ${familyId}`
+      );
+
+    } catch (error) {
+      this.logger.error(`[linkExistingAttributesToFamily] Failed to link attributes: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
+  /**
    * Helper: Update all variants when parent's family changes
    * This ensures all variants stay synchronized with their parent's family
    */
@@ -4382,6 +4425,13 @@ export class ProductService {
 
       this.logger.log(`Successfully soft deleted product with ID: ${id}`);
 
+      // Clean up WooCommerce sync data
+      if (this.wooAutoSyncService) {
+        this.wooAutoSyncService.cleanupProductSyncData(id).catch((error: any) => {
+          this.logger.error(`Failed to cleanup WooCommerce sync data for product ${id}: ${error.message}`);
+        });
+      }
+
       // Log notification
       await this.notificationService.logProductDeletion(userId, product.name);
 
@@ -4393,7 +4443,6 @@ export class ProductService {
       if (error instanceof NotFoundException || error instanceof BadRequestException) {
         throw error;
       }
-
       this.logger.error(`Failed to soft delete product ${id}: ${error.message}`, error.stack);
       throw new BadRequestException('Failed to soft delete product');
     }
@@ -4551,6 +4600,13 @@ export class ProductService {
       // Unlink variants before permanent deletion
       await this.unlinkVariantsOnDelete(id, userId);
 
+      // Clean up WooCommerce sync data before deletion
+      if (this.wooAutoSyncService) {
+        await this.wooAutoSyncService.cleanupProductSyncData(id).catch((error: any) => {
+          this.logger.error(`Failed to cleanup WooCommerce sync data for product ${id}: ${error.message}`);
+        });
+      }
+
       // Permanently delete
       await this.prisma.product.delete({
         where: { id },
@@ -4563,7 +4619,6 @@ export class ProductService {
       if (error instanceof NotFoundException) {
         throw error;
       }
-
       this.logger.error(`Failed to permanently delete product ${id}: ${error.message}`, error.stack);
       throw new BadRequestException('Failed to permanently delete product');
     }

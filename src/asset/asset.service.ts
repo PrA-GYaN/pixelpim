@@ -133,12 +133,19 @@ export class AssetService {
     const username = user.email.replace(/[^a-zA-Z0-9]/g, '_');
     const userFolder = `${userId}_${username}`;
 
+    // Parse assetGroupId to number if it's a string, or set to null
+    const parsedAssetGroupId = createAssetDto.assetGroupId 
+      ? (typeof createAssetDto.assetGroupId === 'string' 
+          ? parseInt(createAssetDto.assetGroupId, 10) 
+          : createAssetDto.assetGroupId)
+      : null;
+
     // Check if asset with same name already exists in the same folder (excluding soft-deleted)
     const existingAsset = await this.prisma.asset.findFirst({
       where: {
         name: createAssetDto.name,
         userId,
-        assetGroupId: createAssetDto.assetGroupId ?? null,
+        assetGroupId: parsedAssetGroupId,
         isDeleted: false,
       },
     });
@@ -148,7 +155,7 @@ export class AssetService {
     }
 
     // Build local directory path
-    const localDirPath = await this.buildLocalDirectoryPath(userId, createAssetDto.assetGroupId);
+    const localDirPath = await this.buildLocalDirectoryPath(userId, parsedAssetGroupId ?? undefined);
 
     // Ensure directory exists
     await fs.mkdir(localDirPath, { recursive: true });
@@ -164,10 +171,10 @@ export class AssetService {
     await fs.writeFile(localFilePath, file.buffer);
 
     // Check asset group exists
-    if (createAssetDto.assetGroupId) {
+    if (parsedAssetGroupId) {
       const assetGroup = await this.prisma.assetGroup.findFirst({
         where: {
-          id: createAssetDto.assetGroupId,
+          id: parsedAssetGroupId,
           userId,
         },
       });
@@ -187,7 +194,7 @@ export class AssetService {
         mimeType: file.mimetype,
         size: BigInt(file.size),
         userId,
-        assetGroupId: createAssetDto.assetGroupId,
+        assetGroupId: parsedAssetGroupId,
       },
       include: {
         assetGroup: true,
@@ -195,8 +202,8 @@ export class AssetService {
     });
 
     // Update group size
-    if (createAssetDto.assetGroupId) {
-      await this.updateAssetGroupSize(createAssetDto.assetGroupId);
+    if (parsedAssetGroupId) {
+      await this.updateAssetGroupSize(parsedAssetGroupId);
     }
 
     return {
@@ -204,6 +211,67 @@ export class AssetService {
       size: Number(asset.size),
       url: asset.filePath, // filePath already includes /uploads/ prefix
       formattedSize: CloudinaryUtil.formatFileSize(Number(asset.size)),
+    };
+  }
+
+  async findAllWithGroups(
+    userId: number,
+    assetGroupId?: number,
+    page: number = 1,
+    limit: number = 10,
+    filters: any = {},
+  ) {
+    // Determine the parent group context
+    const parentGroupId = assetGroupId !== undefined ? assetGroupId : null;
+
+    // Fetch asset groups for the current context (non-paginated, all groups)
+    const groupWhereCondition: any = {
+      userId,
+      parentGroupId,
+    };
+
+    // Apply search filter to groups if provided
+    if (filters.search) {
+      groupWhereCondition.groupName = { contains: filters.search, mode: 'insensitive' };
+    }
+
+    // Fetch groups with asset counts
+    const assetGroups = await this.prisma.assetGroup.findMany({
+      where: groupWhereCondition,
+      select: {
+        id: true,
+        groupName: true,
+        parentGroupId: true,
+        createdDate: true,
+        createdAt: true,
+        updatedAt: true,
+        userId: true,
+        totalSize: true,
+        _count: {
+          select: {
+            assets: true,
+            childGroups: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // Transform groups
+    const transformedGroups = assetGroups.map((group: any) => ({
+      ...AssetService.convertBigIntToString(group),
+      assetCount: group._count.assets,
+      childGroupCount: group._count.childGroups,
+      totalSize: group.totalSize ? Number(group.totalSize) : 0,
+    }));
+
+    // Fetch assets with pagination
+    const assetsResult = await this.findAll(userId, assetGroupId, page, limit, filters, false);
+
+    // Return combined response
+    return {
+      groups: transformedGroups,
+      assets: assetsResult,
     };
   }
 

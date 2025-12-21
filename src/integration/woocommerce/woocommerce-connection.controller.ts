@@ -49,7 +49,7 @@ export class WooCommerceConnectionController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @RequirePermissions({ resource: 'integration', action: 'create' })
+  @RequirePermissions({ resource: 'integrations', action: 'create' })
   async createConnection(
     @Body() dto: CreateWooCommerceConnectionDto,
     @GetUser() user: User,
@@ -62,7 +62,7 @@ export class WooCommerceConnectionController {
   }
 
   @Get()
-  @RequirePermissions({ resource: 'integration', action: 'read' })
+  @RequirePermissions({ resource: 'integrations', action: 'read' })
   async getConnections(
     @GetUser() user: User,
     @EffectiveUserId() effectiveUserId: number,
@@ -71,7 +71,7 @@ export class WooCommerceConnectionController {
   }
 
   @Get('default')
-  @RequirePermissions({ resource: 'integration', action: 'read' })
+  @RequirePermissions({ resource: 'integrations', action: 'read' })
   async getDefaultConnection(
     @GetUser() user: User,
     @EffectiveUserId() effectiveUserId: number,
@@ -80,7 +80,7 @@ export class WooCommerceConnectionController {
   }
 
   @Get(':connectionId')
-  @RequirePermissions({ resource: 'integration', action: 'read' })
+  @RequirePermissions({ resource: 'integrations', action: 'read' })
   async getConnection(
     @Param('connectionId', ParseIntPipe) connectionId: number,
     @GetUser() user: User,
@@ -90,7 +90,7 @@ export class WooCommerceConnectionController {
   }
 
   @Put(':connectionId')
-  @RequirePermissions({ resource: 'integration', action: 'update' })
+  @RequirePermissions({ resource: 'integrations', action: 'update' })
   async updateConnection(
     @Param('connectionId', ParseIntPipe) connectionId: number,
     @Body() dto: UpdateWooCommerceConnectionDto,
@@ -103,7 +103,7 @@ export class WooCommerceConnectionController {
   
   @Delete(':connectionId')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @RequirePermissions({ resource: 'integration', action: 'delete' })
+  @RequirePermissions({ resource: 'integrations', action: 'delete' })
   async deleteConnection(
     @Param('connectionId', ParseIntPipe) connectionId: number,
     @GetUser() user: User,
@@ -115,7 +115,7 @@ export class WooCommerceConnectionController {
 
   @Post('test')
   @HttpCode(HttpStatus.OK)
-  @RequirePermissions({ resource: 'integration', action: 'read' })
+  @RequirePermissions({ resource: 'integrations', action: 'read' })
   async testConnection(@Body() dto: TestConnectionDto) {
     return this.connectionService.testConnection(dto);
   }
@@ -124,7 +124,7 @@ export class WooCommerceConnectionController {
 
   @Post(':connectionId/export-mappings')
   @HttpCode(HttpStatus.CREATED)
-  @RequirePermissions({ resource: 'integration', action: 'create' })
+  @RequirePermissions({ resource: 'integrations', action: 'create' })
   async createExportMapping(
     @Param('connectionId', ParseIntPipe) connectionId: number,
     @Body() dto: CreateExportMappingDto,
@@ -139,7 +139,7 @@ export class WooCommerceConnectionController {
   }
 
   @Get(':connectionId/export-mappings')
-  @RequirePermissions({ resource: 'integration', action: 'read' })
+  @RequirePermissions({ resource: 'integrations', action: 'read' })
   async getExportMappings(
     @Param('connectionId', ParseIntPipe) connectionId: number,
     @GetUser() user: User,
@@ -149,7 +149,7 @@ export class WooCommerceConnectionController {
   }
 
   @Get(':connectionId/export-mappings/active')
-  @RequirePermissions({ resource: 'integration', action: 'read' })
+  @RequirePermissions({ resource: 'integrations', action: 'read' })
   async getActiveExportMapping(
     @Param('connectionId', ParseIntPipe) connectionId: number,
     @GetUser() user: User,
@@ -159,7 +159,7 @@ export class WooCommerceConnectionController {
   }
 
   @Put('export-mappings/:mappingId')
-  @RequirePermissions({ resource: 'integration', action: 'update' })
+  @RequirePermissions({ resource: 'integrations', action: 'update' })
   async updateExportMapping(
     @Param('mappingId', ParseIntPipe) mappingId: number,
     @Body() dto: UpdateExportMappingDto,
@@ -172,7 +172,7 @@ export class WooCommerceConnectionController {
 
   @Delete('export-mappings/:mappingId')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @RequirePermissions({ resource: 'integration', action: 'delete' })
+  @RequirePermissions({ resource: 'integrations', action: 'delete' })
   async deleteExportMapping(
     @Param('mappingId', ParseIntPipe) mappingId: number,
     @GetUser() user: User,
@@ -186,7 +186,7 @@ export class WooCommerceConnectionController {
 
   @Post(':connectionId/import-mappings')
   @HttpCode(HttpStatus.CREATED)
-  @RequirePermissions({ resource: 'integration', action: 'create' })
+  @RequirePermissions({ resource: 'integrations', action: 'create' })
   async createImportMapping(
     @Param('connectionId', ParseIntPipe) connectionId: number,
     @Body() dto: CreateImportMappingDto,
@@ -201,7 +201,7 @@ export class WooCommerceConnectionController {
   }
 
   @Get(':connectionId/import-mappings')
-  @RequirePermissions({ resource: 'integration', action: 'read' })
+  @RequirePermissions({ resource: 'integrations', action: 'read' })
   async getImportMappings(
     @Param('connectionId', ParseIntPipe) connectionId: number,
     @GetUser() user: User,
@@ -211,7 +211,7 @@ export class WooCommerceConnectionController {
   }
 
   @Get(':connectionId/import-mappings/active')
-  @RequirePermissions({ resource: 'integration', action: 'read' })
+  @RequirePermissions({ resource: 'integrations', action: 'read' })
   async getActiveImportMapping(
     @Param('connectionId', ParseIntPipe) connectionId: number,
     @GetUser() user: User,
@@ -221,7 +221,7 @@ export class WooCommerceConnectionController {
   }
 
   @Put('import-mappings/:mappingId')
-  @RequirePermissions({ resource: 'integration', action: 'update' })
+  @RequirePermissions({ resource: 'integrations', action: 'update' })
   async updateImportMapping(
     @Param('mappingId', ParseIntPipe) mappingId: number,
     @Body() dto: UpdateImportMappingDto,
@@ -234,7 +234,7 @@ export class WooCommerceConnectionController {
 
   @Delete('import-mappings/:mappingId')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @RequirePermissions({ resource: 'integration', action: 'delete' })
+  @RequirePermissions({ resource: 'integrations', action: 'delete' })
   async deleteImportMapping(
     @Param('mappingId', ParseIntPipe) mappingId: number,
     @GetUser() user: User,
@@ -248,7 +248,7 @@ export class WooCommerceConnectionController {
 
   @Post('export')
   @HttpCode(HttpStatus.OK)
-  @RequirePermissions({ resource: 'integration', action: 'export' })
+  @RequirePermissions({ resource: 'integrations', action: 'export' })
   async exportProducts(
     @Body() dto: ExportProductsDto,
     @GetUser() user: User,
@@ -262,7 +262,7 @@ export class WooCommerceConnectionController {
 
   @Post('import')
   @HttpCode(HttpStatus.OK)
-  @RequirePermissions({ resource: 'integration', action: 'import' })
+  @RequirePermissions({ resource: 'integrations', action: 'import' })
   async importProducts(
     @Body() dto: ImportProductsDto,
     @GetUser() user: User,
@@ -275,7 +275,7 @@ export class WooCommerceConnectionController {
   }
 
   @Put(':connectionId/products/:productId')
-  @RequirePermissions({ resource: 'integration', action: 'update' })
+  @RequirePermissions({ resource: 'integrations', action: 'update' })
   async updateProduct(
     @Param('connectionId', ParseIntPipe) connectionId: number,
     @Param('productId', ParseIntPipe) productId: number,
@@ -290,7 +290,7 @@ export class WooCommerceConnectionController {
 
   @Delete(':connectionId/products/:productId')
   @HttpCode(HttpStatus.OK)
-  @RequirePermissions({ resource: 'integration', action: 'delete' })
+  @RequirePermissions({ resource: 'integrations', action: 'delete' })
   async deleteProduct(
     @Param('connectionId', ParseIntPipe) connectionId: number,
     @Param('productId', ParseIntPipe) productId: number,
@@ -304,7 +304,7 @@ export class WooCommerceConnectionController {
   }
 
   @Get(':connectionId/sync-stats')
-  @RequirePermissions({ resource: 'integration', action: 'read' })
+  @RequirePermissions({ resource: 'integrations', action: 'read' })
   async getSyncStats(
     @Param('connectionId', ParseIntPipe) connectionId: number,
     @GetUser() user: User,
@@ -314,7 +314,7 @@ export class WooCommerceConnectionController {
   }
 
   @Get(':connectionId/sync-status')
-  @RequirePermissions({ resource: 'integration', action: 'read' })
+  @RequirePermissions({ resource: 'integrations', action: 'read' })
   async getSyncStatus(
     @Param('connectionId', ParseIntPipe) connectionId: number,
     @Query() paginationDto: PaginationDto,

@@ -550,6 +550,12 @@ export class FamilyService {
           });
         }
 
+        // 3.5. Link existing ProductAttributes to newly created FamilyAttributes
+        if (toCreate.length > 0) {
+          const newlyCreatedAttributeIds = toCreate.map(attr => attr.attributeId);
+          await this.linkProductAttributesToNewFamilyAttributes(id, newlyCreatedAttributeIds, tx);
+        }
+
         // 4. Delete removed FamilyAttribute rows (WARNING: This will cascade delete ProductAttributes!)
         if (toDelete.length > 0) {
           // console.log(`[Family Update] WARNING: Deleting ${toDelete.length} FamilyAttributes, which will CASCADE DELETE related ProductAttributes`);
@@ -686,5 +692,85 @@ export class FamilyService {
     });
 
     return { message: 'Attribute removed from family successfully' };
+  }
+
+  /**
+   * Helper: Link existing custom ProductAttribute records to newly created FamilyAttribute records
+   * This is called when a family is updated to add new attributes.
+   * It finds all products using this family and links their existing custom attributes
+   * to the corresponding FamilyAttribute records.
+   */
+  private async linkProductAttributesToNewFamilyAttributes(
+    familyId: number,
+    newlyCreatedAttributeIds: number[],
+    tx: any
+  ): Promise<void> {
+    if (newlyCreatedAttributeIds.length === 0) {
+      return;
+    }
+
+    // Get all products that use this family
+    const productsWithFamily = await tx.product.findMany({
+      where: { familyId },
+      select: { id: true },
+    });
+
+    if (productsWithFamily.length === 0) {
+      return;
+    }
+
+    const productIds = productsWithFamily.map(p => p.id);
+
+    // Get the newly created FamilyAttributes for mapping
+    const newFamilyAttributes = await tx.familyAttribute.findMany({
+      where: {
+        familyId,
+        attributeId: { in: newlyCreatedAttributeIds },
+      },
+      select: {
+        id: true,
+        attributeId: true,
+      },
+    });
+
+    // Create a map of attributeId -> familyAttributeId
+    const attributeToFamilyMap = new Map(
+      newFamilyAttributes.map(fa => [fa.attributeId, fa.id])
+    );
+
+    // Find existing ProductAttribute records that need to be linked
+    const existingProductAttributes = await tx.productAttribute.findMany({
+      where: {
+        productId: { in: productIds },
+        attributeId: { in: newlyCreatedAttributeIds },
+        familyAttributeId: null, // Only link attributes that aren't already linked
+      },
+    });
+
+    if (existingProductAttributes.length === 0) {
+      return;
+    }
+
+    // Update each ProductAttribute to link it to the corresponding FamilyAttribute
+    const updatePromises = existingProductAttributes.map(pa => {
+      const familyAttributeId = attributeToFamilyMap.get(pa.attributeId);
+      return tx.productAttribute.update({
+        where: {
+          productId_attributeId: {
+            productId: pa.productId,
+            attributeId: pa.attributeId,
+          },
+        },
+        data: {
+          familyAttributeId,
+        },
+      });
+    });
+
+    await Promise.all(updatePromises);
+
+    console.log(
+      `[Family Update] Linked ${existingProductAttributes.length} existing ProductAttributes to family ${familyId}`
+    );
   }
 }
