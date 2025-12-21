@@ -323,4 +323,37 @@ export class WooCommerceConnectionController {
   ) {
     return this.multiStoreService.getSyncStatus(effectiveUserId, connectionId, undefined, paginationDto);
   }
+
+  // ===== Sync Logs Management =====
+
+  @Get('sync-logs/list')
+  @RequirePermissions({ resource: 'integrations', action: 'read' })
+  async getSyncLogs(
+    @Query('connectionId', ParseIntPipe) connectionId: number,
+    @Query('syncStatus') syncStatus: string | undefined,
+    @Query('page') page: string | undefined,
+    @Query('limit') limit: string | undefined,
+    @Query('search') search: string | undefined,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    return this.multiStoreService.getSyncLogs(effectiveUserId, {
+      connectionId,
+      syncStatus: syncStatus || undefined,
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      search: search || undefined,
+    });
+  }
+
+  @Post('sync-logs/hide')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions({ resource: 'integrations', action: 'update' })
+  async hideSyncLogs(
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    this.logger.log(`User ${user.id} hiding WooCommerce sync logs`);
+    return this.multiStoreService.hideSyncLogs(effectiveUserId);
+  }
 }

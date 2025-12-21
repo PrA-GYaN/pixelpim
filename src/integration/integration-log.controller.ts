@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Post,
   Query,
   Param,
   UseGuards,
@@ -169,6 +170,25 @@ export class IntegrationLogController {
     } catch (error) {
       this.logger.error(`Failed to fetch error logs for user ${user.id}`, error);
       throw new BadRequestException('Failed to fetch error logs');
+    }
+  }
+
+  /**
+   * POST /api/integration/logs/hide
+   * Hide logs before current timestamp
+   */
+  @Post('hide')
+  async hideLogs(
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ): Promise<{ success: boolean; hiddenLogsTimestamp: Date }> {
+    this.logger.log(`User ${user.id} hiding logs`);
+
+    try {
+      return await this.integrationLogService.hideLogs(effectiveUserId);
+    } catch (error) {
+      this.logger.error(`Failed to hide logs for user ${user.id}`, error);
+      throw new BadRequestException('Failed to hide logs');
     }
   }
 }

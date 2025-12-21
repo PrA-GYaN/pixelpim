@@ -25,6 +25,8 @@ model User {
   role            Role             @default(OWNER)
   ownerId         Int?
   createdAt       DateTime         @default(now())
+  hiddenLogsTimestamp DateTime?
+  hiddenWooSyncLogsTimestamp DateTime?
 
   // Hierarchical relationship for Owner-Staff
   owner              User?            @relation("OwnerStaff", fields: [ownerId], references: [id], onDelete: Cascade)

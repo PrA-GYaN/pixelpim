@@ -43,10 +43,23 @@ export class IntegrationLogService {
 
     const skip = (page - 1) * limit;
 
+    // Get user's hiddenLogsTimestamp
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { hiddenLogsTimestamp: true },
+    });
+
     // Build where clause
     const where: any = {
       userId,
     };
+
+    // Apply hiddenLogsTimestamp filter to hide logs before the timestamp
+    if (user?.hiddenLogsTimestamp) {
+      where.timestamp = {
+        gt: user.hiddenLogsTimestamp,
+      };
+    }
 
     if (integrationType) {
       where.integrationType = integrationType;
@@ -64,8 +77,11 @@ export class IntegrationLogService {
       where.productId = productId;
     }
 
+    // Merge with existing timestamp filter if provided
     if (startDate || endDate) {
-      where.timestamp = {};
+      if (!where.timestamp) {
+        where.timestamp = {};
+      }
       if (startDate) {
         where.timestamp.gte = new Date(startDate);
       }
@@ -348,6 +364,25 @@ export class IntegrationLogService {
     return {
       errors,
       total,
+    };
+  }
+
+  /**
+   * Hide logs before current timestamp
+   */
+  async hideLogs(userId: number): Promise<{ success: boolean; hiddenLogsTimestamp: Date }> {
+    const hiddenLogsTimestamp = new Date();
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { hiddenLogsTimestamp },
+    });
+
+    this.logger.log(`User ${userId} hid logs before ${hiddenLogsTimestamp.toISOString()}`);
+
+    return {
+      success: true,
+      hiddenLogsTimestamp,
     };
   }
 }

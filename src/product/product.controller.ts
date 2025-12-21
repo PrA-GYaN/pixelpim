@@ -20,6 +20,7 @@ import {
 import { ProductService } from './product.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { BulkDeleteDto } from './dto/bulk-delete.dto';
+import { BulkAttachToFamilyDto, BulkAttachToFamilyResponseDto } from './dto/bulk-attach-to-family.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { UpdateProductAttributesDto } from './dto/update-product-attribute.dto';
 import { ProductResponseDto } from './dto/product-response.dto';
@@ -606,5 +607,24 @@ export class ProductController {
     this.logger.log(`User ${user.id} permanently deleting product: ${id}`);
     
     return this.productService.permanentlyDeleteProduct(id, effectiveUserId);
+  }
+
+  @Post('bulk/attach-to-family')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions({ resource: 'products', action: 'update' })
+  async bulkAttachToFamily(
+    @Body() bulkAttachDto: BulkAttachToFamilyDto,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ): Promise<BulkAttachToFamilyResponseDto> {
+    this.logger.log(
+      `User ${user.id} bulk attaching ${bulkAttachDto.productIds.length} products to family ${bulkAttachDto.familyId}`
+    );
+    
+    return this.productService.bulkAttachProductsToFamily(
+      bulkAttachDto.productIds,
+      bulkAttachDto.familyId,
+      effectiveUserId,
+    );
   }
 }

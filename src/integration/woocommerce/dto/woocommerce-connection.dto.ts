@@ -216,6 +216,10 @@ export class ImportProductsDto {
   @IsBoolean()
   @IsOptional()
   useMapping?: boolean; // Use stored mapping or default
+
+  @IsInt()
+  @IsOptional()
+  familyId?: number; // Optional family ID to attach all imported products to
 }
 
 // Response DTO for product sync

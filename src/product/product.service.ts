@@ -4623,4 +4623,94 @@ export class ProductService {
       throw new BadRequestException('Failed to permanently delete product');
     }
   }
+
+  /**
+   * Attach multiple products to a family in bulk
+   * @param productIds Array of product IDs to attach
+   * @param familyId ID of the family to attach products to
+   * @param userId User performing the operation
+   * @returns Summary of the operation
+   */
+  async bulkAttachProductsToFamily(
+    productIds: number[],
+    familyId: number,
+    userId: number,
+  ): Promise<{
+    success: boolean;
+    attached: number;
+    failed: number;
+    errors: Array<{ productId: number; error: string }>;
+  }> {
+    this.logger.log(`Bulk attaching ${productIds.length} products to family ${familyId} for user ${userId}`);
+
+    // Validate family exists and belongs to user
+    const family = await this.prisma.family.findFirst({
+      where: {
+        id: familyId,
+        userId,
+      },
+    });
+
+    if (!family) {
+      throw new NotFoundException(`Family with ID ${familyId} not found`);
+    }
+
+    const errors: Array<{ productId: number; error: string }> = [];
+    let attached = 0;
+    let failed = 0;
+
+    // Process each product
+    for (const productId of productIds) {
+      try {
+        // Verify product exists and belongs to user
+        const product = await this.prisma.product.findFirst({
+          where: {
+            id: productId,
+            userId,
+          },
+        });
+
+        if (!product) {
+          errors.push({
+            productId,
+            error: 'Product not found or does not belong to user',
+          });
+          failed++;
+          continue;
+        }
+
+        // Check if already attached to this family
+        if (product.familyId === familyId) {
+          this.logger.debug(`Product ${productId} already attached to family ${familyId}`);
+          attached++;
+          continue;
+        }
+
+        // Update product with new family
+        await this.prisma.product.update({
+          where: { id: productId },
+          data: { familyId },
+        });
+
+        attached++;
+        this.logger.debug(`Successfully attached product ${productId} to family ${familyId}`);
+      } catch (error: any) {
+        this.logger.error(`Failed to attach product ${productId} to family ${familyId}: ${error.message}`);
+        errors.push({
+          productId,
+          error: error.message || 'Unknown error',
+        });
+        failed++;
+      }
+    }
+
+    this.logger.log(`Bulk attach completed: ${attached} attached, ${failed} failed`);
+
+    return {
+      success: failed === 0,
+      attached,
+      failed,
+      errors,
+    };
+  }
 }

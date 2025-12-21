@@ -27,6 +27,45 @@ export class WooCommerceMultiStoreService {
   }
 
   /**
+   * Simplify error messages for storage
+   * Converts technical error messages into user-friendly format
+   */
+  private simplifyErrorMessage(errorMsg: string): string {
+    if (!errorMsg) return '';
+
+    // Extract unique constraint errors
+    if (errorMsg.includes('Unique constraint failed')) {
+      const match = errorMsg.match(/Unique constraint failed on the fields: \(`([^`]+)`(?:,`([^`]+)`)*\)/);
+      if (match) {
+        const fields = [match[1], match[2]].filter(Boolean).join(', ');
+        return `Duplicate entry: ${fields} already exists`;
+      }
+      return 'Duplicate entry: Record already exists';
+    }
+
+    // Extract foreign key constraint errors
+    if (errorMsg.includes('Foreign key constraint failed')) {
+      return 'Reference error: Related record not found';
+    }
+
+    // If message is too long (likely includes stack trace), truncate to first meaningful line
+    if (errorMsg.length > 200) {
+      const lines = errorMsg.split('\n');
+      // Find first line that's not a file path or stack trace
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed && !trimmed.startsWith('Invalid') && !trimmed.includes('.ts:') && !trimmed.includes('invocation')) {
+          return trimmed.substring(0, 150);
+        }
+      }
+      // If no good line found, take first 150 chars
+      return errorMsg.substring(0, 150) + '...';
+    }
+
+    return errorMsg;
+  }
+
+  /**
    * Export products to a specific WooCommerce connection with selective fields
    * 
    * @legacy This method is now primarily used for initial product sync.
@@ -229,14 +268,14 @@ export class WooCommerceMultiStoreService {
           },
           update: {
             syncStatus: 'error',
-            errorMessage: error.message || 'Export failed',
+            errorMessage: this.simplifyErrorMessage(error.message || 'Export failed'),
           },
           create: {
             connectionId: dto.connectionId,
             productId: product.id,
             wooProductId: 0, // Placeholder
             syncStatus: 'error',
-            errorMessage: error.message || 'Export failed',
+            errorMessage: this.simplifyErrorMessage(error.message || 'Export failed'),
           },
         });
 
@@ -465,14 +504,14 @@ export class WooCommerceMultiStoreService {
             },
             update: {
               syncStatus: 'error',
-              errorMessage: error.message || 'Import failed',
+              errorMessage: this.simplifyErrorMessage(error.message || 'Import failed'),
             },
             create: {
               connectionId: dto.connectionId,
               productId: null, // Null for failed imports
               wooProductId: wooProduct.id,
               syncStatus: 'error',
-              errorMessage: error.message || 'Import failed',
+              errorMessage: this.simplifyErrorMessage(error.message || 'Import failed'),
             },
           });
 
@@ -494,6 +533,48 @@ export class WooCommerceMultiStoreService {
 
     // Update last synced timestamp
     await this.connectionService.updateLastSynced(dto.connectionId);
+
+    // If familyId is provided, attach all successfully imported/updated products to the family
+    if (dto.familyId) {
+      this.logger.log(`Attaching imported products to family ${dto.familyId}`);
+      
+      try {
+        // Verify family exists and belongs to user
+        const family = await this.prisma.family.findFirst({
+          where: {
+            id: dto.familyId,
+            userId,
+          },
+        });
+
+        if (!family) {
+          this.logger.warn(`Family ${dto.familyId} not found or does not belong to user ${userId}`);
+        } else {
+          // Get all successfully imported/updated product IDs
+          const successfulProductIds = products
+            .filter(p => p.productId && (p.status === 'imported' || p.status === 'updated'))
+            .map(p => p.productId!);
+
+          if (successfulProductIds.length > 0) {
+            // Bulk update products to set familyId
+            await this.prisma.product.updateMany({
+              where: {
+                id: { in: successfulProductIds },
+                userId,
+              },
+              data: {
+                familyId: dto.familyId,
+              },
+            });
+
+            this.logger.log(`Successfully attached ${successfulProductIds.length} products to family ${dto.familyId}`);
+          }
+        }
+      } catch (error: any) {
+        this.logger.error(`Failed to attach products to family ${dto.familyId}: ${error.message}`);
+        // Don't fail the entire import if family attachment fails
+      }
+    }
 
     return {
       success: failedCount === 0,
@@ -607,7 +688,7 @@ export class WooCommerceMultiStoreService {
         where: { id: sync.id },
         data: {
           syncStatus: 'error',
-          errorMessage: error.message || 'Update failed',
+          errorMessage: this.simplifyErrorMessage(error.message || 'Update failed'),
         },
       });
 
@@ -772,6 +853,140 @@ export class WooCommerceMultiStoreService {
         hasNext: page < totalPages,
         hasPrev: page > 1,
       },
+    };
+  }
+
+  /**
+   * Get WooCommerce product sync logs with pagination and filtering
+   */
+  async getSyncLogs(
+    userId: number,
+    options: {
+      connectionId?: number;
+      syncStatus?: string;
+      page?: number;
+      limit?: number;
+      search?: string;
+    } = {},
+  ): Promise<{
+    logs: any[];
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  }> {
+    const page = options.page || 1;
+    const limit = options.limit || 20;
+    const skip = (page - 1) * limit;
+
+    // Get the user's hidden logs timestamp
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { hiddenWooSyncLogsTimestamp: true },
+    });
+
+    // Build the where clause
+    const where: any = {
+      connection: {
+        userId,
+      },
+    };
+
+    // Filter by connection if specified
+    if (options.connectionId) {
+      where.connectionId = options.connectionId;
+    }
+
+    // Filter by sync status if specified
+    if (options.syncStatus) {
+      where.syncStatus = options.syncStatus;
+    }
+
+    // Filter by search term in error messages
+    if (options.search) {
+      where.OR = [
+        { errorMessage: { contains: options.search, mode: 'insensitive' } },
+        { syncStatus: { contains: options.search, mode: 'insensitive' } },
+      ];
+    }
+
+    // Filter out logs before the hidden timestamp
+    if (user?.hiddenWooSyncLogsTimestamp) {
+      where.updatedAt = {
+        gt: user.hiddenWooSyncLogsTimestamp,
+      };
+    }
+
+    // Get total count and logs
+    const [total, logs] = await Promise.all([
+      this.prisma.wooCommerceProductSync.count({ where }),
+      this.prisma.wooCommerceProductSync.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { updatedAt: 'desc' },
+        include: {
+          connection: {
+            select: {
+              id: true,
+              storeName: true,
+              storeUrl: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    return {
+      logs,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  /**
+   * Hide WooCommerce product sync logs by updating the user's hidden timestamp
+   */
+  async hideSyncLogs(userId: number): Promise<{ success: boolean; hiddenCount: number }> {
+    // Get current timestamp
+    const now = new Date();
+
+    // Count logs that will be hidden
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { hiddenWooSyncLogsTimestamp: true },
+    });
+
+    const where: any = {
+      connection: {
+        userId,
+      },
+    };
+
+    if (user?.hiddenWooSyncLogsTimestamp) {
+      where.updatedAt = {
+        gt: user.hiddenWooSyncLogsTimestamp,
+        lte: now,
+      };
+    } else {
+      where.updatedAt = {
+        lte: now,
+      };
+    }
+
+    const hiddenCount = await this.prisma.wooCommerceProductSync.count({ where });
+
+    // Update the user's hidden timestamp
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { hiddenWooSyncLogsTimestamp: now },
+    });
+
+    return {
+      success: true,
+      hiddenCount,
     };
   }
 
