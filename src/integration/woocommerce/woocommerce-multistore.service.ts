@@ -164,8 +164,8 @@ export class WooCommerceMultiStoreService {
         // this.logger.log(`Product Data:${JSON.stringify(wooProductData)}`);
         let wooProductId: number;
         // this.logger.log(`Product Data:${JSON.stringify(product)}`);
-        // this.logger.log(`Found Existing Sync:${JSON.stringify(existingSync)}`);
-        // this.logger.log(`WooCommerce Data:${JSON.stringify(wooProductData)}`);
+        this.logger.log(`Found Existing Sync:${JSON.stringify(existingSync)}`);
+        this.logger.log(`WooCommerce Data:${JSON.stringify(wooProductData)}`);
         
         // Collect current image and asset URLs for tracking
         const currentImageUrls: string[] = [];
@@ -205,7 +205,7 @@ export class WooCommerceMultiStoreService {
         } else {
           // Create new product (or retry if previous sync had invalid wooProductId)
           this.logger.log(`Creating new WooCommerce product for local product ${product.id}`);
-          this.logger.log(`Woocommerce Data:${wooProductData}`)
+          this.logger.log(`WooCommerce Data:${JSON.stringify(wooProductData)}`);
           const response = await wooClient.post('products', wooProductData);
           this.logger.log(`Response from WooClient:${response}`)
           wooProductId = response.data.id;
@@ -335,12 +335,13 @@ export class WooCommerceMultiStoreService {
     const products: Array<{
       wooProductId: number;
       productId?: number;
-      status: 'imported' | 'updated' | 'error';
+      status: 'imported' | 'updated' | 'linked' | 'error';
       message?: string;
     }> = [];
 
     let importedCount = 0;
     let updatedCount = 0;
+    let linkedCount = 0;
     let failedCount = 0;
 
     try {
@@ -442,16 +443,66 @@ export class WooCommerceMultiStoreService {
             const attributesToCreate = productData._attributesToCreate;
             delete productData._attributesToCreate;
 
-            const newProduct = await this.prisma.product.create({
-              data: {
-                ...productData,
-                userId,
+            // Check for SKU conflict with existing products
+            const existingProductWithSku = await this.prisma.product.findUnique({
+              where: {
+                sku_userId: {
+                  sku: productData.sku,
+                  userId,
+                },
               },
             });
 
-            // Process attributes
-            if (attributesToCreate && attributesToCreate.length > 0) {
-              await this.processProductAttributes(newProduct.id, userId, attributesToCreate);
+            let productToLink: any;
+
+            if (existingProductWithSku) {
+              // Handle SKU conflict based on user preference
+              const conflictAction = dto.onSkuConflict || 'skip';
+
+              if (conflictAction === 'skip') {
+                this.logger.log(`Skipping WooCommerce product ${wooProduct.id} - SKU ${productData.sku} already exists`);
+                products.push({
+                  wooProductId: wooProduct.id,
+                  status: 'error',
+                  message: `SKU ${productData.sku} already exists`,
+                });
+                failedCount++;
+                continue;
+              } else if (conflictAction === 'update') {
+                // Update existing product with new data
+                await this.prisma.product.update({
+                  where: { id: existingProductWithSku.id },
+                  data: productData,
+                });
+
+                // Process attributes
+                if (attributesToCreate && attributesToCreate.length > 0) {
+                  await this.processProductAttributes(existingProductWithSku.id, userId, attributesToCreate);
+                }
+
+                productToLink = existingProductWithSku;
+                updatedCount++;
+              } else if (conflictAction === 'link') {
+                // Link to existing product without updating
+                productToLink = existingProductWithSku;
+                linkedCount++;
+              }
+            } else {
+              // Create new product
+              const newProduct = await this.prisma.product.create({
+                data: {
+                  ...productData,
+                  userId,
+                },
+              });
+
+              // Process attributes
+              if (attributesToCreate && attributesToCreate.length > 0) {
+                await this.processProductAttributes(newProduct.id, userId, attributesToCreate);
+              }
+
+              productToLink = newProduct;
+              importedCount++;
             }
 
             // Create or update sync record
@@ -460,33 +511,32 @@ export class WooCommerceMultiStoreService {
               await this.prisma.wooCommerceProductSync.update({
                 where: { id: existingSync.id },
                 data: {
-                  productId: newProduct.id,
+                  productId: productToLink.id,
                   lastImportedAt: new Date(),
                   syncStatus: 'synced',
                   errorMessage: null,
                 },
               });
-              this.logger.log(`Updated sync record for WooCommerce product ${wooProduct.id} with new product ID ${newProduct.id}`);
+              this.logger.log(`Updated sync record for WooCommerce product ${wooProduct.id} with product ID ${productToLink.id}`);
             } else {
               // Create new sync record
               await this.prisma.wooCommerceProductSync.create({
                 data: {
                   connectionId: dto.connectionId,
-                  productId: newProduct.id,
+                  productId: productToLink.id,
                   wooProductId: wooProduct.id,
                   lastImportedAt: new Date(),
                   syncStatus: 'synced',
                 },
               });
+              this.logger.log(`Created sync record for WooCommerce product ${wooProduct.id} linked to product ID ${productToLink.id}`);
             }
 
             products.push({
               wooProductId: wooProduct.id,
-              productId: newProduct.id,
-              status: 'imported',
+              productId: productToLink.id,
+              status: existingProductWithSku ? (dto.onSkuConflict === 'update' ? 'updated' : 'linked') : 'imported',
             });
-
-            importedCount++;
           }
         } catch (error: any) {
           this.logger.error(
@@ -534,52 +584,59 @@ export class WooCommerceMultiStoreService {
     // Update last synced timestamp
     await this.connectionService.updateLastSynced(dto.connectionId);
 
-    // If familyId is provided, attach all successfully imported/updated products to the family
-    if (dto.familyId) {
-      this.logger.log(`Attaching imported products to family ${dto.familyId}`);
-      
-      try {
-        // Verify family exists and belongs to user
-        const family = await this.prisma.family.findFirst({
+    // Handle family assignment for successfully imported/updated products
+    try {
+      // Get all successfully imported/updated/linked product IDs
+      const successfulProductIds = products
+        .filter(p => p.productId && (p.status === 'imported' || p.status === 'updated' || p.status === 'linked'))
+        .map(p => p.productId!);
+
+      if (successfulProductIds.length > 0) {
+        let familyIdToSet: number | null = null;
+
+        if (dto.familyId !== undefined) {
+          // Verify family exists and belongs to user
+          const family = await this.prisma.family.findFirst({
+            where: {
+              id: dto.familyId,
+              userId,
+            },
+          });
+
+          if (!family) {
+            this.logger.warn(`Family ${dto.familyId} not found or does not belong to user ${userId}`);
+          } else {
+            familyIdToSet = dto.familyId;
+            this.logger.log(`Attaching imported products to family ${dto.familyId}`);
+          }
+        } else {
+          // No family selected, clear family assignment
+          this.logger.log('Clearing family assignment for imported products');
+        }
+
+        // Bulk update products to set familyId
+        await this.prisma.product.updateMany({
           where: {
-            id: dto.familyId,
+            id: { in: successfulProductIds },
             userId,
+          },
+          data: {
+            familyId: familyIdToSet,
           },
         });
 
-        if (!family) {
-          this.logger.warn(`Family ${dto.familyId} not found or does not belong to user ${userId}`);
-        } else {
-          // Get all successfully imported/updated product IDs
-          const successfulProductIds = products
-            .filter(p => p.productId && (p.status === 'imported' || p.status === 'updated'))
-            .map(p => p.productId!);
-
-          if (successfulProductIds.length > 0) {
-            // Bulk update products to set familyId
-            await this.prisma.product.updateMany({
-              where: {
-                id: { in: successfulProductIds },
-                userId,
-              },
-              data: {
-                familyId: dto.familyId,
-              },
-            });
-
-            this.logger.log(`Successfully attached ${successfulProductIds.length} products to family ${dto.familyId}`);
-          }
-        }
-      } catch (error: any) {
-        this.logger.error(`Failed to attach products to family ${dto.familyId}: ${error.message}`);
-        // Don't fail the entire import if family attachment fails
+        this.logger.log(`Successfully updated family assignment for ${successfulProductIds.length} products`);
       }
+    } catch (error: any) {
+      this.logger.error(`Failed to update family assignment: ${error.message}`);
+      // Don't fail the entire import if family assignment fails
     }
 
     return {
       success: failedCount === 0,
       importedCount,
       updatedCount,
+      linkedCount,
       failedCount,
       products,
     };
@@ -633,6 +690,8 @@ export class WooCommerceMultiStoreService {
 
     const fieldsToExport = exportMapping?.selectedFields || ['name', 'sku'];
     const fieldMappings = exportMapping?.fieldMappings || {};
+
+    // this.logger.log(`Original Product Data:${JSON.stringify(product)}`);
 
     // Build partial update data
     const wooProductData = await this.buildWooProductData(
@@ -1001,9 +1060,8 @@ export class WooCommerceMultiStoreService {
     fieldMappings: Record<string, any>,
     lastModifiedFields: string[] | null,
     wooClient: any,
-    syncRecord?: any, // Optional sync record to check for image/asset changes
+    syncRecord?: any,
   ): Promise<any> {
-    // Validate required fields
     if (!product.name || !product.sku) {
       throw new BadRequestException('Product must have name and sku');
     }
@@ -1012,258 +1070,283 @@ export class WooCommerceMultiStoreService {
     this.logger.log(`Build Data Field to Export:${fieldsToExport}`);
     this.logger.log(`Build Data Last Modified Field:${lastModifiedFields}`);
 
-    // Helper function to sanitize HTML
-    const sanitizeHtml = (html: string): string => {
-      if (!html) return '';
-      return html
-        .replace(/<script[^>]*>.*?<\/script>/gi, '')
-        .replace(/<iframe[^>]*>.*?<\/iframe>/gi, '')
-        .replace(/javascript:/gi, '')
-        .replace(/on\w+\s*=/gi, '');
-    };
-
-    // Helper function to find attribute by name pattern
-    const findAttribute = (patterns: string[]): any => {
-      return product.attributes?.find((attr: any) =>
-        patterns.some(pattern => attr.attribute.name.toLowerCase().includes(pattern.toLowerCase()))
-      );
-    };
-
-    // Helper function to extract numeric value
-    const extractNumeric = (value: string): string => {
-      if (!value) return '';
-      return value.replace(/[^\d.]/g, '');
-    };
-
-    // Check if field should be included
-    const shouldIncludeField = (field: string): boolean => {
-      if (!fieldsToExport.includes(field)) return false;
-      if (lastModifiedFields) {
-        // If field is in lastModifiedFields, include it
-        if (lastModifiedFields.includes(field)) return true;
-        // If 'attributes' was previously exported and field is an attribute, include it
-        if (lastModifiedFields.includes('attributes') && isAttributeField(field)) return true;
-        return false;
-      }
-      return true;
-    };
-
-    // this.logger.log(`Included Filed:${JSON.stringify(shouldIncludeField('regular_price'))}`);
-
-    // Check if field is an attribute field (not a standard WooCommerce field)
-    const isAttributeField = (field: string): boolean => {
-      const standardFields = ['name', 'sku', 'price', 'sale_price', 'weight', 'dimensions', 'stock_status', 'description', 'images', 'categories', 'tags', 'status', 'type'];
-      return !standardFields.includes(field);
-    };
-
-    // Get mapped field name
-    const getMappedField = (field: string): string => {
-      return fieldMappings[field] || field;
-    };
-
+    const context = { product, fieldsToExport, fieldMappings, lastModifiedFields, wooClient, syncRecord };
     const wooProduct: any = {};
 
     // Required fields
-    if (shouldIncludeField('name')) {
-      wooProduct[getMappedField('name')] = product.name;
-    }
-    if (shouldIncludeField('sku')) {
-      wooProduct[getMappedField('sku')] = product.sku;
-    }
+    this.addFieldIfIncluded(wooProduct, 'name', product.name, context);
+    this.addFieldIfIncluded(wooProduct, 'sku', product.sku, context);
 
-    // Optional fields
-    // Images - check for imageUrl field or any field that maps to 'images'
+    // Process all product fields
+    await this.processImages(wooProduct, context);
+    this.processPricing(wooProduct, context);
+    this.processWeight(wooProduct, context);
+    this.processDimensions(wooProduct, context);
+    this.processStockStatus(wooProduct, context);
+    await this.processDescription(wooProduct, context);
+    await this.processCategories(wooProduct, context);
+    this.processTags(wooProduct, context);
+    await this.processAttributes(wooProduct, context);
+    this.processStatus(wooProduct, context);
+    this.addFieldIfIncluded(wooProduct, 'type', 'simple', context);
+
+    return wooProduct;
+  }
+
+  // === Helper methods for buildWooProductData ===
+
+  private shouldIncludeField(field: string, context: any): boolean {
+    const { fieldsToExport, lastModifiedFields } = context;
+    if (!fieldsToExport.map(f => f.toLowerCase()).includes(field.toLowerCase())) return false;
+    if (lastModifiedFields) {
+      if (lastModifiedFields.map(f => f.toLowerCase()).includes(field.toLowerCase())) return true;
+      if (lastModifiedFields.map(f => f.toLowerCase()).includes('attributes') && this.isAttributeField(field)) return true;
+      return false;
+    }
+    return true;
+  }
+
+  private isAttributeField(field: string): boolean {
+    const standardFields = ['name', 'sku', 'price', 'sale_price', 'weight', 'dimensions', 'stock_status', 'description', 'images', 'categories', 'tags', 'status', 'type'];
+    return !standardFields.includes(field);
+  }
+
+  private getMappedField(field: string, fieldMappings: Record<string, any>): string {
+    return fieldMappings[field] || field;
+  }
+
+  private sanitizeHtml(html: string): string {
+    if (!html) return '';
+    return html
+      .replace(/<script[^>]*>.*?<\/script>/gi, '')
+      .replace(/<iframe[^>]*>.*?<\/iframe>/gi, '')
+      .replace(/javascript:/gi, '')
+      .replace(/on\w+\s*=/gi, '');
+  }
+
+  private findAttribute(patterns: string[], product: any): any {
+    return product.attributes?.find((attr: any) =>
+      patterns.some(pattern => attr.attribute.name.toLowerCase().includes(pattern.toLowerCase()))
+    );
+  }
+
+  private extractNumeric(value: string): string {
+    if (!value) return '';
+    return value.replace(/[^\d.]/g, '');
+  }
+
+  private addFieldIfIncluded(wooProduct: any, field: string, value: any, context: any): void {
+    if (this.shouldIncludeField(field, context)) {
+      wooProduct[this.getMappedField(field, context.fieldMappings)] = value;
+    }
+  }
+
+  private async processImages(wooProduct: any, context: any): Promise<void> {
+    const { product, fieldsToExport, fieldMappings, syncRecord } = context;
+    
     const imageFieldNames = fieldsToExport.filter(field => 
       fieldMappings[field] === 'images' || field === 'images' || field === 'imageUrl'
     );
-    if (imageFieldNames.length > 0 || shouldIncludeField('images') || shouldIncludeField('imageUrl')) {
-      const images: Array<{ src: string; alt: string }> = [];
-      if (product.imageUrl) {
-        images.push({ src: this.getAbsoluteUrl(product.imageUrl), alt: product.name });
-      }
-      if (product.subImages && product.subImages.length > 0) {
-        product.subImages.forEach((url: string, index: number) => {
-          images.push({ src: this.getAbsoluteUrl(url), alt: `${product.name} - Gallery ${index + 1}` });
-        });
-      }
-      
-      // Only include images if they have changed
-      if (images.length > 0) {
-        const currentImageUrls = images.map(img => img.src);
-        const lastSyncedImages = syncRecord?.lastSyncedImages as string[] | null;
-        
-        this.logger.log(`[Image Comparison] Product ${product.id}:`);
-        this.logger.log(`  Current images (${currentImageUrls.length}): ${JSON.stringify(currentImageUrls)}`);
-        this.logger.log(`  Last synced images (${lastSyncedImages?.length || 0}): ${JSON.stringify(lastSyncedImages)}`);
-        
-        // Normalize URLs to relative paths for comparison (handles both relative and absolute URLs)
-        const normalizedCurrentUrls = currentImageUrls.map(url => this.normalizeUrlForComparison(url));
-        const normalizedLastSyncedUrls = lastSyncedImages?.map(url => this.normalizeUrlForComparison(url)) || [];
-        
-        this.logger.log(`  Normalized current: ${JSON.stringify(normalizedCurrentUrls)}`);
-        this.logger.log(`  Normalized last synced: ${JSON.stringify(normalizedLastSyncedUrls)}`);
-        
-        // Check if images have changed
-        const imagesChanged = !lastSyncedImages || 
-          normalizedLastSyncedUrls.length !== normalizedCurrentUrls.length ||
-          !normalizedLastSyncedUrls.every((url, index) => url === normalizedCurrentUrls[index]);
-        
-        if (imagesChanged) {
-          wooProduct['images'] = images;
-          this.logger.log(`  ✓ Images CHANGED - including in sync`);
-          if (!lastSyncedImages) {
-            this.logger.log(`    Reason: No previous sync record`);
-          } else if (normalizedLastSyncedUrls.length !== normalizedCurrentUrls.length) {
-            this.logger.log(`    Reason: Image count changed (${normalizedLastSyncedUrls.length} → ${normalizedCurrentUrls.length})`);
-          } else {
-            this.logger.log(`    Reason: Image URLs changed`);
-          }
-        } else {
-          this.logger.log(`  ✗ Images UNCHANGED - skipping image sync`);
-        }
-      }
+    
+    if (imageFieldNames.length === 0 && !this.shouldIncludeField('images', context) && !this.shouldIncludeField('imageUrl', context)) {
+      return;
     }
 
-    // Pricing - check for custom attribute names that map to price fields
-    const regularPriceFieldNames = fieldsToExport.filter(field => 
-      fieldMappings[field] === 'regular_price' || field === 'regular_price' || field === 'price'
+    const images: Array<{ src: string; alt: string }> = [];
+    if (product.imageUrl) {
+      images.push({ src: this.getAbsoluteUrl(product.imageUrl), alt: product.name });
+    }
+    if (product.subImages?.length > 0) {
+      product.subImages.forEach((url: string, index: number) => {
+        images.push({ src: this.getAbsoluteUrl(url), alt: `${product.name} - Gallery ${index + 1}` });
+      });
+    }
+
+    if (images.length > 0) {
+      const currentImageUrls = images.map(img => img.src);
+      const lastSyncedImages = syncRecord?.lastSyncedImages as string[] | null;
+      
+      this.logger.log(`[Image Comparison] Product ${product.id}:`);
+      this.logger.log(`  Current: ${currentImageUrls.length}, Last synced: ${lastSyncedImages?.length || 0}`);
+      
+      const normalizedCurrent = currentImageUrls.map(url => this.normalizeUrlForComparison(url));
+      const normalizedLast = lastSyncedImages?.map(url => this.normalizeUrlForComparison(url)) || [];
+      
+      const imagesChanged = !lastSyncedImages || 
+        normalizedLast.length !== normalizedCurrent.length ||
+        !normalizedLast.every((url, index) => url === normalizedCurrent[index]);
+      
+      if (imagesChanged) {
+        wooProduct['images'] = images;
+        this.logger.log(`  ✓ Images CHANGED - including in sync`);
+      } else {
+        this.logger.log(`  ✗ Images UNCHANGED - skipping`);
+      }
+    }
+  }
+
+  private processPricing(wooProduct: any, context: any): void {
+    const { product, fieldsToExport, fieldMappings } = context;
+    
+    // Regular price
+    const regularPriceFields = fieldsToExport.filter(f => 
+      fieldMappings[f] === 'regular_price' || f === 'regular_price' || f === 'price'
     );
-    if (regularPriceFieldNames.length > 0) {
-      const regularPriceAttr = findAttribute([...regularPriceFieldNames, 'regular_price', 'price', 'regular price']);
-      const regularPrice = regularPriceAttr ? extractNumeric(regularPriceAttr.value) : '';
-      if (regularPrice) {
-        wooProduct['regular_price'] = regularPrice;
+    if (regularPriceFields.length > 0) {
+      const attr = this.findAttribute([...regularPriceFields, 'regular_price', 'price', 'regular price'], product);
+      if (attr) {
+        const price = this.extractNumeric(attr.value);
+        if (price) wooProduct['regular_price'] = price;
       }
     }
 
-    const salePriceFieldNames = fieldsToExport.filter(field => 
-      fieldMappings[field] === 'sale_price' || field === 'sale_price'
+    // Sale price
+    const salePriceFields = fieldsToExport.filter(f => 
+      fieldMappings[f] === 'sale_price' || f === 'sale_price'
     );
-    if (salePriceFieldNames.length > 0) {
-      const salePriceAttr = findAttribute([...salePriceFieldNames, 'sale_price', 'sale price', 'discount price']);
-      const salePrice = salePriceAttr ? extractNumeric(salePriceAttr.value) : '';
-      if (salePrice) {
-        wooProduct['sale_price'] = salePrice;
+    if (salePriceFields.length > 0) {
+      const attr = this.findAttribute([...salePriceFields, 'sale_price', 'sale price', 'discount price'], product);
+      if (attr) {
+        const price = this.extractNumeric(attr.value);
+        if (price) wooProduct['sale_price'] = price;
       }
     }
 
-    if (shouldIncludeField('date_on_sale_from')) {
-      const saleStartDateAttr = findAttribute(['sale_start_date', 'sale start', 'discount start']);
-      if (saleStartDateAttr?.value) {
-        wooProduct[getMappedField('date_on_sale_from')] = saleStartDateAttr.value;
+    // Sale dates
+    if (this.shouldIncludeField('date_on_sale_from', context)) {
+      const attr = this.findAttribute(['sale_start_date', 'sale start', 'discount start'], product);
+      if (attr?.value) {
+        wooProduct[this.getMappedField('date_on_sale_from', fieldMappings)] = attr.value;
       }
     }
 
-    if (shouldIncludeField('date_on_sale_to')) {
-      const saleEndDateAttr = findAttribute(['sale_end_date', 'sale end', 'discount end']);
-      if (saleEndDateAttr?.value) {
-        wooProduct[getMappedField('date_on_sale_to')] = saleEndDateAttr.value;
+    if (this.shouldIncludeField('date_on_sale_to', context)) {
+      const attr = this.findAttribute(['sale_end_date', 'sale end', 'discount end'], product);
+      if (attr?.value) {
+        wooProduct[this.getMappedField('date_on_sale_to', fieldMappings)] = attr.value;
       }
     }
+  }
 
-    // Weight
-    if (shouldIncludeField('weight')) {
-      const weightAttr = findAttribute(['weight']);
-      if (weightAttr?.value) {
-        wooProduct[getMappedField('weight')] = extractNumeric(weightAttr.value);
+  private processWeight(wooProduct: any, context: any): void {
+    if (!this.shouldIncludeField('weight', context)) return;
+    
+    const { product, fieldMappings } = context;
+    const attr = this.findAttribute(['weight'], product);
+    if (attr?.value) {
+      wooProduct[this.getMappedField('weight', fieldMappings)] = this.extractNumeric(attr.value);
+    }
+  }
+
+  private processDimensions(wooProduct: any, context: any): void {
+    if (!this.shouldIncludeField('dimensions', context)) return;
+    
+    const { product, fieldMappings } = context;
+    const dimensions: any = {};
+    
+    const length = this.findAttribute(['length', 'dimension_length'], product);
+    const width = this.findAttribute(['width', 'dimension_width'], product);
+    const height = this.findAttribute(['height', 'dimension_height'], product);
+    
+    if (length?.value) dimensions.length = this.extractNumeric(length.value);
+    if (width?.value) dimensions.width = this.extractNumeric(width.value);
+    if (height?.value) dimensions.height = this.extractNumeric(height.value);
+    
+    if (Object.keys(dimensions).length > 0) {
+      wooProduct[this.getMappedField('dimensions', fieldMappings)] = dimensions;
+    }
+  }
+
+  private processStockStatus(wooProduct: any, context: any): void {
+    if (!this.shouldIncludeField('stock_status', context)) return;
+    
+    const { product, fieldMappings } = context;
+    const attr = this.findAttribute(['stock_status', 'stock status', 'availability'], product);
+    
+    let status = 'instock';
+    if (attr?.value) {
+      const value = attr.value.toLowerCase();
+      if (value.includes('out') || value.includes('unavailable')) {
+        status = 'outofstock';
+      } else if (value.includes('backorder')) {
+        status = 'onbackorder';
       }
     }
+    wooProduct[this.getMappedField('stock_status', fieldMappings)] = status;
+  }
 
-    // Dimensions
-    if (shouldIncludeField('dimensions')) {
-      const lengthAttr = findAttribute(['length', 'dimension_length']);
-      const widthAttr = findAttribute(['width', 'dimension_width']);
-      const heightAttr = findAttribute(['height', 'dimension_height']);
-      const dimensions: any = {};
-      if (lengthAttr?.value) dimensions.length = extractNumeric(lengthAttr.value);
-      if (widthAttr?.value) dimensions.width = extractNumeric(widthAttr.value);
-      if (heightAttr?.value) dimensions.height = extractNumeric(heightAttr.value);
-      if (Object.keys(dimensions).length > 0) {
-        wooProduct[getMappedField('dimensions')] = dimensions;
-      }
+  private async processDescription(wooProduct: any, context: any): Promise<void> {
+    // this.logger.debug("Descrition Checking");
+    // this.logger.log(`Description Feild:${!this.shouldIncludeField('description',context)}`)
+    if (!this.shouldIncludeField('description', context)) return;
+    
+    const { product, fieldMappings, syncRecord } = context;
+    let description = '';
+    
+    const attr = this.findAttribute(['description', 'desc', 'long description'], product);
+    if (attr?.value) {
+      description += this.sanitizeHtml(`<div class="product-description">${attr.value}</div>`);
     }
-
-    // Stock status
-    if (shouldIncludeField('stock_status')) {
-      const stockStatusAttr = findAttribute(['stock_status', 'stock status', 'availability']);
-      let stockStatus = 'instock';
-      if (stockStatusAttr?.value) {
-        const value = stockStatusAttr.value.toLowerCase();
-        if (value.includes('out') || value.includes('unavailable')) {
-          stockStatus = 'outofstock';
-        } else if (value.includes('backorder')) {
-          stockStatus = 'onbackorder';
-        }
-      }
-      wooProduct[getMappedField('stock_status')] = stockStatus;
-    }
-
-    // Description
-    if (shouldIncludeField('description')) {
-      let description = '';
-      const descriptionAttr = findAttribute(['description', 'desc', 'long description']);
-      if (descriptionAttr?.value) {
-        description += sanitizeHtml(`<div class="product-description">${descriptionAttr.value}</div>`);
-      }
-      
-      // Check if assets have changed before adding them to description
-      const currentAssetUrls = product.assets?.map((assetRelation: any) => 
-        assetRelation.asset?.filePath
-      ).filter(Boolean) || [];
-      
-      const lastSyncedAssets = syncRecord?.lastSyncedAssets as string[] | null;
-      const assetsChanged = !lastSyncedAssets || 
-        lastSyncedAssets.length !== currentAssetUrls.length ||
-        !lastSyncedAssets.every((url, index) => url === currentAssetUrls[index]);
-      
-      // Add assets as media in description only if they've changed or it's first sync
-      if (product.assets && product.assets.length > 0 && (assetsChanged || !syncRecord)) {
-        this.logger.log(`Assets changed for product ${product.id}, including in description`);
-        description += '<h3>Additional Media:</h3><div class="product-media">';
-        product.assets.forEach((assetRelation: any) => {
-          if (assetRelation.asset) {
-            const asset = assetRelation.asset;
-            const isImage = asset.mimeType?.startsWith('image/');
-            if (isImage && asset.filePath) {
-              description += sanitizeHtml(`<img src="${asset.filePath}" alt="${asset.name}" style="max-width: 100%; height: auto; margin: 10px 0;" />`);
-            } else if (asset.filePath) {
-              description += sanitizeHtml(`<p><a href="${asset.filePath}" download="${asset.fileName}">${asset.name}</a></p>`);
-            }
+    
+    // Check assets changes
+    const currentAssetUrls = product.assets?.map((rel: any) => rel.asset?.filePath).filter(Boolean) || [];
+    const lastSyncedAssets = syncRecord?.lastSyncedAssets as string[] | null;
+    const assetsChanged = !lastSyncedAssets || 
+      lastSyncedAssets.length !== currentAssetUrls.length ||
+      !lastSyncedAssets.every((url, index) => url === currentAssetUrls[index]);
+    
+    if (product.assets?.length > 0 && (assetsChanged || !syncRecord)) {
+      this.logger.log(`Assets changed for product ${product.id}, including in description`);
+      description += '<h3>Additional Media:</h3><div class="product-media">';
+      product.assets.forEach((rel: any) => {
+        if (rel.asset) {
+          const isImage = rel.asset.mimeType?.startsWith('image/');
+          if (isImage && rel.asset.filePath) {
+            description += this.sanitizeHtml(`<img src="${rel.asset.filePath}" alt="${rel.asset.name}" style="max-width: 100%; height: auto; margin: 10px 0;" />`);
+          } else if (rel.asset.filePath) {
+            description += this.sanitizeHtml(`<p><a href="${rel.asset.filePath}" download="${rel.asset.fileName}">${rel.asset.name}</a></p>`);
           }
-        });
-        description += '</div>';
-      } else if (product.assets && product.assets.length > 0) {
-        this.logger.log(`Assets unchanged for product ${product.id}, skipping asset URLs in description`);
-      }
-      
-      if (description) {
-        wooProduct[getMappedField('description')] = description;
-      }
+        }
+      });
+      description += '</div>';
+    } else if (product.assets?.length > 0) {
+      this.logger.log(`Assets unchanged for product ${product.id}, skipping asset URLs in description`);
     }
+    
+    if (description) {
+      wooProduct[this.getMappedField('description', fieldMappings)] = description;
+    }
+  }
 
-    // Categories
-    if (shouldIncludeField('categories') && product.category) {
+  private async processCategories(wooProduct: any, context: any): Promise<void> {
+    const { product, wooClient, fieldMappings } = context;
+    if (this.shouldIncludeField('categories', context) && product.category) {
       const categoryId = await this.ensureWooCommerceCategory(product.category.name, wooClient);
-      wooProduct[getMappedField('categories')] = [{ id: categoryId }];
+      wooProduct[this.getMappedField('categories', fieldMappings)] = [{ id: categoryId }];
     }
+  }
 
-    // Tags
-    if (shouldIncludeField('tags')) {
-      const tagsAttr = findAttribute(['tags', 'product tags']);
-      const tags: Array<{ name: string }> = [];
-      if (tagsAttr?.value) {
-        const tagValues = tagsAttr.value.split(',').map((tag: string) => tag.trim());
-        tagValues.forEach((tag: string) => {
-          if (tag) tags.push({ name: tag });
-        });
-      }
-      if (tags.length > 0) {
-        wooProduct[getMappedField('tags')] = tags;
-      }
+  private processTags(wooProduct: any, context: any): void {
+    if (!this.shouldIncludeField('tags', context)) return;
+    
+    const { product, fieldMappings } = context;
+    const attr = this.findAttribute(['tags', 'product tags'], product);
+    if (!attr?.value) return;
+    
+    const tags = attr.value
+      .split(',')
+      .map((tag: string) => tag.trim())
+      .filter(Boolean)
+      .map((tag: string) => ({ name: tag }));
+    
+    if (tags.length > 0) {
+      wooProduct[this.getMappedField('tags', fieldMappings)] = tags;
     }
+  }
 
-    // Attributes - only include selected individual attributes
-    const wooAttributes: Array<{ name: string; options: string[]; visible: boolean; variation: boolean }> = [];
+  private async processAttributes(wooProduct: any, context: any): Promise<void> {
+    const { product, fieldsToExport, fieldMappings, wooClient } = context;
+    
     const mappedAttributeNames = [
       'regular_price', 'price', 'regular price', 'sale_price', 'sale price', 'discount price',
       'sale_start_date', 'sale start', 'discount start', 'sale_end_date', 'sale end', 'discount end',
@@ -1272,17 +1355,20 @@ export class WooCommerceMultiStoreService {
       'tags', 'product tags', 'categories', 'category'
     ];
     
-    // Get list of attribute names that are mapped to WooCommerce fields via fieldMappings
     const attributesMappedToWooFields = Object.keys(fieldMappings).filter(key => 
       fieldMappings[key] && typeof fieldMappings[key] === 'string'
     );
 
-    if (product.attributes && product.attributes.length > 0) {
+    const wooAttributes: Array<{ name: string; options: string[]; visible: boolean; variation: boolean }> = [];
+    const variationPatterns = ['color', 'colour', 'size', 'material', 'style'];
+
+    if (product.attributes?.length > 0) {
       for (const attr of product.attributes) {
         const attrName = attr.attribute.name.toLowerCase();
         const isMapped = mappedAttributeNames.some(name => attrName.includes(name.toLowerCase()));
         const isMappedViaFieldMapping = attributesMappedToWooFields.includes(attr.attribute.name);
-        if (!isMapped && !isMappedViaFieldMapping && shouldIncludeField(attr.attribute.name) && attr.value) {
+        
+        if (!isMapped && !isMappedViaFieldMapping && this.shouldIncludeField(attr.attribute.name, context) && attr.value) {
           let options: string[] = [];
           try {
             if (typeof attr.value === 'string' && attr.value.trim().startsWith('[')) {
@@ -1294,41 +1380,38 @@ export class WooCommerceMultiStoreService {
           } catch (e) {
             options = [attr.value];
           }
-          const variationPatterns = ['color', 'colour', 'size', 'material', 'style'];
+          
           const isVariation = variationPatterns.some(pattern => attrName.includes(pattern));
           await this.ensureWooCommerceAttribute(attr.attribute.name, options, wooClient);
           wooAttributes.push({
             name: attr.attribute.name,
-            options: options,
+            options,
             visible: true,
             variation: isVariation
           });
         }
       }
     }
+    
     if (wooAttributes.length > 0) {
-      wooProduct[getMappedField('attributes')] = wooAttributes;
+      wooProduct[this.getMappedField('attributes', fieldMappings)] = wooAttributes;
     }
+  }
 
-    // Status
-    if (shouldIncludeField('status')) {
-      let productStatus = 'draft';
-      const statusAttr = findAttribute(['status', 'publish status']);
-      if (statusAttr?.value) {
-        const value = statusAttr.value.toLowerCase();
-        productStatus = value.includes('publish') ? 'publish' : 'draft';
-      } else if (product.status) {
-        productStatus = product.status === 'complete' ? 'publish' : 'draft';
-      }
-      wooProduct[getMappedField('status')] = productStatus;
+  private processStatus(wooProduct: any, context: any): void {
+    if (!this.shouldIncludeField('status', context)) return;
+    
+    const { product, fieldMappings } = context;
+    let status = 'draft';
+    
+    const attr = this.findAttribute(['status', 'publish status'], product);
+    if (attr?.value) {
+      status = attr.value.toLowerCase().includes('publish') ? 'publish' : 'draft';
+    } else if (product.status) {
+      status = product.status === 'complete' ? 'publish' : 'draft';
     }
-
-    // Type
-    if (shouldIncludeField('type')) {
-      wooProduct[getMappedField('type')] = 'simple';
-    }
-
-    return wooProduct;
+    
+    wooProduct[this.getMappedField('status', fieldMappings)] = status;
   }
 
   /**

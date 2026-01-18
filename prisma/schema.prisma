@@ -27,6 +27,7 @@ model User {
   createdAt       DateTime         @default(now())
   hiddenLogsTimestamp DateTime?
   hiddenWooSyncLogsTimestamp DateTime?
+  hiddenMyDealSyncLogsTimestamp DateTime?
 
   // Hierarchical relationship for Owner-Staff
   owner              User?            @relation("OwnerStaff", fields: [ownerId], references: [id], onDelete: Cascade)
@@ -50,6 +51,8 @@ model User {
   wooConnections      WooCommerceConnection[] @relation("UserWooConnections")
   webhooks           Webhook[]           @relation("UserWebhooks")
   shareLinks         ShareLink[]         @relation("UserShareLinks")
+  mydealWorkItems    MyDealWorkItem[]    @relation("UserMyDealWorkItems")
+  mydealConnections  MyDealConnection[]  @relation("UserMyDealConnections")
 }
 
 model Otp {
@@ -532,4 +535,87 @@ model SharedAssetGroup {
 
   @@unique([shareLinkId, assetGroupId])
   @@index([shareLinkId])
+}
+
+// MyDeal work items tracking
+model MyDealWorkItem {
+  id                Int      @id @default(autoincrement())
+  workItemId        String   @unique
+  userId            Int
+  connectionId      Int?
+  productId         Int?
+  status            String   @default("pending") // pending, processing, completed, failed
+  operation         String   // export, update, delete
+  requestPayload    Json?
+  responseData      Json?
+  errorMessage      String?
+  pendingUri        String?
+  externalProductId String?
+  externalSku       String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  completedAt       DateTime?
+
+  user              User     @relation("UserMyDealWorkItems", fields: [userId], references: [id], onDelete: Cascade)
+  connection        MyDealConnection? @relation("MyDealConnectionWorkItems", fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([userId, productId])
+  @@index([userId, status])
+  @@index([workItemId])
+}
+
+// MyDeal connection configurations (similar to WooCommerce connections)
+model MyDealConnection {
+  id             Int      @id @default(autoincrement())
+  userId         Int
+  connectionName String
+  baseApiUrl     String
+  clientId       String
+  clientSecret   String
+  sellerId       String
+  sellerToken    String
+  isActive       Boolean  @default(true)
+  isDefault      Boolean  @default(false)
+  lastSyncedAt   DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user           User                    @relation("UserMyDealConnections", fields: [userId], references: [id], onDelete: Cascade)
+  exportMappings MyDealExportMapping[]
+  importMappings MyDealImportMapping[]
+  workItems      MyDealWorkItem[]       @relation("MyDealConnectionWorkItems")
+
+  @@unique([userId, baseApiUrl])
+  @@index([userId, isActive])
+  @@index([userId, isDefault])
+}
+
+// MyDeal export field mappings
+model MyDealExportMapping {
+  id              Int              @id @default(autoincrement())
+  connectionId    Int
+  fieldMappings   Json             // Maps internal fields to MyDeal fields
+  selectedFields  String[]         // List of fields to export
+  isActive        Boolean          @default(true)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  connection      MyDealConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([connectionId, isActive])
+}
+
+// MyDeal import attribute mappings
+model MyDealImportMapping {
+  id                Int              @id @default(autoincrement())
+  connectionId      Int
+  attributeMappings Json             // Maps MyDeal attributes to internal attributes
+  fieldMappings     Json             // Maps MyDeal fields to internal fields
+  isActive          Boolean          @default(true)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  connection        MyDealConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([connectionId, isActive])
 }

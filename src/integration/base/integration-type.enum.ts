@@ -2,6 +2,7 @@ export enum IntegrationType {
   WOOCOMMERCE = 'woocommerce',
   AMAZON = 'amazon',
   SHOPIFY = 'shopify',
+  MYDEAL = 'mydeal',
 }
 
 export enum IntegrationOperation {

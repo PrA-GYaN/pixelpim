@@ -115,7 +115,15 @@ export abstract class BaseIntegrationService {
             asset: true,
           },
         },
-        variants: true,
+        variants: {
+          include: {
+            attributes: {
+              include: {
+                attribute: true,
+              },
+            },
+          },
+        },
       },
     });
   }

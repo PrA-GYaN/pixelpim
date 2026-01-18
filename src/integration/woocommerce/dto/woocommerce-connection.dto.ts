@@ -8,6 +8,7 @@ import {
   ValidateNested,
   IsUrl,
   MinLength,
+  IsEnum,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -213,6 +214,10 @@ export class ImportProductsDto {
   @IsOptional()
   updateExisting?: boolean; // Update existing products or skip them
 
+  @IsEnum(['update', 'link', 'skip'])
+  @IsOptional()
+  onSkuConflict?: 'update' | 'link' | 'skip'; // How to handle SKU conflicts with existing products
+
   @IsBoolean()
   @IsOptional()
   useMapping?: boolean; // Use stored mapping or default
@@ -238,11 +243,12 @@ export class ImportProductsResponseDto {
   success: boolean;
   importedCount: number;
   updatedCount: number;
+  linkedCount: number;
   failedCount: number;
   products: Array<{
     wooProductId: number;
     productId?: number;
-    status: 'imported' | 'updated' | 'error';
+    status: 'imported' | 'updated' | 'linked' | 'error';
     message?: string;
   }>;
 }

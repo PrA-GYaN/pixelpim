@@ -6,6 +6,7 @@ import { ProductController } from './product.controller';
 import { CsvImportService } from './services/csv-import.service';
 import { ImportSchedulerService } from './services/import-scheduler.service';
 import { ExcelImportService } from './services/excel-import.service';
+import { ExportGeneratorService } from './services/export-generator.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { AssetModule } from '../asset/asset.module';
 import { NotificationModule } from '../notification/notification.module';
@@ -28,6 +29,7 @@ import { ScheduleModule } from '@nestjs/schedule';
     CsvImportService,
     ImportSchedulerService,
     ExcelImportService,
+    ExportGeneratorService,
   ],
   exports: [ProductService],
 })

@@ -6,6 +6,14 @@ export class ProductVariantSummaryDto {
   sku: string;
   imageUrl?: string;
   status: string;
+  attributes?: {
+    id: number;
+    name: string;
+    type: string;
+    userFriendlyType?: string;
+    defaultValue?: string;
+    value: string;
+  }[];
 }
 
 export class ProductResponseDto {

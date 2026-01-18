@@ -101,6 +101,7 @@ POST /integration/woocommerce/connections/import
 {
   "connectionId": 1,
   "updateExisting": true,
+  "onSkuConflict": "link",
   "useMapping": true
 }
 ```
@@ -405,8 +406,16 @@ Body: { connectionId, productIds, fieldsToExport?, partialUpdate? }
 ### Import Products
 ```bash
 POST /integration/woocommerce/connections/import
-Body: { connectionId, wooProductIds?, updateExisting?, useMapping? }
+Body: { connectionId, wooProductIds?, updateExisting?, onSkuConflict?, useMapping?, familyId? }
 ```
+
+Parameters:
+- `connectionId` (required): WooCommerce connection ID
+- `wooProductIds` (optional): Array of specific WooCommerce product IDs to import
+- `updateExisting` (optional): Whether to update products already synced from this connection (default: false)
+- `onSkuConflict` (optional): How to handle SKU conflicts with existing products ('update', 'link', 'skip') (default: 'skip')
+- `useMapping` (optional): Whether to use configured import mapping (default: true)
+- `familyId` (optional): Family ID to attach all imported products to
 
 ### Configure Mapping
 ```bash

@@ -16,7 +16,10 @@ import {
   ClassSerializerInterceptor,
   NotFoundException,
   Sse,
+  Res,
+  StreamableFile,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { ProductService } from './product.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { BulkDeleteDto } from './dto/bulk-delete.dto';
@@ -329,6 +332,29 @@ export class ProductController {
     this.logger.log(`User ${user.id} exporting ${exportDto.productIds.length} products with attributes: ${exportDto.attributes.join(', ')}`);
     
     return this.productService.exportProducts(exportDto, effectiveUserId);
+  }
+
+  @Post('export/download')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions({ resource: 'products', action: 'export' })
+  async exportProductsAndDownload(
+    @Body() exportDto: ExportProductDto,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    this.logger.log(`User ${user.id} downloading ${exportDto.productIds.length} products with attributes: ${exportDto.attributes.join(', ')}`);
+    
+    const result = await this.productService.exportProductsAsFile(exportDto, effectiveUserId);
+    
+    // Set response headers
+    res.set({
+      'Content-Type': result.mimeType,
+      'Content-Disposition': `attachment; filename="${result.filename}"`,
+      'Content-Length': result.buffer.length,
+    });
+    
+    return new StreamableFile(result.buffer);
   }
 
   // Product Attribute Value Management Endpoints

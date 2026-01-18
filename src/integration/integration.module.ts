@@ -11,6 +11,11 @@ import { WooCommerceMultiStoreService } from './woocommerce/woocommerce-multisto
 import { WooCommerceAutoSyncService } from './woocommerce/woocommerce-auto-sync.service';
 import { AmazonController } from './amazon/amazon.controller';
 import { AmazonService } from './amazon/amazon.service';
+import { MyDealController } from './mydeal/mydeal.controller';
+import { MyDealService } from './mydeal/mydeal.service';
+import { MyDealAutoSyncService } from './mydeal/mydeal-auto-sync.service';
+import { MyDealConnectionController } from './mydeal/mydeal-connection.controller';
+import { MyDealConnectionService } from './mydeal/mydeal-connection.service';
 import { IntegrationFactory } from './base/integration.factory';
 import { PrismaModule } from '../prisma/prisma.module';
 
@@ -22,6 +27,8 @@ import { PrismaModule } from '../prisma/prisma.module';
     WooCommerceController,
     WooCommerceConnectionController,
     AmazonController,
+    MyDealController,
+    MyDealConnectionController,
   ],
   providers: [
     IntegrationService,
@@ -31,6 +38,9 @@ import { PrismaModule } from '../prisma/prisma.module';
     WooCommerceMultiStoreService,
     WooCommerceAutoSyncService,
     AmazonService,
+    MyDealService,
+    MyDealAutoSyncService,
+    MyDealConnectionService,
     IntegrationFactory,
   ],
   exports: [
@@ -41,6 +51,9 @@ import { PrismaModule } from '../prisma/prisma.module';
     WooCommerceMultiStoreService,
     WooCommerceAutoSyncService,
     AmazonService,
+    MyDealService,
+    MyDealAutoSyncService,
+    MyDealConnectionService,
     IntegrationFactory,
   ],
 })

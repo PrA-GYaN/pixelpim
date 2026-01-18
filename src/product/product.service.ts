@@ -16,6 +16,7 @@ import { ScheduleImportDto, UpdateScheduledImportDto, ImportJobResponseDto } fro
 import { CsvImportService } from './services/csv-import.service';
 import { ImportSchedulerService } from './services/import-scheduler.service';
 import { ExcelImportService } from './services/excel-import.service';
+import { ExportGeneratorService } from './services/export-generator.service';
 import { WooCommerceAutoSyncService } from '../integration/woocommerce/woocommerce-auto-sync.service';
 import { PaginatedResponse, PaginationUtils } from '../common';
 import { getUserFriendlyType } from '../types/user-attribute-type.enum';
@@ -84,6 +85,20 @@ export class ProductService {
         sku: true,
         imageUrl: true,
         status: true,
+        attributes: {
+          select: {
+            value: true,
+            familyAttributeId: true,
+            attribute: {
+              select: {
+                id: true,
+                name: true,
+                type: true,
+                defaultValue: true,
+              },
+            },
+          },
+        },
       },
     },
   };
@@ -107,6 +122,7 @@ export class ProductService {
     private readonly importSchedulerService: ImportSchedulerService,
     @Inject(forwardRef(() => ExcelImportService))
     private readonly excelImportService: ExcelImportService,
+    private readonly exportGeneratorService: ExportGeneratorService,
     @Optional()
     @Inject(forwardRef(() => WooCommerceAutoSyncService))
     private readonly wooAutoSyncService?: WooCommerceAutoSyncService,
@@ -1647,8 +1663,7 @@ export class ProductService {
       // Update attributes if provided
       let removedAttributeNames: string[] = [];
       if (updateProductDto.attributes !== undefined) {
-        // Filter out attributes that are already in the family
-        let filteredAttributes = updateProductDto.attributes;
+        // Get current family ID to identify family attributes
         let familyIdToCheck = updateProductDto.familyId;
 
         // If familyId is not being updated, get it from the existing product
@@ -1660,9 +1675,31 @@ export class ProductService {
           familyIdToCheck = existingProduct?.familyId ?? undefined;
         }
 
-        if (familyIdToCheck && updateProductDto.attributes.length > 0) {
-          const familyAttributeIds = await this.getFamilyAttributeIds(familyIdToCheck);
-          const { filteredAttributes: newFilteredAttributes, removedAttributes } = this.filterDuplicateAttributes(updateProductDto.attributes, familyAttributeIds);
+        // Get family attribute IDs to preserve them
+        const familyAttributeIds = familyIdToCheck 
+          ? await this.getFamilyAttributeIds(familyIdToCheck)
+          : [];
+
+        // Get current custom attributes (non-family attributes)
+        const currentCustomAttributes = await this.prisma.productAttribute.findMany({
+          where: {
+            productId: id,
+            attributeId: {
+              notIn: familyAttributeIds.length > 0 ? familyAttributeIds : undefined,
+            },
+          },
+          select: { attributeId: true },
+        });
+
+        const currentCustomAttributeIds = currentCustomAttributes.map(pa => pa.attributeId);
+
+        // Filter out attributes that are already in the family
+        let filteredAttributes = updateProductDto.attributes;
+        if (familyAttributeIds.length > 0) {
+          const { filteredAttributes: newFilteredAttributes, removedAttributes } = this.filterDuplicateAttributes(
+            updateProductDto.attributes, 
+            familyAttributeIds
+          );
 
           if (removedAttributes.length > 0) {
             removedAttributeNames = await this.getAttributeNames(removedAttributes);
@@ -1672,21 +1709,36 @@ export class ProductService {
           filteredAttributes = newFilteredAttributes;
         }
 
-        // Use upsert to merge attributes instead of replacing them
-        for (const attributeId of filteredAttributes) {
-          await this.prisma.productAttribute.upsert({
+        // Find attributes to remove (custom attributes not in the new list)
+        const attributesToRemove = currentCustomAttributeIds.filter(
+          id => !filteredAttributes.includes(id)
+        );
+
+        // Remove attributes that are no longer needed
+        if (attributesToRemove.length > 0) {
+          await this.prisma.productAttribute.deleteMany({
             where: {
-              productId_attributeId: {
-                productId: id,
-                attributeId,
-              },
-            },
-            update: {},
-            create: {
               productId: id,
-              attributeId,
+              attributeId: { in: attributesToRemove },
             },
           });
+          this.logger.log(`Removed ${attributesToRemove.length} attributes from product ${id}`);
+        }
+
+        // Add new attributes (only those that don't already exist)
+        const attributesToAdd = filteredAttributes.filter(
+          id => !currentCustomAttributeIds.includes(id)
+        );
+
+        if (attributesToAdd.length > 0) {
+          await this.prisma.productAttribute.createMany({
+            data: attributesToAdd.map(attributeId => ({
+              productId: id,
+              attributeId,
+            })),
+            skipDuplicates: true,
+          });
+          this.logger.log(`Added ${attributesToAdd.length} attributes to product ${id}`);
         }
       }
 
@@ -2339,13 +2391,41 @@ export class ProductService {
             value: getAttributeValue(fa.attribute.id, fa.id), // Pass familyAttributeId as well
           })) || [],
       } : undefined,
-      variants: variants.length > 0 ? variants.map(variant => ({
-        id: variant.id,
-        name: variant.name,
-        sku: variant.sku,
-        imageUrl: variant.imageUrl,
-        status: variant.status,
-      })) : undefined,
+      variants: variants.length > 0 ? variants.map(variant => {
+        const variantData: any = {
+          id: variant.id,
+          name: variant.name,
+          sku: variant.sku,
+          imageUrl: variant.imageUrl,
+          status: variant.status,
+        };
+
+        // Compare variant attributes with parent attributes
+        if (variant.attributes && variant.attributes.length > 0 && attributes && Array.isArray(attributes)) {
+          const differentAttributes = variant.attributes
+            .filter((varAttr: any) => {
+              // Find matching parent attribute by id
+              const parentAttr = attributes.find((pa: any) => pa.id === varAttr.attribute.id);
+              // Include if not found in parent or value is different
+              return !parentAttr || parentAttr.value !== varAttr.value;
+            })
+            .map((varAttr: any) => ({
+              id: varAttr.attribute.id,
+              name: varAttr.attribute.name,
+              type: varAttr.attribute.type,
+              userFriendlyType: varAttr.attribute.userFriendlyType ?? getUserFriendlyType(varAttr.attribute.type),
+              defaultValue: varAttr.attribute.defaultValue,
+              value: varAttr.value,
+            }));
+
+          // Only include attributes array if there are differences
+          if (differentAttributes.length > 0) {
+            variantData.attributes = differentAttributes;
+          }
+        }
+
+        return variantData;
+      }) : undefined,
       totalVariants: variants.length,
       parentProduct: product.parentProduct ? {
         id: product.parentProduct.id,
@@ -3222,6 +3302,69 @@ export class ProductService {
   }
 
   /**
+   * Export products as a downloadable file (server-side generation)
+   * @param exportDto - Export configuration with product IDs and selected attributes
+   * @param userId - The ID of the user
+   * @returns Promise with file buffer, MIME type, and filename
+   */
+  async exportProductsAsFile(
+    exportDto: ExportProductDto,
+    userId: number
+  ): Promise<{ buffer: Buffer; mimeType: string; filename: string }> {
+    try {
+      this.logger.log(`Generating ${exportDto.format || ExportFormat.JSON} file for ${exportDto.productIds.length} products`);
+
+      // Get the export data using existing logic
+      const exportResult = await this.exportProducts(exportDto, userId);
+
+      // Ensure data is an array
+      const exportData = Array.isArray(exportResult.data) ? exportResult.data : [];
+
+      // Get all attributes including custom ones
+      const allAttributes = [...exportDto.attributes];
+      
+      // Add custom attribute columns if present
+      if (exportDto.selectedAttributes && exportDto.selectedAttributes.length > 0) {
+        exportDto.selectedAttributes.forEach(customAttr => {
+          const columnName = customAttr.columnName || customAttr.attributeName;
+          if (!allAttributes.includes(columnName as any)) {
+            allAttributes.push(columnName as any);
+          }
+        });
+      }
+
+      // Generate file using the ExportGeneratorService
+      const fileResult = await this.exportGeneratorService.generateFile(
+        exportData,
+        allAttributes,
+        exportDto.format || ExportFormat.JSON
+      );
+
+      // Ensure filename has correct extension
+      const extension = this.exportGeneratorService.getFileExtension(exportDto.format || ExportFormat.JSON);
+      let filename = exportDto.filename || exportResult.filename;
+      if (!filename.endsWith(`.${extension}`)) {
+        filename = filename.replace(/\.[^.]+$/, '') + `.${extension}`;
+      }
+
+      this.logger.log(`Generated ${exportDto.format || ExportFormat.JSON} file: ${filename} (${fileResult.buffer.length} bytes)`);
+
+      return {
+        buffer: fileResult.buffer,
+        mimeType: fileResult.mimeType,
+        filename,
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+        throw error;
+      }
+
+      this.logger.error(`Failed to generate export file: ${error.message}`, error.stack);
+      throw new BadRequestException('Failed to generate export file');
+    }
+  }
+
+  /**
    * Determine which relations to include based on selected attributes
    */
   private determineIncludeRelations(attributes: ProductAttribute[], selectedAttributes?: AttributeSelectionDto[]): any {
@@ -3422,11 +3565,11 @@ export class ProductService {
               );
               const columnName = customAttr.columnName || customAttr.attributeName;
               const value = productAttribute?.value || productAttribute?.attribute?.defaultValue || '';
-              const attributeType = productAttribute?.attribute?.type || '';
               
-              // Format the value with type information
-              const formattedValue = attributeType ? `${value}(${attributeType})` : value;
-              exportRecord[columnName] = formattedValue;
+              // Only include non-empty values
+              if (value !== '' && value !== null && value !== undefined) {
+                exportRecord[columnName] = value;
+              }
             });
           }
           break;
