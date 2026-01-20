@@ -146,7 +146,7 @@ export interface MyDealProductResponse {
 }
 
 export interface MyDealApiResponse<T = any> {
-  ResponseStatus: 'Complete' | 'AsyncResponsePending' | 'Failed';
+  ResponseStatus: 'Complete' | 'AsyncResponsePending' | 'Failed' | 'CompleteWithErrors';
   Data?: T;
   PendingUri?: string;
   Errors?: Array<{
@@ -154,6 +154,27 @@ export interface MyDealApiResponse<T = any> {
     Code: string;
     Message: string;
   }>;
+}
+
+export interface MyDealBuyableProductError {
+  ID: string;
+  Code: string;
+  Message: string;
+}
+
+export interface MyDealBuyableProductResponse {
+  ExternalBuyableProductID: string;
+  SKU: string;
+  Errors?: MyDealBuyableProductError[];
+  Result: 'Success' | 'Fail';
+}
+
+export interface MyDealProductErrorResponse {
+  ExternalProductId: string;
+  ProductSKU: string;
+  BuyableProductResponses?: MyDealBuyableProductResponse[];
+  Errors?: MyDealBuyableProductError[];
+  Result: 'Success' | 'Fail';
 }
 
 export interface MyDealOrder {

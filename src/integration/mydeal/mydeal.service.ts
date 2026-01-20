@@ -174,6 +174,52 @@ export class MyDealService extends BaseIntegrationService {
   }
 
   /**
+   * Extract detailed error messages from MyDeal API response
+   * Handles both regular errors and product validation errors with buyable product details
+   */
+  private extractMyDealErrors(response: any): string {
+    const errors: string[] = [];
+
+    // Check for top-level errors array
+    if (response.Errors && Array.isArray(response.Errors)) {
+      errors.push(...response.Errors.map((e: any) => e.Message || e.toString()));
+    }
+
+    // Check for Data array with product-level and buyable-product-level errors
+    if (response.Data && Array.isArray(response.Data)) {
+      response.Data.forEach((product: any) => {
+        const productSku = product.ProductSKU || product.ExternalProductId || 'Unknown SKU';
+        
+        // Add product-level errors
+        if (product.Errors && Array.isArray(product.Errors)) {
+          product.Errors.forEach((err: any) => {
+            errors.push(`[${productSku}] ${err.Message || err.toString()}`);
+          });
+        }
+
+        // Add buyable product errors
+        if (product.BuyableProductResponses && Array.isArray(product.BuyableProductResponses)) {
+          product.BuyableProductResponses.forEach((bp: any) => {
+            if (bp.Errors && Array.isArray(bp.Errors)) {
+              const bpSku = bp.SKU || bp.ExternalBuyableProductID || 'Unknown Variant';
+              bp.Errors.forEach((err: any) => {
+                errors.push(`[${productSku} - ${bpSku}] ${err.Message || err.toString()}`);
+              });
+            }
+          });
+        }
+      });
+    }
+
+    // If no errors extracted but response indicates failure, provide a generic message
+    if (errors.length === 0 && (response.ResponseStatus === 'Failed' || response.ResponseStatus === 'CompleteWithErrors')) {
+      errors.push('MyDeal API request failed without detailed error message');
+    }
+
+    return errors.length > 0 ? errors.join(' | ') : 'Unknown error';
+  }
+
+  /**
    * Fetch MyDeal categories from API with caching
    */
   private async fetchMyDealCategories(): Promise<any[]> {
@@ -349,8 +395,9 @@ export class MyDealService extends BaseIntegrationService {
 
         externalProductId = product.sku;
         message = 'Product exported successfully';
-      } else if (response.ResponseStatus === 'Failed' && response.Errors) {
-        const errorMsg = response.Errors.map(e => e.Message).join(', ');
+      } else if (response.ResponseStatus === 'Failed' || response.ResponseStatus === 'CompleteWithErrors') {
+        // Extract detailed error messages using helper function
+        const errorMsg = this.extractMyDealErrors(response);
         
         // Store failed work item
         await this.storeWorkItem({
@@ -390,12 +437,21 @@ export class MyDealService extends BaseIntegrationService {
     } catch (error: any) {
       this.logger.error(`Export failed for product ${productId}:`, error);
 
+      // Extract detailed error message from API response if available
+      let errorMessage = error.message;
+      if (error.response?.data) {
+        const apiErrorMsg = this.extractMyDealErrors(error.response.data);
+        if (apiErrorMsg && apiErrorMsg !== 'Unknown error') {
+          errorMessage = apiErrorMsg;
+        }
+      }
+
       await this.recordIntegrationLog({
         productId,
         integrationType: this.integrationType,
         operation: IntegrationOperation.EXPORT,
         status: IntegrationStatus.ERROR,
-        message: error.message,
+        message: errorMessage,
         errorDetails: { stack: error.stack, response: error.response?.data },
         userId,
       });
@@ -403,7 +459,7 @@ export class MyDealService extends BaseIntegrationService {
       return {
         productId,
         status: 'error',
-        message: error.message,
+        message: errorMessage,
       };
     }
   }
@@ -514,20 +570,29 @@ export class MyDealService extends BaseIntegrationService {
     } catch (error: any) {
       this.logger.error(`Delete failed for product ${productId}:`, error);
 
+      // Extract detailed error message from API response if available
+      let errorMessage = error.message;
+      if (error.response?.data) {
+        const apiErrorMsg = this.extractMyDealErrors(error.response.data);
+        if (apiErrorMsg && apiErrorMsg !== 'Unknown error') {
+          errorMessage = apiErrorMsg;
+        }
+      }
+
       await this.recordIntegrationLog({
         productId,
         integrationType: this.integrationType,
         operation: IntegrationOperation.DELETE,
         status: IntegrationStatus.ERROR,
-        message: error.message,
-        errorDetails: { stack: error.stack },
+        message: errorMessage,
+        errorDetails: { stack: error.stack, response: error.response?.data },
         userId,
       });
 
       return {
         productId,
         status: 'error',
-        message: error.message,
+        message: errorMessage,
       };
     }
   }
@@ -1224,9 +1289,10 @@ export class MyDealService extends BaseIntegrationService {
           if (response.data.Data) {
             updateData.responseData = response.data.Data;
           }
-        } else if (response.data.ResponseStatus === 'Failed') {
+        } else if (response.data.ResponseStatus === 'Failed' || response.data.ResponseStatus === 'CompleteWithErrors') {
           updateData.status = 'failed';
-          updateData.errorMessage = response.data.Errors?.map(e => e.Message).join(', ') || 'Unknown error';
+          // Extract detailed error messages using helper function
+          updateData.errorMessage = this.extractMyDealErrors(response.data);
         } else if (response.data.ResponseStatus === 'AsyncResponsePending') {
           updateData.status = 'processing';
         }
@@ -1241,13 +1307,22 @@ export class MyDealService extends BaseIntegrationService {
     } catch (error: any) {
       this.logger.error('Failed to check work item status:', error);
       
+      // Extract detailed error message from API response if available
+      let errorMessage = error.message;
+      if (error.response?.data) {
+        const apiErrorMsg = this.extractMyDealErrors(error.response.data);
+        if (apiErrorMsg && apiErrorMsg !== 'Unknown error') {
+          errorMessage = apiErrorMsg;
+        }
+      }
+      
       // Update work item as failed if it exists
       try {
         await this.prisma.myDealWorkItem.update({
           where: { id: parseInt(workItemId) },
           data: {
             status: 'failed',
-            errorMessage: error.message,
+            errorMessage: errorMessage,
             updatedAt: new Date(),
           },
         });

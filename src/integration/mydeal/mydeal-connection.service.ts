@@ -764,14 +764,6 @@ export class MyDealConnectionService {
       };
     }
 
-    const fullitems = await this.prisma.myDealWorkItem.findMany({
-      orderBy: { createdAt: 'desc' },
-    })
-
-    this.logger.debug('Where Clause:', where);
-
-    // this.logger.debug('Full Items:', fullitems);
-
     // Get total count and logs
     const [total, logs] = await Promise.all([
       this.prisma.myDealWorkItem.count({ where }),
@@ -791,8 +783,6 @@ export class MyDealConnectionService {
         },
       }),
     ]);
-
-    this.logger.debug('Get Sync Logs:', { total, logs });
 
     // Format logs to match the expected interface
     const formattedLogs = logs.map((log) => {
