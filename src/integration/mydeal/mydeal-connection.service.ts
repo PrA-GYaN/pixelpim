@@ -573,10 +573,11 @@ export class MyDealConnectionService {
     const mapping = await this.prisma.myDealImportMapping.create({
       data: {
         connectionId: dto.connectionId,
-        attributeMappings: dto.attributeMappings as any,
-        fieldMappings: dto.fieldMappings as any,
+        attributeMappings: dto.attributeMappings,
+        fieldMappings: dto.fieldMappings,
+        selectedFields: dto.selectedFields,
         isActive: dto.isActive ?? true,
-      },
+      } as any,
     });
 
     return this.toImportMappingDto(mapping);
@@ -647,13 +648,27 @@ export class MyDealConnectionService {
       });
     }
 
+    const updateData: any = {};
+    
+    if (dto.attributeMappings !== undefined) {
+      updateData.attributeMappings = dto.attributeMappings;
+    }
+    
+    if (dto.fieldMappings !== undefined) {
+      updateData.fieldMappings = dto.fieldMappings;
+    }
+    
+    if (dto.selectedFields !== undefined) {
+      updateData.selectedFields = dto.selectedFields;
+    }
+    
+    if (dto.isActive !== undefined) {
+      updateData.isActive = dto.isActive;
+    }
+
     const updated = await this.prisma.myDealImportMapping.update({
       where: { id: mappingId },
-      data: {
-        attributeMappings: dto.attributeMappings as any,
-        fieldMappings: dto.fieldMappings as any,
-        isActive: dto.isActive,
-      },
+      data: updateData,
     });
 
     return this.toImportMappingDto(updated);
@@ -696,6 +711,7 @@ export class MyDealConnectionService {
       connectionId: mapping.connectionId,
       attributeMappings: mapping.attributeMappings as Record<string, string>,
       fieldMappings: mapping.fieldMappings as Record<string, string>,
+      selectedFields: mapping.selectedFields || [],
       isActive: mapping.isActive,
       createdAt: mapping.createdAt,
       updatedAt: mapping.updatedAt,

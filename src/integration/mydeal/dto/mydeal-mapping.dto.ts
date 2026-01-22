@@ -39,6 +39,9 @@ export class CreateMyDealImportMappingDto {
   @IsObject()
   fieldMappings: Record<string, string>;
 
+  @IsArray()
+  selectedFields: string[];
+
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
@@ -52,6 +55,10 @@ export class UpdateMyDealImportMappingDto {
   @IsObject()
   @IsOptional()
   fieldMappings?: Record<string, string>;
+
+  @IsArray()
+  @IsOptional()
+  selectedFields?: string[];
 
   @IsBoolean()
   @IsOptional()
@@ -73,6 +80,7 @@ export interface MyDealImportMappingResponseDto {
   connectionId: number;
   attributeMappings: Record<string, string>;
   fieldMappings: Record<string, string>;
+  selectedFields: string[];
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;

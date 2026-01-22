@@ -11,6 +11,7 @@ import {
   MyDealProductResponse,
   MyDealApiResponse,
   MyDealOrder,
+  MyDealBuyableProduct,
 } from './dto/mydeal.dto';
 
 @Injectable()
@@ -609,7 +610,7 @@ export class MyDealService extends BaseIntegrationService {
         '/products',
         {
           params: {
-            fields: 'ExternalProductId,ProductSKU,Title,Description,Brand,Tags,Condition,Categories,Images,Weight,WeightUnit,BuyableProducts',
+            fields: 'ExternalProductId,ProductSKU,Title,Description,Specifications,Brand,Tags,Condition,Categories(CategoryId),Images(Src,Position),Weight,WeightUnit,Length,Height,Width,DimensionUnit,GTIN,MPN,ShippingCostCategory,CustomFreightSchemeID,ShippingCostStandard,DeliveryTime,MaxDaysForDelivery,Has48HoursDispatch,BuyableProducts(ExternalBuyableProductID,SKU,Price,RRP,Quantity,Options(OptionName,OptionValue),ListingStatus)',
             page: 1,
             limit: 100,
           },
@@ -617,32 +618,798 @@ export class MyDealService extends BaseIntegrationService {
       );
 
       if (response.data.ResponseStatus === 'Complete' && response.data.Data) {
-        // If connectionId provided, apply import mapping
-        let products = response.data.Data;
+        const mydealProducts = response.data.Data;
         
-        if (connectionId) {
-          const importMapping = await this.connectionService.getActiveImportMapping(userId, connectionId);
-          if (importMapping) {
-            products = await Promise.all(
-              products.map(p => this.transformMyDealToProduct(p, importMapping.attributeMappings, importMapping.fieldMappings))
-            );
-          }
+        if (mydealProducts.length === 0) {
+          return {
+            success: true,
+            importedCount: 0,
+            failedCount: 0,
+            results: [],
+            message: 'No products found to import',
+          };
         }
 
-        return {
-          success: true,
-          products,
-          count: products.length,
-        };
+        // Automatically import the fetched products (import mapping will be applied inside importProducts)
+        const importResult = await this.importProducts(mydealProducts, userId, connectionId);
+        
+        return importResult;
       }
 
       return {
         success: false,
+        importedCount: 0,
+        failedCount: 0,
+        results: [],
         message: 'Failed to fetch products from MyDeal',
       };
     } catch (error: any) {
       this.logger.error('Pull updates failed:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Import products from MyDeal into local database
+   * Handles both simple products and variant products
+   */
+  async importProducts(
+    mydealProducts: MyDealProductResponse[],
+    userId: number,
+    connectionId?: number,
+  ): Promise<{
+    success: boolean;
+    importedCount: number;
+    failedCount: number;
+    results: Array<{
+      externalProductId: string;
+      status: 'success' | 'error';
+      productId?: number;
+      parentProductId?: number;
+      variantIds?: number[];
+      message?: string;
+    }>;
+  }> {
+    const results: Array<{
+      externalProductId: string;
+      status: 'success' | 'error';
+      productId?: number;
+      parentProductId?: number;
+      variantIds?: number[];
+      message?: string;
+    }> = [];
+    
+    let importedCount = 0;
+    let failedCount = 0;
+
+    // Get import mapping if connectionId provided
+    let attributeMappings: Record<string, any> = {};
+    let fieldMappings: Record<string, any> = {};
+    let selectedFields: string[] | null = null;
+    
+    if (connectionId) {
+      const importMapping = await this.connectionService.getActiveImportMapping(userId, connectionId);
+      if (importMapping) {
+        attributeMappings = importMapping.attributeMappings;
+        fieldMappings = importMapping.fieldMappings;
+        selectedFields = importMapping.selectedFields;
+        this.logger.log(`Using import mapping for connection ${connectionId} with fields: ${selectedFields?.join(', ')}`);
+      }
+    }
+
+    for (const mydealProduct of mydealProducts) {
+      this.logger.debug(`The Product IMported is:${JSON.stringify(mydealProduct)}`)
+      try {
+        // Detect if product has variants
+        const hasVariants = this.isVariantProduct(mydealProduct);
+
+        if (hasVariants) {
+          // Import as parent + variants
+          const result = await this.importVariantProduct(mydealProduct, userId, attributeMappings, fieldMappings, selectedFields);
+          results.push(result);
+          
+          // Store work item for tracking
+          await this.storeWorkItem({
+            workItemId: `import-${Date.now()}-${mydealProduct.ExternalProductId}`,
+            userId,
+            connectionId,
+            productId: result.parentProductId,
+            status: result.status === 'success' ? 'completed' : 'failed',
+            operation: 'import',
+            requestPayload: { externalProductId: mydealProduct.ExternalProductId },
+            responseData: result,
+            errorMessage: result.status === 'error' ? result.message : undefined,
+            externalProductId: mydealProduct.ExternalProductId,
+            externalSku: mydealProduct.ProductSKU,
+            completedAt: new Date(),
+          });
+          
+          if (result.status === 'success') {
+            importedCount++;
+          } else {
+            failedCount++;
+          }
+        } else {
+          // Import as simple/standalone product
+          const result = await this.importSimpleProduct(mydealProduct, userId, attributeMappings, fieldMappings, selectedFields);
+          results.push(result);
+          
+          // Store work item for tracking
+          await this.storeWorkItem({
+            workItemId: `import-${Date.now()}-${mydealProduct.ExternalProductId}`,
+            userId,
+            connectionId,
+            productId: result.productId,
+            status: result.status === 'success' ? 'completed' : 'failed',
+            operation: 'import',
+            requestPayload: { externalProductId: mydealProduct.ExternalProductId },
+            responseData: result,
+            errorMessage: result.status === 'error' ? result.message : undefined,
+            externalProductId: mydealProduct.ExternalProductId,
+            externalSku: mydealProduct.ProductSKU,
+            completedAt: new Date(),
+          });
+          
+          if (result.status === 'success') {
+            importedCount++;
+          } else {
+            failedCount++;
+          }
+        }
+      } catch (error: any) {
+        this.logger.error(`Failed to import product ${mydealProduct.ExternalProductId}:`, error);
+        
+        const errorResult = {
+          externalProductId: mydealProduct.ExternalProductId,
+          status: 'error' as const,
+          message: error.message || 'Import failed',
+        };
+        results.push(errorResult);
+        
+        // Store work item for failed import
+        await this.storeWorkItem({
+          workItemId: `import-${Date.now()}-${mydealProduct.ExternalProductId}`,
+          userId,
+          connectionId,
+          status: 'failed',
+          operation: 'import',
+          requestPayload: { externalProductId: mydealProduct.ExternalProductId },
+          responseData: errorResult,
+          errorMessage: error.message || 'Import failed',
+          externalProductId: mydealProduct.ExternalProductId,
+          externalSku: mydealProduct.ProductSKU,
+          completedAt: new Date(),
+        });
+        
+        failedCount++;
+      }
+    }
+
+    return {
+      success: failedCount === 0,
+      importedCount,
+      failedCount,
+      results,
+    };
+  }
+
+  /**
+   * Detect if a MyDeal product contains variants
+   * A product is considered to have variants if BuyableProducts has more than one item
+   */
+  private isVariantProduct(mydealProduct: MyDealProductResponse): boolean {
+    return mydealProduct.BuyableProducts && mydealProduct.BuyableProducts.length > 1;
+  }
+
+  /**
+   * Import a simple/standalone product (single BuyableProduct)
+   */
+  private async importSimpleProduct(
+    mydealProduct: MyDealProductResponse,
+    userId: number,
+    attributeMappings: Record<string, any>,
+    fieldMappings: Record<string, any>,
+    selectedFields: string[] | null = null,
+  ): Promise<{
+    externalProductId: string;
+    status: 'success' | 'error';
+    productId?: number;
+    message?: string;
+  }> {
+    try {
+      const mapField = (mydealField: string): string => {
+        return fieldMappings[mydealField] || mydealField.toLowerCase();
+      };
+
+      const buyableProduct = mydealProduct.BuyableProducts[0];
+      
+      // Check if product already exists
+      const existingProduct = await this.prisma.product.findFirst({
+        where: {
+          sku: mydealProduct.ProductSKU,
+          userId,
+          isDeleted: false,
+        },
+      });
+
+      // Build attributes array
+      const attributes = await this.buildProductAttributes(
+        mydealProduct,
+        buyableProduct,
+        attributeMappings,
+        mapField,
+        userId,
+        selectedFields,
+      );
+
+      // Extract category
+      let categoryId: number | null = null;
+      if (mydealProduct.Categories && mydealProduct.Categories.length > 0) {
+        // You might want to create/map categories here
+        // For now, we'll skip category creation
+      }
+
+      // Prepare image URLs
+      const images = mydealProduct.Images || [];
+      const mainImage = images.find(img => img.Position === 0)?.Src || images[0]?.Src || null;
+      const subImages = images
+        .filter(img => img.Position > 0)
+        .sort((a, b) => a.Position - b.Position)
+        .map(img => img.Src);
+
+      if (existingProduct) {
+        // Update existing product
+        const updatedProduct = await this.prisma.product.update({
+          where: { id: existingProduct.id },
+          data: {
+            name: mydealProduct.Title,
+            imageUrl: mainImage,
+            subImages: subImages,
+            updatedAt: new Date(),
+          },
+        });
+
+        // Update attributes
+        await this.updateProductAttributes(updatedProduct.id, attributes, userId);
+
+        return {
+          externalProductId: mydealProduct.ExternalProductId,
+          status: 'success',
+          productId: updatedProduct.id,
+          message: 'Product updated successfully',
+        };
+      } else {
+        // Create new product
+        const newProduct = await this.prisma.product.create({
+          data: {
+            name: mydealProduct.Title,
+            sku: mydealProduct.ProductSKU,
+            imageUrl: mainImage,
+            subImages: subImages,
+            categoryId,
+            userId,
+          },
+        });
+
+        // Create attributes
+        await this.updateProductAttributes(newProduct.id, attributes, userId);
+
+        return {
+          externalProductId: mydealProduct.ExternalProductId,
+          status: 'success',
+          productId: newProduct.id,
+          message: 'Product created successfully',
+        };
+      }
+    } catch (error: any) {
+      this.logger.error(`Failed to import simple product ${mydealProduct.ExternalProductId}:`, error);
+      return {
+        externalProductId: mydealProduct.ExternalProductId,
+        status: 'error',
+        message: error.message || 'Failed to import product',
+      };
+    }
+  }
+
+  /**
+   * Import a variant product (multiple BuyableProducts)
+   * Creates a parent product and multiple variant products
+   */
+  private async importVariantProduct(
+    mydealProduct: MyDealProductResponse,
+    userId: number,
+    attributeMappings: Record<string, any>,
+    fieldMappings: Record<string, any>,
+    selectedFields: string[] | null = null,
+  ): Promise<{
+    externalProductId: string;
+    status: 'success' | 'error';
+    parentProductId?: number;
+    variantIds?: number[];
+    message?: string;
+  }> {
+    try {
+      const mapField = (mydealField: string): string => {
+        return fieldMappings[mydealField] || mydealField.toLowerCase();
+      };
+
+      // Step 1: Create or update parent product
+      let parentProduct = await this.prisma.product.findFirst({
+        where: {
+          sku: mydealProduct.ProductSKU,
+          userId,
+          isDeleted: false,
+          parentProductId: null, // Ensure it's not a variant
+        },
+        include: {
+          attributes: {
+            include: {
+              attribute: true,
+            },
+          },
+        },
+      });
+
+      // Build parent attributes (shared attributes for all variants)
+      const parentAttributes = await this.buildProductAttributes(
+        mydealProduct,
+        null, // No specific buyable product for parent
+        attributeMappings,
+        mapField,
+        userId,
+        selectedFields,
+      );
+
+      // Extract category
+      let categoryId: number | null = null;
+      if (mydealProduct.Categories && mydealProduct.Categories.length > 0) {
+        // Category mapping would go here
+      }
+
+      // Prepare image URLs for parent
+      const images = mydealProduct.Images || [];
+      const mainImage = images.find(img => img.Position === 0)?.Src || images[0]?.Src || null;
+      const subImages = images
+        .filter(img => img.Position > 0)
+        .sort((a, b) => a.Position - b.Position)
+        .map(img => img.Src);
+
+      if (parentProduct) {
+        // Update existing parent product
+        parentProduct = await this.prisma.product.update({
+          where: { id: parentProduct.id },
+          data: {
+            name: mydealProduct.Title,
+            imageUrl: mainImage,
+            subImages: subImages,
+            updatedAt: new Date(),
+          },
+          include: {
+            attributes: {
+              include: {
+                attribute: true,
+              },
+            },
+          },
+        });
+
+        // Update parent attributes
+        await this.updateProductAttributes(parentProduct.id, parentAttributes, userId);
+      } else {
+        // Create new parent product
+        parentProduct = await this.prisma.product.create({
+          data: {
+            name: mydealProduct.Title,
+            sku: mydealProduct.ProductSKU,
+            imageUrl: mainImage,
+            subImages: subImages,
+            categoryId,
+            userId,
+          },
+          include: {
+            attributes: {
+              include: {
+                attribute: true,
+              },
+            },
+          },
+        });
+
+        // Create parent attributes
+        await this.updateProductAttributes(parentProduct.id, parentAttributes, userId);
+      }
+
+      // Step 2: Create or update variants
+      const variantIds: number[] = [];
+
+      for (const buyableProduct of mydealProduct.BuyableProducts) {
+        try {
+          // Check if variant already exists
+          let variant = await this.prisma.product.findFirst({
+            where: {
+              sku: buyableProduct.SKU,
+              userId,
+              isDeleted: false,
+            },
+          });
+
+          // Build variant-specific attributes
+          const variantAttributes = await this.buildVariantAttributes(
+            mydealProduct,
+            buyableProduct,
+            parentAttributes,
+            attributeMappings,
+            mapField,
+            userId,
+            selectedFields,
+          );
+
+          if (variant) {
+            // Update existing variant
+            variant = await this.prisma.product.update({
+              where: { id: variant.id },
+              data: {
+                name: `${mydealProduct.Title} - ${buyableProduct.SKU}`,
+                parentProductId: parentProduct.id,
+                updatedAt: new Date(),
+              },
+            });
+
+            // Update variant attributes
+            await this.updateProductAttributes(variant.id, variantAttributes, userId);
+          } else {
+            // Create new variant
+            this.logger.log(`Creating variant ${buyableProduct.SKU} for parent product ${parentProduct.sku} (ID: ${parentProduct.id})`);
+            variant = await this.prisma.product.create({
+              data: {
+                name: `${mydealProduct.Title} - ${buyableProduct.SKU}`,
+                sku: buyableProduct.SKU,
+                parentProductId: parentProduct.id,
+                imageUrl: mainImage, // Variants inherit parent images by default
+                subImages: subImages,
+                categoryId,
+                userId,
+              },
+            });
+            this.logger.log(`Successfully created variant ${buyableProduct.SKU} with ID: ${variant.id}`);
+
+            // Create variant attributes (inherits from parent + variant-specific)
+            await this.updateProductAttributes(variant.id, variantAttributes, userId);
+          }
+
+          variantIds.push(variant.id);
+        } catch (variantError: any) {
+          this.logger.error(`Failed to create/update variant ${buyableProduct.SKU}:`, variantError);
+          // Continue with other variants
+        }
+      }
+
+      return {
+        externalProductId: mydealProduct.ExternalProductId,
+        status: 'success',
+        parentProductId: parentProduct.id,
+        variantIds,
+        message: `Parent product and ${variantIds.length} variants imported successfully`,
+      };
+    } catch (error: any) {
+      this.logger.error(`Failed to import variant product ${mydealProduct.ExternalProductId}:`, error);
+      return {
+        externalProductId: mydealProduct.ExternalProductId,
+        status: 'error',
+        message: error.message || 'Failed to import variant product',
+      };
+    }
+  }
+
+  /**
+   * Build product attributes from MyDeal product data
+   */
+  private async buildProductAttributes(
+    mydealProduct: MyDealProductResponse,
+    buyableProduct: MyDealBuyableProduct | null,
+    attributeMappings: Record<string, any>,
+    mapField: (field: string) => string,
+    userId: number,
+    selectedFields: string[] | null = null,
+  ): Promise<Array<{ name: string; value: any }>> {
+    const attributes: Array<{ name: string; value: any }> = [];
+
+    // Helper function to check if a field should be included
+    const shouldIncludeField = (fieldName: string): boolean => {
+      if (!selectedFields || selectedFields.length === 0) {
+        return true; // Include all fields if no selection
+      }
+      return selectedFields.includes(fieldName);
+    };
+
+    // Map basic fields
+    if (shouldIncludeField('Description') && mydealProduct.Description) {
+      attributes.push({
+        name: attributeMappings['Description'] || mapField('Description'),
+        value: mydealProduct.Description,
+      });
+    }
+
+    if (shouldIncludeField('Brand') && mydealProduct.Brand) {
+      attributes.push({
+        name: attributeMappings['Brand'] || mapField('Brand'),
+        value: mydealProduct.Brand,
+      });
+    }
+
+    if (shouldIncludeField('Tags') && mydealProduct.Tags) {
+      attributes.push({
+        name: attributeMappings['Tags'] || mapField('Tags'),
+        value: mydealProduct.Tags,
+      });
+    }
+
+    if (shouldIncludeField('Condition') && mydealProduct.Condition) {
+      attributes.push({
+        name: attributeMappings['Condition'] || mapField('Condition'),
+        value: mydealProduct.Condition,
+      });
+    }
+
+    // Map dimensions and weight
+    if (shouldIncludeField('Weight') && mydealProduct.Weight) {
+      attributes.push({
+        name: attributeMappings['Weight'] || mapField('Weight'),
+        value: mydealProduct.Weight,
+      });
+    }
+
+    if (shouldIncludeField('WeightUnit') && mydealProduct.WeightUnit) {
+      attributes.push({
+        name: attributeMappings['WeightUnit'] || mapField('WeightUnit'),
+        value: mydealProduct.WeightUnit,
+      });
+    }
+
+    if (shouldIncludeField('Length') && mydealProduct.Length) {
+      attributes.push({
+        name: attributeMappings['Length'] || mapField('Length'),
+        value: mydealProduct.Length,
+      });
+    }
+
+    if (shouldIncludeField('Height') && mydealProduct.Height) {
+      attributes.push({
+        name: attributeMappings['Height'] || mapField('Height'),
+        value: mydealProduct.Height,
+      });
+    }
+
+    if (shouldIncludeField('Width') && mydealProduct.Width) {
+      attributes.push({
+        name: attributeMappings['Width'] || mapField('Width'),
+        value: mydealProduct.Width,
+      });
+    }
+
+    if (shouldIncludeField('DimensionUnit') && mydealProduct.DimensionUnit) {
+      attributes.push({
+        name: attributeMappings['DimensionUnit'] || mapField('DimensionUnit'),
+        value: mydealProduct.DimensionUnit,
+      });
+    }
+
+    // Map identifiers
+    if (shouldIncludeField('GTIN') && mydealProduct.GTIN) {
+      attributes.push({
+        name: attributeMappings['GTIN'] || mapField('GTIN'),
+        value: mydealProduct.GTIN,
+      });
+    }
+
+    if (shouldIncludeField('MPN') && mydealProduct.MPN) {
+      attributes.push({
+        name: attributeMappings['MPN'] || mapField('MPN'),
+        value: mydealProduct.MPN,
+      });
+    }
+
+    // Map shipping configuration
+    if (shouldIncludeField('ShippingCostCategory') && mydealProduct.ShippingCostCategory !== undefined) {
+      const shippingCategory = this.mapShippingCategory(mydealProduct.ShippingCostCategory);
+      attributes.push({
+        name: attributeMappings['ShippingCostCategory'] || mapField('ShippingCostCategory'),
+        value: shippingCategory,
+      });
+    }
+
+    // Add buyable product specific attributes (price, quantity, etc.)
+    if (buyableProduct) {
+      if (shouldIncludeField('Price')) {
+        attributes.push({
+          name: attributeMappings['Price'] || mapField('Price'),
+          value: buyableProduct.Price,
+        });
+      }
+
+      if (shouldIncludeField('RRP') && buyableProduct.RRP) {
+        attributes.push({
+          name: attributeMappings['RRP'] || mapField('RRP'),
+          value: buyableProduct.RRP,
+        });
+      }
+
+      if (shouldIncludeField('Quantity')) {
+        attributes.push({
+          name: attributeMappings['Quantity'] || mapField('Quantity'),
+          value: buyableProduct.Quantity,
+        });
+      }
+
+      if (shouldIncludeField('ListingStatus')) {
+        attributes.push({
+          name: attributeMappings['ListingStatus'] || mapField('ListingStatus'),
+          value: buyableProduct.ListingStatus === 1 ? 'active' : 'inactive',
+        });
+      }
+
+      // Add variant-specific options as attributes
+      if (buyableProduct.Options && buyableProduct.Options.length > 0) {
+        for (const option of buyableProduct.Options) {
+          if (shouldIncludeField(option.OptionName)) {
+            attributes.push({
+              name: attributeMappings[option.OptionName] || option.OptionName,
+              value: option.OptionValue,
+            });
+          }
+        }
+      }
+    }
+
+    return attributes;
+  }
+
+  /**
+   * Build variant-specific attributes
+   * Inherits parent attributes and adds/overrides with variant-specific values
+   */
+  private async buildVariantAttributes(
+    mydealProduct: MyDealProductResponse,
+    buyableProduct: MyDealBuyableProduct,
+    parentAttributes: Array<{ name: string; value: any }>,
+    attributeMappings: Record<string, any>,
+    mapField: (field: string) => string,
+    userId: number,
+    selectedFields: string[] | null = null,
+  ): Promise<Array<{ name: string; value: any }>> {
+    // Helper function to check if a field should be included
+    const shouldIncludeField = (fieldName: string): boolean => {
+      if (!selectedFields || selectedFields.length === 0) {
+        return true; // Include all fields if no selection
+      }
+      return selectedFields.includes(fieldName);
+    };
+
+    // Start with inherited parent attributes
+    const attributes = [...parentAttributes];
+
+    // Add/override with variant-specific attributes
+    const variantSpecificAttrs: Array<{ name: string; value: any }> = [];
+
+    if (shouldIncludeField('Price')) {
+      variantSpecificAttrs.push({
+        name: attributeMappings['Price'] || mapField('Price'),
+        value: buyableProduct.Price,
+      });
+    }
+
+    if (shouldIncludeField('Quantity')) {
+      variantSpecificAttrs.push({
+        name: attributeMappings['Quantity'] || mapField('Quantity'),
+        value: buyableProduct.Quantity,
+      });
+    }
+
+    if (shouldIncludeField('ListingStatus')) {
+      variantSpecificAttrs.push({
+        name: attributeMappings['ListingStatus'] || mapField('ListingStatus'),
+        value: buyableProduct.ListingStatus === 1 ? 'active' : 'inactive',
+      });
+    }
+
+    if (shouldIncludeField('RRP') && buyableProduct.RRP) {
+      variantSpecificAttrs.push({
+        name: attributeMappings['RRP'] || mapField('RRP'),
+        value: buyableProduct.RRP,
+      });
+    }
+
+    // Add variant options as attributes (only if 'Options' is in selectedFields)
+    if (shouldIncludeField('Options') && buyableProduct.Options && buyableProduct.Options.length > 0) {
+      for (const option of buyableProduct.Options) {
+        // Use option name directly or from attribute mapping
+        const attributeName = attributeMappings[option.OptionName] || option.OptionName;
+        variantSpecificAttrs.push({
+          name: attributeName,
+          value: option.OptionValue,
+        });
+      }
+    }
+
+    // Override parent attributes with variant-specific ones
+    for (const variantAttr of variantSpecificAttrs) {
+      const existingIndex = attributes.findIndex(a => a.name === variantAttr.name);
+      if (existingIndex >= 0) {
+        attributes[existingIndex] = variantAttr;
+      } else {
+        attributes.push(variantAttr);
+      }
+    }
+
+    return attributes;
+  }
+
+  /**
+   * Update product attributes in the database
+   */
+  private async updateProductAttributes(
+    productId: number,
+    attributes: Array<{ name: string; value: any }>,
+    userId: number,
+  ): Promise<void> {
+    for (const attr of attributes) {
+      try {
+        // Find or create attribute definition
+        let attributeDefinition = await this.prisma.attribute.findFirst({
+          where: {
+            name: attr.name,
+            userId,
+          },
+        });
+
+        if (!attributeDefinition) {
+          // Create new attribute definition
+          attributeDefinition = await this.prisma.attribute.create({
+            data: {
+              name: attr.name,
+              type: typeof attr.value === 'number' ? 'number' : 'text',
+              userId,
+            },
+          });
+        }
+
+        // Create or update product attribute
+        await this.prisma.productAttribute.upsert({
+          where: {
+            productId_attributeId: {
+              productId,
+              attributeId: attributeDefinition.id,
+            },
+          },
+          update: {
+            value: attr.value?.toString() || null,
+          },
+          create: {
+            productId,
+            attributeId: attributeDefinition.id,
+            value: attr.value?.toString() || null,
+          },
+        });
+      } catch (attrError: any) {
+        this.logger.error(`Failed to update attribute ${attr.name}:`, attrError);
+        // Continue with other attributes
+      }
+    }
+  }
+
+  /**
+   * Map MyDeal shipping category to internal format
+   */
+  private mapShippingCategory(category: number): string {
+    switch (category) {
+      case 0:
+        return 'Free';
+      case 1:
+        return 'Flat';
+      case 2:
+        return 'Custom';
+      default:
+        return 'Unknown';
     }
   }
 
@@ -668,7 +1435,16 @@ export class MyDealService extends BaseIntegrationService {
     mydealProduct: MyDealProductResponse,
     attributeMappings: Record<string, any> = {},
     fieldMappings: Record<string, any> = {},
+    selectedFields: string[] | null = null,
   ): Promise<any> {
+    // Helper function to check if a field should be included
+    const shouldIncludeField = (fieldName: string): boolean => {
+      if (!selectedFields || selectedFields.length === 0) {
+        return true; // Include all fields if no selection
+      }
+      return selectedFields.includes(fieldName);
+    };
+
     // Apply field mappings
     const mapField = (mydealField: string): string => {
       return fieldMappings[mydealField] || mydealField.toLowerCase();
@@ -678,28 +1454,28 @@ export class MyDealService extends BaseIntegrationService {
     const attributes: Array<{ name: string; value: any }> = [];
 
     // Map basic fields
-    if (mydealProduct.Description) {
+    if (shouldIncludeField('Description') && mydealProduct.Description) {
       attributes.push({ 
         name: mapField('Description'), 
         value: mydealProduct.Description 
       });
     }
 
-    if (mydealProduct.Brand) {
+    if (shouldIncludeField('Brand') && mydealProduct.Brand) {
       attributes.push({ 
         name: attributeMappings['Brand'] || mapField('Brand'), 
         value: mydealProduct.Brand 
       });
     }
 
-    if (mydealProduct.Tags) {
+    if (shouldIncludeField('Tags') && mydealProduct.Tags) {
       attributes.push({ 
         name: mapField('Tags'), 
         value: mydealProduct.Tags 
       });
     }
 
-    if (mydealProduct.Condition) {
+    if (shouldIncludeField('Condition') && mydealProduct.Condition) {
       attributes.push({ 
         name: mapField('Condition'), 
         value: mydealProduct.Condition 
@@ -707,42 +1483,42 @@ export class MyDealService extends BaseIntegrationService {
     }
 
     // Map dimensions and weight
-    if (mydealProduct.Weight) {
+    if (shouldIncludeField('Weight') && mydealProduct.Weight) {
       attributes.push({ 
         name: mapField('Weight'), 
         value: mydealProduct.Weight 
       });
     }
 
-    if (mydealProduct.WeightUnit) {
+    if (shouldIncludeField('WeightUnit') && mydealProduct.WeightUnit) {
       attributes.push({ 
         name: mapField('WeightUnit'), 
         value: mydealProduct.WeightUnit 
       });
     }
 
-    if (mydealProduct.Length) {
+    if (shouldIncludeField('Length') && mydealProduct.Length) {
       attributes.push({ 
         name: mapField('Length'), 
         value: mydealProduct.Length 
       });
     }
 
-    if (mydealProduct.Height) {
+    if (shouldIncludeField('Height') && mydealProduct.Height) {
       attributes.push({ 
         name: mapField('Height'), 
         value: mydealProduct.Height 
       });
     }
 
-    if (mydealProduct.Width) {
+    if (shouldIncludeField('Width') && mydealProduct.Width) {
       attributes.push({ 
         name: mapField('Width'), 
         value: mydealProduct.Width 
       });
     }
 
-    if (mydealProduct.DimensionUnit) {
+    if (shouldIncludeField('DimensionUnit') && mydealProduct.DimensionUnit) {
       attributes.push({ 
         name: mapField('DimensionUnit'), 
         value: mydealProduct.DimensionUnit 
@@ -750,14 +1526,14 @@ export class MyDealService extends BaseIntegrationService {
     }
 
     // Map identifiers
-    if (mydealProduct.GTIN) {
+    if (shouldIncludeField('GTIN') && mydealProduct.GTIN) {
       attributes.push({ 
         name: attributeMappings['GTIN'] || mapField('GTIN'), 
         value: mydealProduct.GTIN 
       });
     }
 
-    if (mydealProduct.MPN) {
+    if (shouldIncludeField('MPN') && mydealProduct.MPN) {
       attributes.push({ 
         name: attributeMappings['MPN'] || mapField('MPN'), 
         value: mydealProduct.MPN 
@@ -767,22 +1543,26 @@ export class MyDealService extends BaseIntegrationService {
     // Get price and quantity from first BuyableProduct
     const firstBuyable = mydealProduct.BuyableProducts?.[0];
     if (firstBuyable) {
-      attributes.push({ 
-        name: mapField('Price'), 
-        value: firstBuyable.Price 
-      });
+      if (shouldIncludeField('Price')) {
+        attributes.push({ 
+          name: mapField('Price'), 
+          value: firstBuyable.Price 
+        });
+      }
 
-      if (firstBuyable.RRP) {
+      if (shouldIncludeField('RRP') && firstBuyable.RRP) {
         attributes.push({ 
           name: mapField('RRP'), 
           value: firstBuyable.RRP 
         });
       }
 
-      attributes.push({ 
-        name: mapField('Quantity'), 
-        value: firstBuyable.Quantity 
-      });
+      if (shouldIncludeField('Quantity')) {
+        attributes.push({ 
+          name: mapField('Quantity'), 
+          value: firstBuyable.Quantity 
+        });
+      }
     }
 
     // Get category
@@ -916,27 +1696,34 @@ export class MyDealService extends BaseIntegrationService {
     };
 
     // Helper function to get the MyDeal field name from internal field name
+    // This always returns the MyDeal API field name (e.g., "ShippingCostStandard")
     const getMappedFieldName = (internalField: string): string => {
-      // If there's a custom mapping, use it
-      if (fieldMappings[internalField]) {
-        return fieldMappings[internalField];
-      }
-      // Otherwise use the default MyDeal field name from fieldDefaults
+      // Always use the default MyDeal field name from fieldDefaults
+      // fieldMappings is for mapping to local attributes, not MyDeal field names
       const config = fieldDefaults[internalField];
       return config ? config.mydealField : internalField;
     };
 
     // Helper function to get field value
+    // This looks for the value using the mapped attribute name
     const getFieldValue = (internalField: string, defaultValue: any = null): any => {
-      // First check if value exists directly on product
+      // Determine which attribute name to look for
+      // If there's a field mapping, use the mapped attribute name (e.g., "Shipping_Cost")
+      // Otherwise use the internal field name
+      const attributeToLookFor = fieldMappings[internalField] || internalField;
+      
+      // First check if value exists directly on product (using internal field name)
       if (product[internalField] !== undefined && product[internalField] !== null) {
         return product[internalField];
       }
 
-      // Then check in attributes
+      // Then check in attributes (using the mapped attribute name)
       if (product.attributes && Array.isArray(product.attributes)) {
         const attr = product.attributes.find(
-          (a: any) => a.attribute?.name?.toLowerCase() === internalField.toLowerCase()
+          (a: any) => {
+            const attrName = a.attribute?.name || a.name;
+            return attrName?.toLowerCase() === attributeToLookFor.toLowerCase();
+          }
         );
         if (attr) {
           return attr.value;
@@ -1061,6 +1848,29 @@ export class MyDealService extends BaseIntegrationService {
     // Check if variants should be exported
     const shouldExportVariants = shouldExportField('variants');
     
+    // Helper function to get field value from variant (checks attributes array)
+    const getVariantFieldValue = (variant: any, fieldName: string, defaultValue: any = null): any => {
+      // First check if value exists directly on variant
+      if (variant[fieldName] !== undefined && variant[fieldName] !== null) {
+        return variant[fieldName];
+      }
+
+      // Then check in variant attributes
+      if (variant.attributes && Array.isArray(variant.attributes)) {
+        const attr = variant.attributes.find(
+          (a: any) => {
+            const attrName = a.attribute?.name || a.name;
+            return attrName?.toLowerCase() === fieldName.toLowerCase();
+          }
+        );
+        if (attr && attr.value !== undefined && attr.value !== null) {
+          return attr.value;
+        }
+      }
+
+      return defaultValue;
+    };
+    
     // Build buyable products array with only variants that have differing attributes
     let buyableProducts: any[] = [];
     
@@ -1073,20 +1883,31 @@ export class MyDealService extends BaseIntegrationService {
             SKU: variant.sku || variant.id.toString(),
           };
 
+          // Extract variant-specific values, fallback to parent if not found
           if (hasPriceField) {
-            buyableProduct.Price = parseFloat(variant.price) || price || 0;
+            const variantPrice = getVariantFieldValue(variant, 'price', null);
+            buyableProduct.Price = variantPrice !== null ? parseFloat(variantPrice) : price;
           }
           if (hasCompareAtPriceField) {
-            buyableProduct.RRP = parseFloat(variant.compareAtPrice || variant.price) || compareAtPrice || 0;
+            const variantRRP = getVariantFieldValue(variant, 'compareAtPrice', null) || 
+                               getVariantFieldValue(variant, 'rrp', null);
+            buyableProduct.RRP = variantRRP !== null ? parseFloat(variantRRP) : compareAtPrice;
           }
           if (hasQuantityField) {
-            buyableProduct.Quantity = variant.quantity !== undefined ? variant.quantity : quantity;
+            const variantQuantity = getVariantFieldValue(variant, 'quantity', null);
+            buyableProduct.Quantity = variantQuantity !== null ? parseInt(variantQuantity) : quantity;
           }
           if (hasIsActiveField) {
-            buyableProduct.ListingStatus = (variant.isActive !== undefined ? variant.isActive : isActive) ? 1 : 0;
+            const variantIsActive = getVariantFieldValue(variant, 'isActive', null);
+            const variantListingStatus = getVariantFieldValue(variant, 'listingStatus', null);
+            const activeValue = variantIsActive !== null ? variantIsActive : 
+                               (variantListingStatus !== null ? variantListingStatus : isActive);
+            buyableProduct.ListingStatus = activeValue ? 1 : 0;
           }
           if (hasProductUnlimitedField) {
-            buyableProduct.ProductUnlimited = productUnlimited === true || productUnlimited === 'true';
+            const variantProductUnlimited = getVariantFieldValue(variant, 'productUnlimited', null);
+            const unlimitedValue = variantProductUnlimited !== null ? variantProductUnlimited : productUnlimited;
+            buyableProduct.ProductUnlimited = unlimitedValue === true || unlimitedValue === 'true';
           }
 
           // Build Options from variant attributes that differ from parent
@@ -1095,8 +1916,9 @@ export class MyDealService extends BaseIntegrationService {
           if (variant.attributes && Array.isArray(variant.attributes)) {
             // Compare each variant attribute with parent attributes
             variant.attributes.forEach((varAttr: any) => {
-              const attrId = varAttr.attribute?.id;
-              const attrName = varAttr.attribute?.name;
+              // Support both nested attribute structure and direct structure
+              const attrId = varAttr.attribute?.id || varAttr.id;
+              const attrName = varAttr.attribute?.name || varAttr.name;
               const varValue = varAttr.value;
               
               // Skip attributes that should be BuyableProduct fields, not Options
@@ -1104,8 +1926,11 @@ export class MyDealService extends BaseIntegrationService {
                 return;
               }
               
-              // Find matching parent attribute
-              const parentAttr = product.attributes?.find((pa: any) => pa.attribute?.id === attrId);
+              // Find matching parent attribute (check both structures)
+              const parentAttr = product.attributes?.find((pa: any) => {
+                const parentId = pa.attribute?.id || pa.id;
+                return parentId === attrId;
+              });
               const parentValue = parentAttr?.value;
               
               // Only include if value differs from parent or parent doesn't have this attribute
@@ -1127,12 +1952,8 @@ export class MyDealService extends BaseIntegrationService {
         .filter(item => item.hasOptions) // Only include variants with differing attributes
         .map(item => item.buyableProduct);
 
-      // If only one variant with options or no variants with options, treat as standalone product
-      if (variantsWithOptions.length <= 1) {
-        buyableProducts = [];
-      } else {
-        buyableProducts = variantsWithOptions;
-      }
+      // Use the variants with options as BuyableProducts
+      buyableProducts = variantsWithOptions;
     }
 
     // If no buyable products with variants, create standalone product
@@ -1178,7 +1999,7 @@ export class MyDealService extends BaseIntegrationService {
 
     if (product.attributes && Array.isArray(product.attributes)) {
       product.attributes.forEach((attr: any) => {
-        const attrName = attr.attribute?.name;
+        const attrName = attr.attribute?.name || attr.name;
         if (attrName && !excludedAttributes.includes(attrName.toLowerCase()) && attr.value) {
           payload.ProductSpecifics.push({
             Name: attrName,

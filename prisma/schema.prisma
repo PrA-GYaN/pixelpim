@@ -611,6 +611,7 @@ model MyDealImportMapping {
   connectionId      Int
   attributeMappings Json             // Maps MyDeal attributes to internal attributes
   fieldMappings     Json             // Maps MyDeal fields to internal fields
+  selectedFields    String[]         // List of fields to import
   isActive          Boolean          @default(true)
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt

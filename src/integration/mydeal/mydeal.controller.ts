@@ -200,6 +200,29 @@ export class MyDealController {
     return result;
   }
 
+  @Post('import')
+  @UseGuards(JwtAuthGuard, OwnershipGuard, PermissionsGuard)
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions({ resource: 'integration', action: 'import' })
+  async importProducts(
+    @Body() body: { 
+      products: any[];
+      connectionId?: number;
+    },
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    this.logger.log(`User ${user.id} importing ${body.products.length} products from MyDeal`);
+
+    const result = await this.mydealService.importProducts(
+      body.products,
+      effectiveUserId,
+      body.connectionId,
+    );
+
+    return result;
+  }
+
   @Get('work-items')
   @UseGuards(JwtAuthGuard, OwnershipGuard, PermissionsGuard)
   @HttpCode(HttpStatus.OK)
