@@ -118,7 +118,7 @@ export class WooCommerceMultiStoreService {
     let syncedCount = 0;
     let failedCount = 0;
 
-    // Fetch products with their attributes
+    // Fetch products with their attributes and variants
     const products = await this.prisma.product.findMany({
       where: {
         id: { in: dto.productIds },
@@ -135,6 +135,15 @@ export class WooCommerceMultiStoreService {
         assets: {
           include: {
             asset: true,
+          },
+        },
+        variants: {
+          include: {
+            attributes: {
+              include: {
+                attribute: true,
+              },
+            },
           },
         },
       },
@@ -240,6 +249,12 @@ export class WooCommerceMultiStoreService {
               },
             });
           }
+        }
+
+        // Export variants if enabled
+        if (fieldsToExport.includes('variants') && product.variants && product.variants.length > 0) {
+          this.logger.log(`Exporting ${product.variants.length} variants for product ${product.id} to WooCommerce`);
+          await this.exportProductVariants(wooClient, wooProductId, product.variants, fieldMappings);
         }
 
         results.push({
@@ -530,6 +545,19 @@ export class WooCommerceMultiStoreService {
                 },
               });
               this.logger.log(`Created sync record for WooCommerce product ${wooProduct.id} linked to product ID ${productToLink.id}`);
+            }
+
+            // Import variants if enabled
+            if (fieldMappings['variants'] && wooProduct.id) {
+              this.logger.log(`Importing variants for WooCommerce product ${wooProduct.id}`);
+              await this.importProductVariants(
+                wooClient,
+                wooProduct.id,
+                productToLink.id,
+                userId,
+                attributeMappings,
+                fieldMappings,
+              );
             }
 
             products.push({
@@ -1052,6 +1080,369 @@ export class WooCommerceMultiStoreService {
   // ===== Helper Methods =====
 
   /**
+   * Export product variants to WooCommerce
+   * Creates WooCommerce product variations for a parent product
+   */
+  private async exportProductVariants(
+    wooClient: any,
+    wooProductId: number,
+    variants: any[],
+    fieldMappings: Record<string, any>,
+  ): Promise<void> {
+    for (const variant of variants) {
+      try {
+        // Build variant payload from variant attributes
+        const variationData = await this.buildVariantPayload(variant, wooClient, fieldMappings);
+        
+        this.logger.log(`Creating variation for product ${wooProductId}: ${JSON.stringify(variationData)}`);
+        
+        // Create variation in WooCommerce
+        await wooClient.post(`products/${wooProductId}/variations`, variationData);
+        
+        this.logger.log(`Successfully created variation for variant ${variant.id}`);
+      } catch (error: any) {
+        this.logger.error(`Failed to create variation for variant ${variant.id}:`, error);
+        // Continue with other variants even if one fails
+      }
+    }
+  }
+
+  /**
+   * Build WooCommerce variation payload from variant data
+   * Handles both default WooCommerce fields and custom attributes
+   */
+  private async buildVariantPayload(
+    variant: any,
+    wooClient: any,
+    fieldMappings: Record<string, any>,
+  ): Promise<any> {
+    const payload: any = {};
+    
+    // Default WooCommerce variation fields
+    const defaultFields = [
+      'regular_price', 'sale_price', 'sku', 'weight', 'dimensions',
+      'stock_quantity', 'stock_status', 'manage_stock', 'description'
+    ];
+    
+    const customAttributes: Array<{ id: number; option: string }> = [];
+    
+    // Process variant attributes
+    if (variant.attributes && variant.attributes.length > 0) {
+      for (const attr of variant.attributes) {
+        const attrName = attr.attribute.name.toLowerCase();
+        const attrValue = attr.value;
+        
+        // Check if this is a default WooCommerce field
+        const isDefaultField = defaultFields.some(field => 
+          attrName.includes(field.toLowerCase().replace('_', ' ')) || 
+          attrName === field
+        );
+        
+        if (isDefaultField) {
+          // Map to default field
+          if (attrName.includes('regular') || attrName.includes('price') && !attrName.includes('sale')) {
+            payload.regular_price = this.extractNumeric(attrValue);
+          } else if (attrName.includes('sale')) {
+            payload.sale_price = this.extractNumeric(attrValue);
+          } else if (attrName.includes('sku')) {
+            payload.sku = attrValue;
+          } else if (attrName.includes('weight')) {
+            payload.weight = this.extractNumeric(attrValue);
+          } else if (attrName.includes('stock') && attrName.includes('quantity')) {
+            payload.stock_quantity = parseInt(attrValue, 10);
+            payload.manage_stock = true;
+          } else if (attrName.includes('stock') && attrName.includes('status')) {
+            payload.stock_status = attrValue.toLowerCase();
+          } else if (attrName.includes('description')) {
+            payload.description = attrValue;
+          }
+        } else {
+          // Custom attribute - needs to be mapped to WooCommerce attribute
+          const wooAttributeId = await this.getOrCreateWooCommerceAttribute(
+            wooClient,
+            attr.attribute.name,
+            attrValue,
+          );
+          
+          if (wooAttributeId) {
+            customAttributes.push({
+              id: wooAttributeId,
+              option: attrValue,
+            });
+          }
+        }
+      }
+    }
+    
+    // Add custom attributes if any
+    if (customAttributes.length > 0) {
+      payload.attributes = customAttributes;
+    }
+    
+    // If variant has SKU, use it
+    if (variant.sku && !payload.sku) {
+      payload.sku = variant.sku;
+    }
+    
+    return payload;
+  }
+
+  /**
+   * Get or create WooCommerce attribute
+   * Searches for existing attribute by name, creates if not found
+   */
+  private async getOrCreateWooCommerceAttribute(
+    wooClient: any,
+    attributeName: string,
+    attributeValue: string,
+  ): Promise<number | null> {
+    try {
+      // Search for existing attribute by name
+      const searchResponse = await wooClient.get('products/attributes', {
+        search: attributeName,
+      });
+      
+      let attributeId: number | null = null;
+      
+      if (searchResponse.data && searchResponse.data.length > 0) {
+        // Find exact match (case-insensitive)
+        const exactMatch = searchResponse.data.find((attr: any) => 
+          attr.name.toLowerCase() === attributeName.toLowerCase()
+        );
+        
+        if (exactMatch) {
+          attributeId = exactMatch.id;
+          this.logger.log(`Found existing WooCommerce attribute "${attributeName}" with ID ${attributeId}`);
+        }
+      }
+      
+      // If not found, create new attribute
+      if (!attributeId) {
+        this.logger.log(`Creating new WooCommerce attribute "${attributeName}"`);
+        const createResponse = await wooClient.post('products/attributes', {
+          name: attributeName,
+          slug: attributeName.toLowerCase().replace(/\s+/g, '-'),
+          type: 'select',
+          order_by: 'menu_order',
+          has_archives: false,
+        });
+        
+        attributeId = createResponse.data.id;
+        this.logger.log(`Created WooCommerce attribute "${attributeName}" with ID ${attributeId}`);
+      }
+      
+      // Now ensure the attribute term (value) exists
+      if (attributeId) {
+        await this.ensureAttributeTerm(wooClient, attributeId, attributeValue);
+      }
+      
+      return attributeId;
+    } catch (error: any) {
+      this.logger.error(`Failed to get/create WooCommerce attribute "${attributeName}":`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Ensure attribute term exists for an attribute
+   */
+  private async ensureAttributeTerm(
+    wooClient: any,
+    attributeId: number,
+    termValue: string,
+  ): Promise<void> {
+    try {
+      // Check if term already exists
+      const termsResponse = await wooClient.get(`products/attributes/${attributeId}/terms`, {
+        search: termValue,
+      });
+      
+      const exactMatch = termsResponse.data?.find((term: any) => 
+        term.name.toLowerCase() === termValue.toLowerCase()
+      );
+      
+      if (!exactMatch) {
+        // Create the term
+        await wooClient.post(`products/attributes/${attributeId}/terms`, {
+          name: termValue,
+          slug: termValue.toLowerCase().replace(/\s+/g, '-'),
+        });
+        
+        this.logger.log(`Created attribute term "${termValue}" for attribute ${attributeId}`);
+      }
+    } catch (error: any) {
+      this.logger.error(`Failed to ensure attribute term "${termValue}":`, error);
+    }
+  }
+
+  /**
+   * Import product variants from WooCommerce
+   * Fetches variations and creates them as child products in the local system
+   */
+  private async importProductVariants(
+    wooClient: any,
+    wooProductId: number,
+    parentProductId: number,
+    userId: number,
+    attributeMappings: Record<string, any>,
+    fieldMappings: Record<string, any>,
+  ): Promise<void> {
+    try {
+      // Fetch variations from WooCommerce
+      const variationsResponse = await wooClient.get(`products/${wooProductId}/variations`);
+      const variations = variationsResponse.data;
+      
+      if (!variations || variations.length === 0) {
+        this.logger.log(`No variations found for WooCommerce product ${wooProductId}`);
+        return;
+      }
+      
+      this.logger.log(`Found ${variations.length} variations for product ${wooProductId}`);
+      
+      for (const variation of variations) {
+        try {
+          // Build local variant data
+          const variantData = await this.buildLocalVariantData(
+            variation,
+            parentProductId,
+            userId,
+            attributeMappings,
+            fieldMappings,
+          );
+          
+          // Extract attributes to create separately
+          const attributesToCreate = variantData._attributesToCreate;
+          delete variantData._attributesToCreate;
+          
+          // Check if variant already exists by SKU
+          const existingVariant = variantData.sku ? await this.prisma.product.findUnique({
+            where: {
+              sku_userId: {
+                sku: variantData.sku,
+                userId,
+              },
+            },
+          }) : null;
+          
+          let variantId: number;
+          
+          if (existingVariant) {
+            // Update existing variant
+            await this.prisma.product.update({
+              where: { id: existingVariant.id },
+              data: variantData,
+            });
+            variantId = existingVariant.id;
+            this.logger.log(`Updated existing variant ${variantId} for variation ${variation.id}`);
+          } else {
+            // Create new variant
+            const newVariant = await this.prisma.product.create({
+              data: variantData,
+            });
+            variantId = newVariant.id;
+            this.logger.log(`Created new variant ${variantId} for variation ${variation.id}`);
+          }
+          
+          // Process attributes
+          if (attributesToCreate && attributesToCreate.length > 0) {
+            await this.processProductAttributes(variantId, userId, attributesToCreate);
+          }
+          
+        } catch (error: any) {
+          this.logger.error(`Failed to import variation ${variation.id}:`, error);
+          // Continue with other variations
+        }
+      }
+    } catch (error: any) {
+      this.logger.error(`Failed to import variants for product ${wooProductId}:`, error);
+    }
+  }
+
+  /**
+   * Build local variant data from WooCommerce variation
+   */
+  private async buildLocalVariantData(
+    variation: any,
+    parentProductId: number,
+    userId: number,
+    attributeMappings: Record<string, any>,
+    fieldMappings: Record<string, any>,
+  ): Promise<any> {
+    const data: any = {
+      name: variation.sku || `Variant ${variation.id}`,
+      sku: variation.sku || `VAR-${variation.id}`,
+      parentProductId,
+      userId,
+      status: 'complete',
+    };
+    
+    // Handle price
+    if (variation.regular_price) {
+      // Price will be stored as an attribute
+    }
+    
+    // Handle images
+    if (variation.image?.src) {
+      data.imageUrl = variation.image.src;
+    }
+    
+    // Process attributes
+    const attributesToCreate: Array<{ name: string; value: any; type: string }> = [];
+    
+    // Add price as attribute if available
+    if (variation.regular_price) {
+      attributesToCreate.push({
+        name: 'regular_price',
+        value: variation.regular_price,
+        type: 'TEXT',
+      });
+    }
+    
+    if (variation.sale_price) {
+      attributesToCreate.push({
+        name: 'sale_price',
+        value: variation.sale_price,
+        type: 'TEXT',
+      });
+    }
+    
+    // Add weight as attribute if available
+    if (variation.weight) {
+      attributesToCreate.push({
+        name: 'weight',
+        value: variation.weight,
+        type: 'TEXT',
+      });
+    }
+    
+    // Add stock quantity if available
+    if (variation.stock_quantity !== undefined && variation.stock_quantity !== null) {
+      attributesToCreate.push({
+        name: 'stock_quantity',
+        value: variation.stock_quantity.toString(),
+        type: 'TEXT',
+      });
+    }
+    
+    // Process variation attributes
+    if (variation.attributes && Array.isArray(variation.attributes)) {
+      for (const attr of variation.attributes) {
+        if (attr.option) {
+          attributesToCreate.push({
+            name: attr.name || `Attribute ${attr.id}`,
+            value: attr.option,
+            type: 'TEXT',
+          });
+        }
+      }
+    }
+    
+    data._attributesToCreate = attributesToCreate;
+    
+    return data;
+  }
+
+  /**
    * Build WooCommerce product data from local product
    */
   private async buildWooProductData(
@@ -1088,7 +1479,13 @@ export class WooCommerceMultiStoreService {
     this.processTags(wooProduct, context);
     await this.processAttributes(wooProduct, context);
     this.processStatus(wooProduct, context);
-    this.addFieldIfIncluded(wooProduct, 'type', 'simple', context);
+    
+    // Set product type based on whether it has variants
+    // Always set type regardless of field selection - it's a required WooCommerce field
+    const hasVariants = product.variants && product.variants.length > 0;
+    const includeVariants = fieldsToExport.includes('variants');
+    const productType = (hasVariants && includeVariants) ? 'variable' : 'simple';
+    wooProduct.type = productType;
 
     return wooProduct;
   }
@@ -1361,14 +1758,60 @@ export class WooCommerceMultiStoreService {
 
     const wooAttributes: Array<{ name: string; options: string[]; visible: boolean; variation: boolean }> = [];
     const variationPatterns = ['color', 'colour', 'size', 'material', 'style'];
+    
+    // Track attributes that are used in variants
+    const variantAttributeNames = new Set<string>();
+    const variantAttributeValues = new Map<string, Set<string>>();
+    
+    // If product has variants and variants export is enabled, collect variant attributes
+    const hasVariants = product.variants && product.variants.length > 0;
+    const includeVariants = fieldsToExport.includes('variants');
+    
+    if (hasVariants && includeVariants) {
+      // Collect all attributes from variants
+      for (const variant of product.variants) {
+        if (variant.attributes && variant.attributes.length > 0) {
+          for (const attr of variant.attributes) {
+            const attrName = attr.attribute.name;
+            variantAttributeNames.add(attrName);
+            
+            if (!variantAttributeValues.has(attrName)) {
+              variantAttributeValues.set(attrName, new Set());
+            }
+            variantAttributeValues.get(attrName)!.add(attr.value);
+          }
+        }
+      }
+      
+      // Create attributes for variants
+      for (const [attrName, values] of variantAttributeValues.entries()) {
+        const attrNameLower = attrName.toLowerCase();
+        const isMapped = mappedAttributeNames.some(name => attrNameLower.includes(name.toLowerCase()));
+        
+        if (!isMapped) {
+          const options = Array.from(values);
+          await this.ensureWooCommerceAttribute(attrName, options, wooClient);
+          
+          wooAttributes.push({
+            name: attrName,
+            options,
+            visible: true,
+            variation: true, // Mark as variation attribute
+          });
+        }
+      }
+    }
 
+    // Process parent product attributes (that are not used in variants)
     if (product.attributes?.length > 0) {
       for (const attr of product.attributes) {
         const attrName = attr.attribute.name.toLowerCase();
         const isMapped = mappedAttributeNames.some(name => attrName.includes(name.toLowerCase()));
         const isMappedViaFieldMapping = attributesMappedToWooFields.includes(attr.attribute.name);
+        const isVariantAttribute = variantAttributeNames.has(attr.attribute.name);
         
-        if (!isMapped && !isMappedViaFieldMapping && this.shouldIncludeField(attr.attribute.name, context) && attr.value) {
+        // Skip if already added as variant attribute or if mapped
+        if (!isMapped && !isMappedViaFieldMapping && !isVariantAttribute && this.shouldIncludeField(attr.attribute.name, context) && attr.value) {
           let options: string[] = [];
           try {
             if (typeof attr.value === 'string' && attr.value.trim().startsWith('[')) {
@@ -1513,6 +1956,11 @@ export class WooCommerceMultiStoreService {
       this.logger.log(`Processing field mappings: ${JSON.stringify(fieldMappings)}`);
       
       for (const [wooField, localAttrName] of Object.entries(fieldMappings)) {
+        // Skip 'variants' - it's handled separately by importProductVariants
+        if (wooField === 'variants') {
+          continue;
+        }
+        
         let value: any = null;
         
         // Get value from WooCommerce product
