@@ -12,11 +12,14 @@ import {
   InternalServerErrorException,
   Logger,
   Query,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { AttributeService } from './attribute.service';
 import { CreateAttributeDto } from './dto/create-attribute.dto';
 import { UpdateAttributeDto } from './dto/update-attribute.dto';
 import { AttributeFilterDto, AttributeGroupFilterDto } from './dto/attribute-filter.dto';
+import { BulkDeleteAttributeDto } from './dto/bulk-delete-attribute.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OwnershipGuard } from '../auth/guards/ownership.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
@@ -226,6 +229,22 @@ export class AttributeController {
       return await this.attributeService.remove(id, effectiveUserId);
     } catch (error) {
       return this.handleError(error, 'deleting');
+    }
+  }
+
+  @Post('bulk-delete')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions({ resource: 'attributes', action: 'delete' })
+  async bulkDelete(
+    @Body() bulkDeleteDto: BulkDeleteAttributeDto,
+    @User() user: any,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    try {
+      this.logger.log(`Bulk deleting attributes for user: ${user.id}`);
+      return await this.attributeService.bulkDelete(bulkDeleteDto, effectiveUserId);
+    } catch (error) {
+      return this.handleError(error, 'bulk deleting');
     }
   }
 }

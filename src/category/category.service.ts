@@ -4,6 +4,7 @@ import { NotificationService } from '../notification/notification.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import { CategoryResponseDto, CategoryTreeResponseDto } from './dto/category-response.dto';
+import { BulkDeleteCategoryDto } from './dto/bulk-delete-category.dto';
 import { PaginatedResponse, PaginationUtils } from '../common';
 import type { Category } from '@prisma/client';
 
@@ -728,5 +729,122 @@ export class CategoryService {
 
     // Default error
     throw new BadRequestException(`Failed to ${operation} category`);
+  }
+
+  async bulkDelete(bulkDeleteDto: BulkDeleteCategoryDto, userId: number): Promise<{ deletedCount: number }> {
+    try {
+      this.logger.log(`Bulk deleting categories for user: ${userId}`);
+
+      let categoriesToDelete: number[] = [];
+
+      if (bulkDeleteDto.ids && bulkDeleteDto.ids.length > 0) {
+        // Delete by specific IDs
+        categoriesToDelete = bulkDeleteDto.ids;
+        this.logger.log(`Bulk deleting ${categoriesToDelete.length} categories by IDs`);
+      } else if (bulkDeleteDto.filters) {
+        // Delete by filters - fetch matching category IDs
+        this.logger.log('Bulk deleting categories by filters', bulkDeleteDto.filters);
+        const where: any = { userId };
+
+        // Search filter
+        if (bulkDeleteDto.filters.search) {
+          where.OR = [
+            { name: { contains: bulkDeleteDto.filters.search, mode: 'insensitive' } },
+            { description: { contains: bulkDeleteDto.filters.search, mode: 'insensitive' } },
+          ];
+        }
+
+        // Build order by for consistency with the list view
+        let orderBy: any = { createdAt: 'desc' }; // Default
+        
+        if (bulkDeleteDto.filters.sortBy && bulkDeleteDto.filters.sortOrder) {
+          orderBy = { 
+            [bulkDeleteDto.filters.sortBy]: bulkDeleteDto.filters.sortOrder 
+          };
+        }
+
+        // Fetch ALL matching categories (no pagination for bulk delete)
+        const categories = await this.prisma.category.findMany({
+          where,
+          select: { id: true },
+          orderBy: orderBy
+        });
+
+        categoriesToDelete = categories.map(c => c.id);
+        this.logger.log(`Found ${categoriesToDelete.length} categories matching filters`);
+      }
+
+      if (categoriesToDelete.length === 0) {
+        return { deletedCount: 0 };
+      }
+
+      // Verify ownership of all categories
+      const categories = await this.prisma.category.findMany({
+        where: {
+          id: { in: categoriesToDelete },
+          userId,
+        },
+        select: { id: true },
+      });
+
+      if (categories.length !== categoriesToDelete.length) {
+        throw new ForbiddenException('You can only delete your own categories');
+      }
+
+      // Get all subcategories recursively
+      const allCategoryIds = await this.getAllSubcategoryIds(categoriesToDelete, userId);
+
+      // First, remove category associations from products
+      await this.prisma.product.updateMany({
+        where: {
+          categoryId: { in: allCategoryIds },
+        },
+        data: {
+          categoryId: null,
+        },
+      });
+
+      // Delete all categories (including subcategories)
+      const result = await this.prisma.category.deleteMany({
+        where: {
+          id: { in: allCategoryIds },
+          userId,
+        },
+      });
+
+      this.logger.log(`Successfully deleted ${result.count} categories (including subcategories)`);
+      return { deletedCount: result.count };
+    } catch (error) {
+      this.logger.error(`Failed to bulk delete categories: ${error.message}`, error.stack);
+      if (error.status) {
+        throw error;
+      }
+      throw new BadRequestException('Failed to bulk delete categories');
+    }
+  }
+
+  private async getAllSubcategoryIds(categoryIds: number[], userId: number): Promise<number[]> {
+    const allIds = new Set<number>(categoryIds);
+    const toProcess = [...categoryIds];
+
+    while (toProcess.length > 0) {
+      const currentId = toProcess.pop()!;
+      const subcategories = await this.prisma.category.findMany({
+        where: {
+          parentCategoryId: currentId,
+          userId,
+        },
+        select: { id: true },
+      });
+
+      for (const sub of subcategories) {
+        if (!allIds.has(sub.id)) {
+          allIds.add(sub.id);
+          toProcess.push(sub.id);
+        }
+      }
+    }
+
+    return Array.from(allIds);
   }
 }

@@ -588,7 +588,7 @@ export class WooCommerceService extends BaseIntegrationService {
             // Check if value is a JSON array string
             if (typeof attr.value === 'string' && attr.value.trim().startsWith('[')) {
               const parsed = JSON.parse(attr.value);
-              options = Array.isArray(parsed) ? parsed : [attr.value];
+              options = Array.isArray(parsed) ? parsed.filter(v => v != null && v !== '').map(v => String(v)) : [attr.value];
             } else {
               options = [attr.value];
             }
@@ -597,19 +597,25 @@ export class WooCommerceService extends BaseIntegrationService {
             options = [attr.value];
           }
 
-          // Check if this is a variation attribute (color, size, material, etc.)
-          const variationPatterns = ['color', 'colour', 'size', 'material', 'style'];
-          const isVariation = variationPatterns.some(pattern => attrName.includes(pattern));
+          // Ensure all options are valid strings and filter out null/empty values
+          options = options.filter(v => v != null && v !== '').map(v => String(v));
           
-          // Ensure attribute exists in WooCommerce
-          await this.ensureWooCommerceAttribute(attr.attribute.name, options);
-          
-          wooAttributes.push({
-            name: attr.attribute.name,
-            options: options,
-            visible: true,
-            variation: isVariation
-          });
+          // Only add attribute if it has valid options
+          if (options.length > 0) {
+            // Check if this is a variation attribute (color, size, material, etc.)
+            const variationPatterns = ['color', 'colour', 'size', 'material', 'style'];
+            const isVariation = variationPatterns.some(pattern => attrName.includes(pattern));
+            
+            // Ensure attribute exists in WooCommerce
+            await this.ensureWooCommerceAttribute(attr.attribute.name, options);
+            
+            wooAttributes.push({
+              name: attr.attribute.name,
+              options: options,
+              visible: true,
+              variation: isVariation
+            });
+          }
         }
       }
     }

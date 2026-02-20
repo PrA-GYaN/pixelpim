@@ -5,6 +5,7 @@ import { CreateAttributeDto } from './dto/create-attribute.dto';
 import { UpdateAttributeDto } from './dto/update-attribute.dto';
 import { AttributeResponseDto } from './dto/attribute-response.dto';
 import { AttributeFilterDto, AttributeGroupFilterDto, AttributeSortField, SortOrder, DateFilter } from './dto/attribute-filter.dto';
+import { BulkDeleteAttributeDto } from './dto/bulk-delete-attribute.dto';
 import { AttributeValueValidator } from './validators/attribute-value.validator';
 import { PaginatedResponse, PaginationUtils } from '../common';
 import type { Attribute } from '@prisma/client';
@@ -580,6 +581,88 @@ export class AttributeService {
     } catch (error) {
       this.logger.error(`Failed to get attribute suggestions: ${error.message}`, error.stack);
       throw new BadRequestException('Failed to fetch attribute suggestions');
+    }
+  }
+
+  async bulkDelete(bulkDeleteDto: BulkDeleteAttributeDto, userId: number): Promise<{ deletedCount: number; message: string }> {
+    try {
+      let attributeIds: number[] = [];
+
+      // If IDs are provided, use them directly
+      if (bulkDeleteDto.ids && bulkDeleteDto.ids.length > 0) {
+        attributeIds = bulkDeleteDto.ids;
+        this.logger.log(`Bulk deleting ${attributeIds.length} attributes by IDs`);
+      } 
+      // Otherwise, use filters to find the IDs
+      else if (bulkDeleteDto.filters) {
+        this.logger.log(`Fetching attributes with filters for user: ${userId}`);
+        this.logger.log('AttributeFilterDto', bulkDeleteDto.filters);
+        
+        const whereCondition: any = { userId };
+
+        // Search filter
+        if (bulkDeleteDto.filters.search) {
+          whereCondition.name = { 
+            contains: bulkDeleteDto.filters.search, 
+            mode: 'insensitive' 
+          };
+        }
+
+        // User-friendly type filter
+        if (bulkDeleteDto.filters.userFriendlyType) {
+          const storageType = userTypeToStorageType(bulkDeleteDto.filters.userFriendlyType as UserAttributeType);
+          if (storageType) {
+            whereCondition.type = storageType;
+          }
+        }
+
+        // Build order by for consistency with the list view
+        let orderBy: any = { createdAt: 'desc' }; // Default
+        
+        if (bulkDeleteDto.filters.sortBy && bulkDeleteDto.filters.sortOrder) {
+          orderBy = { 
+            [bulkDeleteDto.filters.sortBy]: bulkDeleteDto.filters.sortOrder 
+          };
+        }
+
+        // Fetch ALL matching attributes (no pagination for bulk delete)
+        const attributes = await this.prisma.attribute.findMany({
+          where: whereCondition,
+          select: { id: true },
+          orderBy: orderBy
+        });
+
+        attributeIds = attributes.map(attr => attr.id);
+        this.logger.log(`Found ${attributeIds.length} attributes matching filters`);
+      }
+
+      if (attributeIds.length === 0) {
+        return { 
+          deletedCount: 0, 
+          message: 'No attributes to delete' 
+        };
+      }
+
+      // Delete all attributes with the given IDs
+      const deleteResult = await this.prisma.attribute.deleteMany({
+        where: { 
+          id: { in: attributeIds },
+          userId // Ensure user owns the attributes
+        }
+      });
+
+      // Clear cache for this user
+      await this.invalidateUserCache(userId);
+
+      this.logger.log(`Successfully deleted ${deleteResult.count} attribute(s)`);
+
+      return { 
+        deletedCount: deleteResult.count, 
+        message: `Successfully deleted ${deleteResult.count} attribute(s)` 
+      };
+    } catch (error) {
+      this.logger.error(`Failed to bulk delete: ${error.message}`, error.stack);
+      throw new BadRequestException('Failed to bulk delete attributes');
     }
   }
 }

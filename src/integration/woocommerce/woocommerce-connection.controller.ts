@@ -220,6 +220,17 @@ export class WooCommerceConnectionController {
     return this.connectionService.getActiveImportMapping(effectiveUserId, connectionId);
   }
 
+  @Get(':connectionId/woocommerce-attributes')
+  @RequirePermissions({ resource: 'integrations', action: 'read' })
+  async getWooCommerceAttributes(
+    @Param('connectionId', ParseIntPipe) connectionId: number,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    this.logger.log(`User ${user.id} fetching WooCommerce attributes for connection ${connectionId}`);
+    return this.connectionService.getWooCommerceAttributes(effectiveUserId, connectionId);
+  }
+
   @Put('import-mappings/:mappingId')
   @RequirePermissions({ resource: 'integrations', action: 'update' })
   async updateImportMapping(
@@ -329,20 +340,34 @@ export class WooCommerceConnectionController {
   @Get('sync-logs/list')
   @RequirePermissions({ resource: 'integrations', action: 'read' })
   async getSyncLogs(
-    @Query('connectionId', ParseIntPipe) connectionId: number,
+    @Query('connectionId') connectionId: string | undefined,
+    @Query('productId') productId: string | undefined,
+    @Query('wooProductId') wooProductId: string | undefined,
+    @Query('sku') sku: string | undefined,
     @Query('syncStatus') syncStatus: string | undefined,
+    @Query('startDate') startDate: string | undefined,
+    @Query('endDate') endDate: string | undefined,
     @Query('page') page: string | undefined,
     @Query('limit') limit: string | undefined,
     @Query('search') search: string | undefined,
+    @Query('sortBy') sortBy: string | undefined,
+    @Query('sortOrder') sortOrder: string | undefined,
     @GetUser() user: User,
     @EffectiveUserId() effectiveUserId: number,
   ) {
     return this.multiStoreService.getSyncLogs(effectiveUserId, {
-      connectionId,
+      connectionId: connectionId ? parseInt(connectionId, 10) : undefined,
+      productId: productId ? parseInt(productId, 10) : undefined,
+      wooProductId: wooProductId ? parseInt(wooProductId, 10) : undefined,
+      sku: sku || undefined,
       syncStatus: syncStatus || undefined,
+      startDate: startDate || undefined,
+      endDate: endDate || undefined,
       page: page ? parseInt(page, 10) : undefined,
       limit: limit ? parseInt(limit, 10) : undefined,
       search: search || undefined,
+      sortBy: sortBy || undefined,
+      sortOrder: (sortOrder as 'asc' | 'desc') || undefined,
     });
   }
 
@@ -355,5 +380,33 @@ export class WooCommerceConnectionController {
   ) {
     this.logger.log(`User ${user.id} hiding WooCommerce sync logs`);
     return this.multiStoreService.hideSyncLogs(effectiveUserId);
+  }
+
+  @Delete('sync-logs')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions({ resource: 'integrations', action: 'delete' })
+  async deleteSyncLogs(
+    @Query('ids') ids: string | undefined,
+    @Query('connectionId') connectionId: string | undefined,
+    @Query('productId') productId: string | undefined,
+    @Query('syncStatus') syncStatus: string | undefined,
+    @Query('startDate') startDate: string | undefined,
+    @Query('endDate') endDate: string | undefined,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    this.logger.log(`User ${user.id} deleting WooCommerce sync logs`);
+    
+    // Parse comma-separated IDs if provided
+    const parsedIds = ids ? ids.split(',').map(id => parseInt(id.trim(), 10)).filter(id => !isNaN(id)) : undefined;
+    
+    return this.multiStoreService.deleteSyncLogs(effectiveUserId, {
+      ids: parsedIds,
+      connectionId: connectionId ? parseInt(connectionId, 10) : undefined,
+      productId: productId ? parseInt(productId, 10) : undefined,
+      syncStatus: syncStatus || undefined,
+      startDate: startDate || undefined,
+      endDate: endDate || undefined,
+    });
   }
 }

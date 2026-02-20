@@ -284,3 +284,89 @@ export class TestConnectionResponseDto {
     storeName?: string;
   };
 }
+
+// DTO for getting sync logs with enhanced filtering
+export class GetSyncLogsDto {
+  @IsInt()
+  @IsOptional()
+  connectionId?: number;
+
+  @IsInt()
+  @IsOptional()
+  productId?: number;
+
+  @IsInt()
+  @IsOptional()
+  wooProductId?: number;
+
+  @IsString()
+  @IsOptional()
+  sku?: string;
+
+  @IsString()
+  @IsOptional()
+  syncStatus?: string;
+
+  @IsOptional()
+  @IsString()
+  startDate?: string; // ISO date string
+
+  @IsOptional()
+  @IsString()
+  endDate?: string; // ISO date string
+
+  @IsInt()
+  @IsOptional()
+  page?: number;
+
+  @IsInt()
+  @IsOptional()
+  limit?: number;
+
+  @IsString()
+  @IsOptional()
+  search?: string; // Keyword search across SKU, product name, error message
+
+  @IsString()
+  @IsOptional()
+  sortBy?: string; // Field to sort by: 'updatedAt', 'createdAt', 'syncStatus', 'productId'
+
+  @IsString()
+  @IsOptional()
+  @IsEnum(['asc', 'desc'])
+  sortOrder?: 'asc' | 'desc';
+}
+
+// DTO for deleting sync logs
+export class DeleteSyncLogsDto {
+  @IsArray()
+  @IsInt({ each: true })
+  @IsOptional()
+  ids?: number[]; // Specific log IDs to delete
+
+  @IsInt()
+  @IsOptional()
+  connectionId?: number; // Delete logs for specific connection
+
+  @IsInt()
+  @IsOptional()
+  productId?: number; // Delete logs for specific product
+
+  @IsString()
+  @IsOptional()
+  syncStatus?: string; // Delete logs by status
+
+  @IsOptional()
+  @IsString()
+  startDate?: string; // ISO date string
+
+  @IsOptional()
+  @IsString()
+  endDate?: string; // ISO date string
+}
+
+// Response DTO for delete sync logs operation
+export class DeleteSyncLogsResponseDto {
+  success: boolean;
+  deletedCount: number;
+}

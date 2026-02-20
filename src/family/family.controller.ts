@@ -15,6 +15,7 @@ import { CreateFamilyDto } from './dto/create-family.dto';
 import { UpdateFamilyDto } from './dto/update-family.dto';
 import { FamilyResponseDto } from './dto/family-response.dto';
 import { FamilyFilterDto } from './dto/family-filter.dto';
+import { BulkDeleteFamilyDto } from './dto/bulk-delete-family.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OwnershipGuard } from '../auth/guards/ownership.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
@@ -115,5 +116,15 @@ export class FamilyController {
     @EffectiveUserId() effectiveUserId: number,
   ) {
     return this.familyService.removeAttribute(familyId, attributeId, effectiveUserId);
+  }
+
+  @Post('bulk-delete')
+  @RequirePermissions({ resource: 'families', action: 'delete' })
+  async bulkDelete(
+    @Body() bulkDeleteDto: BulkDeleteFamilyDto,
+    @User() user: any,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    return this.familyService.bulkDelete(bulkDeleteDto, effectiveUserId);
   }
 }

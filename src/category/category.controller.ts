@@ -17,6 +17,7 @@ import { CategoryService } from './category.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import { CategoryResponseDto, CategoryTreeResponseDto } from './dto/category-response.dto';
+import { BulkDeleteCategoryDto } from './dto/bulk-delete-category.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OwnershipGuard } from '../auth/guards/ownership.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
@@ -139,5 +140,17 @@ export class CategoryController {
     this.logger.log(`User ${user.id} deleting category: ${id}`);
     
     return this.categoryService.remove(id, effectiveUserId);
+  }
+
+  @Post('bulk-delete')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions({ resource: 'categories', action: 'delete' })
+  async bulkDelete(
+    @Body() bulkDeleteDto: BulkDeleteCategoryDto,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    this.logger.log(`User ${user.id} bulk deleting categories`);
+    return this.categoryService.bulkDelete(bulkDeleteDto, effectiveUserId);
   }
 }

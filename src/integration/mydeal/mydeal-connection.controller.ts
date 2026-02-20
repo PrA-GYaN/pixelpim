@@ -8,6 +8,7 @@ import {
   HttpCode,
   HttpStatus,
   Put,
+  Patch,
   Delete,
   Param,
   ParseIntPipe,
@@ -176,6 +177,28 @@ export class MyDealConnectionController {
     return {
       success: true,
       message: 'MyDeal connection deleted successfully',
+    };
+  }
+
+  @Patch(':connectionId/set-default')
+  @UseGuards(JwtAuthGuard, OwnershipGuard, PermissionsGuard)
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions({ resource: 'integration', action: 'update' })
+  async setConnectionAsDefault(
+    @Param('connectionId', ParseIntPipe) connectionId: number,
+    @GetUser() user: User,
+    @EffectiveUserId() effectiveUserId: number,
+  ) {
+    this.logger.log(`User ${user.id} setting MyDeal connection ${connectionId} as default`);
+
+    const connection = await this.connectionService.setConnectionAsDefault(
+      effectiveUserId,
+      connectionId,
+    );
+
+    return {
+      success: true,
+      connection,
     };
   }
 

@@ -4,6 +4,7 @@ import { CreateFamilyDto } from './dto/create-family.dto';
 import { UpdateFamilyDto } from './dto/update-family.dto';
 import { FamilyResponseDto } from './dto/family-response.dto';
 import { FamilyFilterDto, FamilySortField, SortOrder, DateFilter } from './dto/family-filter.dto';
+import { BulkDeleteFamilyDto } from './dto/bulk-delete-family.dto';
 import { AttributeValueValidator } from '../attribute/validators/attribute-value.validator';
 import { AttributeType } from '../types/attribute-type.enum';
 import { PaginatedResponse, PaginationUtils } from '../common';
@@ -772,5 +773,74 @@ export class FamilyService {
     console.log(
       `[Family Update] Linked ${existingProductAttributes.length} existing ProductAttributes to family ${familyId}`
     );
+  }
+
+  async bulkDelete(bulkDeleteDto: BulkDeleteFamilyDto, userId: number): Promise<{ deletedCount: number; message: string }> {
+    try {
+      let familyIds: number[] = [];
+
+      // If IDs are provided, use them directly
+      if (bulkDeleteDto.ids && bulkDeleteDto.ids.length > 0) {
+        familyIds = bulkDeleteDto.ids;
+        console.log(`Bulk deleting ${familyIds.length} families by IDs`);
+      } 
+      // Otherwise, use filters to find the IDs
+      else if (bulkDeleteDto.filters) {
+        console.log('Bulk deleting families by filters', bulkDeleteDto.filters);
+        const whereCondition: any = { userId };
+
+        // Search filter
+        if (bulkDeleteDto.filters.search) {
+          whereCondition.name = { 
+            contains: bulkDeleteDto.filters.search, 
+            mode: 'insensitive' 
+          };
+        }
+
+        // Build order by for consistency with the list view
+        let orderBy: any = { createdAt: 'desc' }; // Default
+        
+        if (bulkDeleteDto.filters.sortBy && bulkDeleteDto.filters.sortOrder) {
+          orderBy = { 
+            [bulkDeleteDto.filters.sortBy]: bulkDeleteDto.filters.sortOrder 
+          };
+        }
+
+        // Fetch ALL matching families (no pagination for bulk delete)
+        const families = await this.prisma.family.findMany({
+          where: whereCondition,
+          select: { id: true },
+          orderBy: orderBy
+        });
+
+        familyIds = families.map(family => family.id);
+        console.log(`Found ${familyIds.length} families matching filters`);
+      }
+
+      if (familyIds.length === 0) {
+        return { 
+          deletedCount: 0, 
+          message: 'No families to delete' 
+        };
+      }
+
+      // Delete all families with the given IDs
+      const deleteResult = await this.prisma.family.deleteMany({
+        where: { 
+          id: { in: familyIds },
+          userId // Ensure user owns the families
+        }
+      });
+
+      console.log(`Successfully deleted ${deleteResult.count} family/families`);
+
+      return { 
+        deletedCount: deleteResult.count, 
+        message: `Successfully deleted ${deleteResult.count} family/families` 
+      };
+    } catch (error) {
+      console.error(`Failed to bulk delete: ${error.message}`, error.stack);
+      throw new BadRequestException('Failed to bulk delete families');
+    }
   }
 }

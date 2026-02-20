@@ -218,6 +218,65 @@ export class MyDealConnectionService {
   }
 
   /**
+   * Set a specific connection as default
+   */
+  async setConnectionAsDefault(userId: number, connectionId: number) {
+    try {
+      // Verify connection belongs to user
+      const connection = await this.prisma.myDealConnection.findFirst({
+        where: {
+          id: connectionId,
+          userId,
+        },
+      });
+
+      if (!connection) {
+        throw new NotFoundException('MyDeal connection not found');
+      }
+
+      // Unset all other default connections for this user
+      await this.prisma.myDealConnection.updateMany({
+        where: {
+          userId,
+          isDefault: true,
+        },
+        data: {
+          isDefault: false,
+        },
+      });
+
+      // Set this connection as default
+      const updatedConnection = await this.prisma.myDealConnection.update({
+        where: {
+          id: connectionId,
+        },
+        data: {
+          isDefault: true,
+        },
+      });
+
+      this.logger.log(`MyDeal connection ${connectionId} set as default for user ${userId}`);
+
+      return {
+        id: updatedConnection.id,
+        connectionName: updatedConnection.connectionName,
+        isActive: updatedConnection.isActive,
+        isDefault: updatedConnection.isDefault,
+        createdAt: updatedConnection.createdAt,
+        updatedAt: updatedConnection.updatedAt,
+        lastSyncedAt: updatedConnection.lastSyncedAt,
+        baseApiUrl: updatedConnection.baseApiUrl,
+        sellerId: updatedConnection.sellerId,
+      };
+    } catch (error: any) {
+      if (error.code === 'P2025') {
+        throw new NotFoundException('MyDeal connection not found');
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Test MyDeal connection
    */
   async testConnection(

@@ -9,12 +9,22 @@ import {
   ImportProductsDto,
   ImportProductsResponseDto,
 } from './dto/woocommerce-connection.dto';
+import {
+  LocalProductBuilder,
+  WooCommerceValidator,
+  ProductDataWithAttributes,
+  VariantDataWithAttributes,
+  AttributeToCreate,
+  VARIANT_ONLY_FIELDS,
+} from './woocommerce-import-domain';
 
 
 @Injectable()
 export class WooCommerceMultiStoreService {
   private readonly logger = new Logger(WooCommerceMultiStoreService.name);
   private readonly baseUrl: string;
+
+  private readonly productBuilder = new LocalProductBuilder();
 
   constructor(
     private prisma: PrismaService,
@@ -48,6 +58,17 @@ export class WooCommerceMultiStoreService {
       return 'Reference error: Related record not found';
     }
 
+    // Don't truncate user-friendly messages (they're already formatted for display)
+    if (errorMsg.includes('successfully') || 
+        errorMsg.includes('Variants skipped') ||
+        errorMsg.includes('same SKU')) {
+      // Still limit to a reasonable length (300 chars) but don't cut too short
+      if (errorMsg.length > 300) {
+        return errorMsg.substring(0, 297) + '...';
+      }
+      return errorMsg;
+    }
+
     // If message is too long (likely includes stack trace), truncate to first meaningful line
     if (errorMsg.length > 200) {
       const lines = errorMsg.split('\n');
@@ -55,11 +76,11 @@ export class WooCommerceMultiStoreService {
       for (const line of lines) {
         const trimmed = line.trim();
         if (trimmed && !trimmed.startsWith('Invalid') && !trimmed.includes('.ts:') && !trimmed.includes('invocation')) {
-          return trimmed.substring(0, 150);
+          return trimmed.substring(0, 200);
         }
       }
-      // If no good line found, take first 150 chars
-      return errorMsg.substring(0, 150) + '...';
+      // If no good line found, take first 200 chars
+      return errorMsg.substring(0, 200) + '...';
     }
 
     return errorMsg;
@@ -254,7 +275,7 @@ export class WooCommerceMultiStoreService {
         // Export variants if enabled
         if (fieldsToExport.includes('variants') && product.variants && product.variants.length > 0) {
           this.logger.log(`Exporting ${product.variants.length} variants for product ${product.id} to WooCommerce`);
-          await this.exportProductVariants(wooClient, wooProductId, product.variants, fieldMappings);
+          await this.exportProductVariants(wooClient, wooProductId, product.variants, fieldMappings, fieldsToExport);
         }
 
         results.push({
@@ -378,7 +399,44 @@ export class WooCommerceMultiStoreService {
 
       for (const wooProduct of wooProducts) {
         try {
-          this.logger.log(`WooCommerce product data for ID ${wooProduct.id}: ${JSON.stringify(wooProduct, null, 2)}`);
+          // Defensive validation: Check WooCommerce product data before processing
+          const validation = WooCommerceValidator.validateWooProduct(wooProduct);
+          if (!validation.valid) {
+            this.logger.error(
+              `Invalid WooCommerce product ${wooProduct?.id || 'unknown'}: ${validation.errors.join(', ')}`
+            );
+            
+            await this.prisma.wooCommerceProductSync.upsert({
+              where: {
+                connectionId_wooProductId: {
+                  connectionId: dto.connectionId,
+                  wooProductId: wooProduct?.id || 0,
+                },
+              },
+              update: {
+                syncStatus: 'error',
+                errorMessage: `Validation failed: ${validation.errors.join(', ')}`,
+              },
+              create: {
+                connectionId: dto.connectionId,
+                productId: null,
+                wooProductId: wooProduct?.id || 0,
+                syncStatus: 'error',
+                errorMessage: `Validation failed: ${validation.errors.join(', ')}`,
+              },
+            });
+
+            products.push({
+              wooProductId: wooProduct?.id || 0,
+              status: 'error',
+              message: `Validation failed: ${validation.errors.join(', ')}`,
+            });
+            failedCount++;
+            continue;
+          }
+
+          this.logger.log(`Processing WooCommerce product ${wooProduct.id}: ${wooProduct.name} (SKU: ${wooProduct.sku})`);
+
           // Check if product already exists in our system
           const existingSync = await this.prisma.wooCommerceProductSync.findUnique({
             where: {
@@ -547,17 +605,80 @@ export class WooCommerceMultiStoreService {
               this.logger.log(`Created sync record for WooCommerce product ${wooProduct.id} linked to product ID ${productToLink.id}`);
             }
 
-            // Import variants if enabled
-            if (fieldMappings['variants'] && wooProduct.id) {
-              this.logger.log(`Importing variants for WooCommerce product ${wooProduct.id}`);
-              await this.importProductVariants(
-                wooClient,
-                wooProduct.id,
-                productToLink.id,
-                userId,
-                attributeMappings,
-                fieldMappings,
-              );
+            // Track variant errors without failing parent import
+            let variantErrorMessage: string | null = null;
+
+            // Import variants if enabled and parent product is valid
+            if (fieldMappings['variants'] && wooProduct.id && productToLink?.id) {
+              // Verify parent product exists and is correctly set up
+              const parentProduct = await this.prisma.product.findUnique({
+                where: { id: productToLink.id },
+              });
+
+              if (!parentProduct) {
+                variantErrorMessage = `Cannot import variants: Parent product ${productToLink.id} not found in database`;
+                this.logger.error(variantErrorMessage);
+              } else if (parentProduct.parentProductId !== null) {
+                variantErrorMessage = `Cannot import variants: Product ${productToLink.id} is itself a variant (parentProductId: ${parentProduct.parentProductId})`;
+                this.logger.error(variantErrorMessage);
+              } else {
+                this.logger.log(`Importing variants for WooCommerce product ${wooProduct.id}`);
+                try {
+                  const variantResults = await this.importProductVariants(
+                    wooClient,
+                    wooProduct.id,
+                    productToLink.id,
+                    userId,
+                    attributeMappings,
+                    fieldMappings,
+                    productToLink.sku, // Pass parent SKU for conflict detection
+                  );
+                  
+                  // Capture variant-level errors if any variants failed
+                  if (variantResults.failedVariants.length > 0) {
+                    const failedSkus = variantResults.failedVariants.map(v => v.sku).join(', ');
+                    const failedReasons = variantResults.failedVariants.map(v => `${v.sku}: ${v.error}`).join(' | ');
+                    variantErrorMessage = `Parent product imported successfully, but ${variantResults.failedVariants.length} variant(s) failed: ${failedReasons}`;
+                    this.logger.warn(variantErrorMessage);
+                  }
+                } catch (variantError: any) {
+                  // Check if it's a SKU conflict error
+                  if (variantError.message.includes('same SKU')) {
+                    // Message already includes "Variants skipped:" prefix
+                    variantErrorMessage = variantError.message;
+                    this.logger.warn(
+                      `Variants skipped for product ${wooProduct.id} due to SKU conflict: ${variantError.message}`
+                    );
+                  } else {
+                    variantErrorMessage = `Variants import failed: ${variantError.message}`;
+                    this.logger.error(
+                      `Failed to import variants for product ${wooProduct.id}: ${variantError.message}`,
+                      variantError.stack
+                    );
+                  }
+                  // Don't fail the entire product import if variants fail
+                }
+              }
+            }
+
+            // Update sync record with variant error message if present
+            // Even if parent succeeds, we store variant errors for transparency
+            const syncRecord = existingSync || await this.prisma.wooCommerceProductSync.findUnique({
+              where: {
+                connectionId_wooProductId: {
+                  connectionId: dto.connectionId,
+                  wooProductId: wooProduct.id,
+                },
+              },
+            });
+
+            if (syncRecord && variantErrorMessage) {
+              await this.prisma.wooCommerceProductSync.update({
+                where: { id: syncRecord.id },
+                data: {
+                  errorMessage: this.simplifyErrorMessage(variantErrorMessage),
+                },
+              });
             }
 
             products.push({
@@ -950,10 +1071,17 @@ export class WooCommerceMultiStoreService {
     userId: number,
     options: {
       connectionId?: number;
+      productId?: number;
+      wooProductId?: number;
+      sku?: string;
       syncStatus?: string;
+      startDate?: string;
+      endDate?: string;
       page?: number;
       limit?: number;
       search?: string;
+      sortBy?: string;
+      sortOrder?: 'asc' | 'desc';
     } = {},
   ): Promise<{
     logs: any[];
@@ -965,6 +1093,8 @@ export class WooCommerceMultiStoreService {
     const page = options.page || 1;
     const limit = options.limit || 20;
     const skip = (page - 1) * limit;
+    const sortBy = options.sortBy || 'updatedAt';
+    const sortOrder = options.sortOrder || 'desc';
 
     // Get the user's hidden logs timestamp
     const user = await this.prisma.user.findUnique({
@@ -984,24 +1114,110 @@ export class WooCommerceMultiStoreService {
       where.connectionId = options.connectionId;
     }
 
+    // Filter by product ID if specified
+    if (options.productId) {
+      where.productId = options.productId;
+    }
+
+    // Filter by WooCommerce product ID if specified
+    if (options.wooProductId) {
+      where.wooProductId = options.wooProductId;
+    }
+
     // Filter by sync status if specified
     if (options.syncStatus) {
       where.syncStatus = options.syncStatus;
     }
 
-    // Filter by search term in error messages
+    // Filter by date range if specified
+    if (options.startDate || options.endDate) {
+      where.updatedAt = {};
+      if (options.startDate) {
+        where.updatedAt.gte = new Date(options.startDate);
+      }
+      if (options.endDate) {
+        where.updatedAt.lte = new Date(options.endDate);
+      }
+    }
+
+    // Handle SKU filter - find products with matching SKU first
+    if (options.sku) {
+      const productsWithSku = await this.prisma.product.findMany({
+        where: {
+          userId,
+          sku: {
+            contains: options.sku,
+            mode: 'insensitive',
+          },
+        },
+        select: { id: true },
+      });
+      
+      if (productsWithSku.length > 0) {
+        where.productId = { in: productsWithSku.map(p => p.id) };
+      } else {
+        // No products found with this SKU, return empty result
+        return {
+          logs: [],
+          total: 0,
+          page,
+          limit,
+          totalPages: 0,
+        };
+      }
+    }
+
+    // Handle search term - search across error messages, sync status, SKU, and product name
     if (options.search) {
+      // Find products matching SKU or name
+      const productsMatchingSearch = await this.prisma.product.findMany({
+        where: {
+          userId,
+          OR: [
+            { sku: { contains: options.search, mode: 'insensitive' } },
+            { name: { contains: options.search, mode: 'insensitive' } },
+          ],
+        },
+        select: { id: true },
+      });
+
+      const productIds = productsMatchingSearch.map(p => p.id);
+      
+      // Build OR condition for search
       where.OR = [
         { errorMessage: { contains: options.search, mode: 'insensitive' } },
         { syncStatus: { contains: options.search, mode: 'insensitive' } },
       ];
+      
+      // Add productId filter if we found matching products
+      if (productIds.length > 0) {
+        where.OR.push({ productId: { in: productIds } });
+      }
     }
 
     // Filter out logs before the hidden timestamp
     if (user?.hiddenWooSyncLogsTimestamp) {
+      if (!where.updatedAt) {
+        where.updatedAt = {};
+      }
+      // Need to handle both gt and existing filters
+      const existingFilter = where.updatedAt;
       where.updatedAt = {
+        ...existingFilter,
         gt: user.hiddenWooSyncLogsTimestamp,
       };
+    }
+
+    // Build orderBy clause
+    const orderBy: any = {};
+    if (sortBy === 'updatedAt' || sortBy === 'createdAt') {
+      orderBy[sortBy] = sortOrder;
+    } else if (sortBy === 'syncStatus') {
+      orderBy.syncStatus = sortOrder;
+    } else if (sortBy === 'productId') {
+      orderBy.productId = sortOrder;
+    } else {
+      orderBy.updatedAt = sortOrder;
     }
 
     // Get total count and logs
@@ -1011,7 +1227,7 @@ export class WooCommerceMultiStoreService {
         where,
         skip,
         take: limit,
-        orderBy: { updatedAt: 'desc' },
+        orderBy,
         include: {
           connection: {
             select: {
@@ -1024,12 +1240,96 @@ export class WooCommerceMultiStoreService {
       }),
     ]);
 
+    // Fetch product details for the logs that have productId
+    const productIds = logs.map(log => log.productId).filter((id): id is number => id !== null);
+    const products = productIds.length > 0
+      ? await this.prisma.product.findMany({
+          where: { id: { in: productIds } },
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+          },
+        })
+      : [];
+
+    // Create a map of productId to product details
+    const productMap = new Map(products.map(p => [p.id, p]));
+
+    // Enrich logs with product details
+    const enrichedLogs = logs.map(log => ({
+      ...log,
+      product: log.productId ? productMap.get(log.productId) || null : null,
+    }));
+
     return {
-      logs,
+      logs: enrichedLogs,
       total,
       page,
       limit,
       totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  /**
+   * Delete WooCommerce product sync logs
+   * Supports single, bulk, and filtered deletion
+   */
+  async deleteSyncLogs(
+    userId: number,
+    options: {
+      ids?: number[];
+      connectionId?: number;
+      productId?: number;
+      syncStatus?: string;
+      startDate?: string;
+      endDate?: string;
+    },
+  ): Promise<{ success: boolean; deletedCount: number }> {
+    // Build the where clause
+    const where: any = {
+      connection: {
+        userId,
+      },
+    };
+
+    // Delete specific IDs
+    if (options.ids && options.ids.length > 0) {
+      where.id = { in: options.ids };
+    } else {
+      // Apply filters for bulk deletion
+      if (options.connectionId) {
+        where.connectionId = options.connectionId;
+      }
+
+      if (options.productId) {
+        where.productId = options.productId;
+      }
+
+      if (options.syncStatus) {
+        where.syncStatus = options.syncStatus;
+      }
+
+      // Filter by date range if specified
+      if (options.startDate || options.endDate) {
+        where.updatedAt = {};
+        if (options.startDate) {
+          where.updatedAt.gte = new Date(options.startDate);
+        }
+        if (options.endDate) {
+          where.updatedAt.lte = new Date(options.endDate);
+        }
+      }
+    }
+
+    // Delete logs
+    const result = await this.prisma.wooCommerceProductSync.deleteMany({
+      where,
+    });
+
+    return {
+      success: true,
+      deletedCount: result.count,
     };
   }
 
@@ -1081,27 +1381,53 @@ export class WooCommerceMultiStoreService {
 
   /**
    * Export product variants to WooCommerce
-   * Creates WooCommerce product variations for a parent product
+   * Creates or updates WooCommerce product variations for a parent product
    */
   private async exportProductVariants(
     wooClient: any,
     wooProductId: number,
     variants: any[],
     fieldMappings: Record<string, any>,
+    fieldsToExport: string[],
   ): Promise<void> {
     for (const variant of variants) {
       try {
-        // Build variant payload from variant attributes
-        const variationData = await this.buildVariantPayload(variant, wooClient, fieldMappings);
+        // Build variant payload from variant attributes, applying export mappings
+        const variationData = await this.buildVariantPayload(variant, wooClient, fieldMappings, fieldsToExport);
+        // this.logger.log(`The build Woo Variant Payload:${JSON.stringify(variationData)}`)
+        // Check if variant with the same SKU already exists
+        let existingVariation: any = null;
+        if (variationData.sku) {
+          try {
+            // Get all variations for this product
+            const existingVariations = await this.getAllWooVariations(wooClient, wooProductId);
+            
+            // Find variation with matching SKU
+            existingVariation = existingVariations.find(
+              (v: any) => v.sku === variationData.sku
+            );
+          } catch (error) {
+            this.logger.warn(`Failed to fetch existing variations for product ${wooProductId}:`, error);
+          }
+        }
         
-        this.logger.log(`Creating variation for product ${wooProductId}: ${JSON.stringify(variationData)}`);
-        
-        // Create variation in WooCommerce
-        await wooClient.post(`products/${wooProductId}/variations`, variationData);
-        
-        this.logger.log(`Successfully created variation for variant ${variant.id}`);
+        if (existingVariation) {
+          // Update existing variation
+          this.logger.log(`Updating existing variation ${existingVariation.id} for product ${wooProductId} with SKU ${variationData.sku}`);
+          // this.logger.log(`The Variants data is:${variationData}`);
+          await wooClient.put(
+            `products/${wooProductId}/variations/${existingVariation.id}`,
+            variationData
+          );
+          this.logger.log(`Successfully updated variation ${existingVariation.id} for variant ${variant.id}`);
+        } else {
+          // Create new variation
+          this.logger.log(`Creating new variation for product ${wooProductId}: ${JSON.stringify(variationData)}`);
+          await wooClient.post(`products/${wooProductId}/variations`, variationData);
+          this.logger.log(`Successfully created variation for variant ${variant.id}`);
+        }
       } catch (error: any) {
-        this.logger.error(`Failed to create variation for variant ${variant.id}:`, error);
+        this.logger.error(`Failed to export variation for variant ${variant.id}:`, error);
         // Continue with other variants even if one fails
       }
     }
@@ -1109,78 +1435,118 @@ export class WooCommerceMultiStoreService {
 
   /**
    * Build WooCommerce variation payload from variant data
-   * Handles both default WooCommerce fields and custom attributes
+   * Applies export mappings to ensure consistency with product exports
    */
   private async buildVariantPayload(
     variant: any,
     wooClient: any,
     fieldMappings: Record<string, any>,
+    fieldsToExport: string[],
   ): Promise<any> {
     const payload: any = {};
+    const variationAttributes: Array<{ name: string; option: string }> = [];
     
-    // Default WooCommerce variation fields
-    const defaultFields = [
+    // WooCommerce default/standard fields that map to specific variation properties
+    const wooCommerceDefaultFields = [
       'regular_price', 'sale_price', 'sku', 'weight', 'dimensions',
-      'stock_quantity', 'stock_status', 'manage_stock', 'description'
+      'stock_quantity', 'stock_status', 'manage_stock', 'description',
+      'length', 'width', 'height', 'tax_class', 'tax_status'
     ];
     
-    const customAttributes: Array<{ id: number; option: string }> = [];
+    // Helper function to check if field should be included
+    const shouldIncludeField = (field: string): boolean => {
+      return fieldsToExport.map(f => f.toLowerCase()).includes(field.toLowerCase());
+    };
     
-    // Process variant attributes
+    // Helper function to get mapped field name
+    const getMappedField = (field: string): string => {
+      return fieldMappings[field] || field;
+    };
+    
+    // Helper to check if an attribute name matches a WooCommerce default field
+    const isWooCommerceDefaultField = (attrName: string): boolean => {
+      const attrLower = attrName.toLowerCase();
+      return wooCommerceDefaultFields.some(field => 
+        attrLower.includes(field.toLowerCase().replace('_', ' ')) || 
+        attrLower === field.toLowerCase()
+      );
+    };
+    
+    // Create a map of variant attributes by name for easy lookup
+    const variantAttributeMap = new Map<string, string>();
     if (variant.attributes && variant.attributes.length > 0) {
       for (const attr of variant.attributes) {
-        const attrName = attr.attribute.name.toLowerCase();
-        const attrValue = attr.value;
+        variantAttributeMap.set(attr.attribute.name, attr.value);
+      }
+    }
+    
+    // Process each field in fieldsToExport
+    for (const fieldName of fieldsToExport) {
+      // Skip special fields that aren't actual attributes
+      if (['variants', 'images', 'categories', 'tags', 'status', 'type'].includes(fieldName.toLowerCase())) {
+        continue;
+      }
+      
+      // Find the attribute with this name
+      const variantAttr = variant.attributes?.find((attr: any) => 
+        attr.attribute.name.toLowerCase() === fieldName.toLowerCase()
+      );
+      
+      if (!variantAttr) {
+        continue; // Skip if variant doesn't have this attribute
+      }
+      
+      const attrName = variantAttr.attribute.name;
+      const attrValue = variantAttr.value;
+      const attrNameLower = attrName.toLowerCase();
+      
+      // Check if this field is mapped to a WooCommerce default field
+      const mappedFieldName = getMappedField(fieldName);
+      const isMappedToDefault = wooCommerceDefaultFields.includes(mappedFieldName.toLowerCase());
+      
+      // Determine if this should be treated as a default field based on field name or mapping
+      if (isMappedToDefault || isWooCommerceDefaultField(attrNameLower)) {
+        // Add as default field
+        if (attrNameLower.includes('regular') || (attrNameLower.includes('price') && !attrNameLower.includes('sale'))) {
+          payload.regular_price = this.extractNumeric(attrValue);
+        } else if (attrNameLower.includes('sale')) {
+          payload.sale_price = this.extractNumeric(attrValue);
+        } else if (attrNameLower.includes('sku')) {
+          payload.sku = attrValue;
+        } else if (attrNameLower.includes('weight')) {
+          payload.weight = this.extractNumeric(attrValue);
+        } else if (attrNameLower.includes('stock') && attrNameLower.includes('quantity')) {
+          payload.stock_quantity = parseInt(attrValue, 10);
+          payload.manage_stock = true;
+        } else if (attrNameLower.includes('stock') && attrNameLower.includes('status')) {
+          payload.stock_status = attrValue.toLowerCase();
+        } else if (attrNameLower.includes('description')) {
+          payload.description = attrValue;
+        }
         
-        // Check if this is a default WooCommerce field
-        const isDefaultField = defaultFields.some(field => 
-          attrName.includes(field.toLowerCase().replace('_', ' ')) || 
-          attrName === field
-        );
-        
-        if (isDefaultField) {
-          // Map to default field
-          if (attrName.includes('regular') || attrName.includes('price') && !attrName.includes('sale')) {
-            payload.regular_price = this.extractNumeric(attrValue);
-          } else if (attrName.includes('sale')) {
-            payload.sale_price = this.extractNumeric(attrValue);
-          } else if (attrName.includes('sku')) {
-            payload.sku = attrValue;
-          } else if (attrName.includes('weight')) {
-            payload.weight = this.extractNumeric(attrValue);
-          } else if (attrName.includes('stock') && attrName.includes('quantity')) {
-            payload.stock_quantity = parseInt(attrValue, 10);
-            payload.manage_stock = true;
-          } else if (attrName.includes('stock') && attrName.includes('status')) {
-            payload.stock_status = attrValue.toLowerCase();
-          } else if (attrName.includes('description')) {
-            payload.description = attrValue;
-          }
-        } else {
-          // Custom attribute - needs to be mapped to WooCommerce attribute
-          const wooAttributeId = await this.getOrCreateWooCommerceAttribute(
-            wooClient,
-            attr.attribute.name,
-            attrValue,
-          );
-          
-          if (wooAttributeId) {
-            customAttributes.push({
-              id: wooAttributeId,
-              option: attrValue,
-            });
-          }
+        // If it's also a variation attribute (like a custom field mapped to a default),
+        // it may need to be in attributes array too, but typically default fields
+        // are not variation-defining attributes
+      } else {
+        // Not a default field - treat as a variation attribute
+        // These are fields like Brand, Color, Size, etc.
+        // Only add if the value is not null or empty
+        if (attrValue != null && attrValue !== '') {
+          variationAttributes.push({
+            name: attrName,
+            option: String(attrValue),
+          });
         }
       }
     }
     
-    // Add custom attributes if any
-    if (customAttributes.length > 0) {
-      payload.attributes = customAttributes;
+    // Add variation attributes to payload
+    if (variationAttributes.length > 0) {
+      payload.attributes = variationAttributes;
     }
     
-    // If variant has SKU, use it
-    if (variant.sku && !payload.sku) {
+    // If variant has direct SKU property and SKU is included in export and not already set
+    if (variant.sku && !payload.sku && shouldIncludeField('sku')) {
       payload.sku = variant.sku;
     }
     
@@ -1279,6 +1645,11 @@ export class WooCommerceMultiStoreService {
    * Import product variants from WooCommerce
    * Fetches variations and creates them as child products in the local system
    */
+  /**
+   * Import product variants from WooCommerce
+   * Creates separate product entities for each variant with proper parent relationship
+   * Returns details about successful and failed variants
+   */
   private async importProductVariants(
     wooClient: any,
     wooProductId: number,
@@ -1286,80 +1657,147 @@ export class WooCommerceMultiStoreService {
     userId: number,
     attributeMappings: Record<string, any>,
     fieldMappings: Record<string, any>,
-  ): Promise<void> {
+    parentProductSku?: string,
+  ): Promise<{
+    successCount: number;
+    failedVariants: Array<{ sku: string; wooVariationId: number; error: string }>;
+  }> {
+    const failedVariants: Array<{ sku: string; wooVariationId: number; error: string }> = [];
+    let successCount = 0;
+
     try {
-      // Fetch variations from WooCommerce
-      const variationsResponse = await wooClient.get(`products/${wooProductId}/variations`);
-      const variations = variationsResponse.data;
+      this.logger.log(`Importing variants for WooCommerce product ${wooProductId}`);
+
+      // Fetch all variations from WooCommerce with pagination
+      const variations = await this.getAllWooVariations(wooClient, wooProductId);
       
       if (!variations || variations.length === 0) {
         this.logger.log(`No variations found for WooCommerce product ${wooProductId}`);
-        return;
+        return { successCount: 0, failedVariants: [] };
       }
       
       this.logger.log(`Found ${variations.length} variations for product ${wooProductId}`);
+
+      // Check for SKU conflicts between parent and variations
+      if (parentProductSku) {
+        const skuCheck = WooCommerceValidator.detectSkuConflicts(parentProductSku, variations);
+        
+        if (skuCheck.hasConflict) {
+          this.logger.error(
+            `SKU conflict detected for WooCommerce product ${wooProductId}: ` +
+            `Parent SKU "${parentProductSku}" matches ${skuCheck.conflictingSKUs.length} variation SKU(s). ` +
+            `Skipping variant import to prevent data corruption. ` +
+            `Conflicting SKUs: ${skuCheck.conflictingSKUs.join(', ')}`
+          );
+          
+          throw new Error(
+            `Variants skipped: Parent and variant(s) share the same SKU ("${parentProductSku}"). ` +
+            `This causes data corruption. Please use unique SKUs for each variation.`
+          );
+        }
+      }
       
       for (const variation of variations) {
         try {
-          // Build local variant data
-          const variantData = await this.buildLocalVariantData(
+          // Validate variation
+          const validation = WooCommerceValidator.validateWooVariation(variation, wooProductId);
+          if (!validation.valid) {
+            const errorMsg = validation.errors.join(', ');
+            this.logger.error(`Invalid variation ${variation.id}: ${errorMsg}`);
+            failedVariants.push({
+              sku: variation.sku || 'unknown',
+              wooVariationId: variation.id,
+              error: `Validation failed: ${errorMsg}`,
+            });
+            continue;
+          }
+
+          // Build local variant data using domain builder
+          const { variantData, attributes } = this.productBuilder.buildVariant(
             variation,
             parentProductId,
+            wooProductId,
             userId,
             attributeMappings,
             fieldMappings,
           );
-          
-          // Extract attributes to create separately
-          const attributesToCreate = variantData._attributesToCreate;
-          delete variantData._attributesToCreate;
-          
+
+          this.logger.log(`Built variant data for variation ${variation.id}`);
+          this.logger.log(`  - Variant: ${variantData.name} (SKU: ${variantData.sku})`);
+          this.logger.log(`  - Parent Product ID: ${variantData.parentProductId}`);
+          this.logger.log(`  - Attributes to create: ${attributes.length}`);
+
           // Check if variant already exists by SKU
-          const existingVariant = variantData.sku ? await this.prisma.product.findUnique({
+          const existingVariant = await this.prisma.product.findUnique({
             where: {
               sku_userId: {
                 sku: variantData.sku,
                 userId,
               },
             },
-          }) : null;
+          });
           
           let variantId: number;
           
           if (existingVariant) {
             // Update existing variant
+            // IMPORTANT: Ensure we're updating with correct parentProductId
             await this.prisma.product.update({
               where: { id: existingVariant.id },
-              data: variantData,
+              data: {
+                ...variantData,
+                parentProductId, // Ensure parent relationship is correct
+              },
             });
             variantId = existingVariant.id;
-            this.logger.log(`Updated existing variant ${variantId} for variation ${variation.id}`);
+            this.logger.log(`✓ Updated existing variant ${variantId} for variation ${variation.id}`);
           } else {
-            // Create new variant
+            // Create new variant as a separate product entity
             const newVariant = await this.prisma.product.create({
               data: variantData,
             });
             variantId = newVariant.id;
-            this.logger.log(`Created new variant ${variantId} for variation ${variation.id}`);
+            this.logger.log(`✓ Created new variant ${variantId} for variation ${variation.id}`);
+          }
+
+          // Verify the variant is not the same as parent
+          if (variantId === parentProductId) {
+            this.logger.error(
+              `CRITICAL: Variant ID ${variantId} matches parent ID ${parentProductId}! Data corruption detected.`
+            );
+            throw new Error('Variant ID cannot be the same as parent product ID');
           }
           
-          // Process attributes
-          if (attributesToCreate && attributesToCreate.length > 0) {
-            await this.processProductAttributes(variantId, userId, attributesToCreate);
+          // Process attributes for this specific variant
+          if (attributes && attributes.length > 0) {
+            await this.processProductAttributes(variantId, userId, attributes);
           }
           
+          successCount++;
         } catch (error: any) {
-          this.logger.error(`Failed to import variation ${variation.id}:`, error);
+          const errorMsg = this.simplifyErrorMessage(error.message || 'Unknown error');
+          this.logger.error(`Failed to import variation ${variation.id}: ${error.message}`, error.stack);
+          failedVariants.push({
+            sku: variation.sku || 'unknown',
+            wooVariationId: variation.id,
+            error: errorMsg,
+          });
           // Continue with other variations
         }
       }
+
+      this.logger.log(`✓ Completed importing variants for WooCommerce product ${wooProductId}: ${successCount} succeeded, ${failedVariants.length} failed`);
+      return { successCount, failedVariants };
     } catch (error: any) {
-      this.logger.error(`Failed to import variants for product ${wooProductId}:`, error);
+      this.logger.error(`Failed to import variants for product ${wooProductId}: ${error.message}`, error.stack);
+      throw error;
     }
   }
 
   /**
    * Build local variant data from WooCommerce variation
+   * Uses the new domain builder for proper validation and field separation
+   * @deprecated This method is kept for compatibility but delegates to domain builder
    */
   private async buildLocalVariantData(
     variation: any,
@@ -1368,78 +1806,26 @@ export class WooCommerceMultiStoreService {
     attributeMappings: Record<string, any>,
     fieldMappings: Record<string, any>,
   ): Promise<any> {
-    const data: any = {
-      name: variation.sku || `Variant ${variation.id}`,
-      sku: variation.sku || `VAR-${variation.id}`,
-      parentProductId,
-      userId,
-      status: 'complete',
-    };
-    
-    // Handle price
-    if (variation.regular_price) {
-      // Price will be stored as an attribute
+    try {
+      // Use domain builder
+      const { variantData, attributes } = this.productBuilder.buildVariant(
+        variation,
+        parentProductId,
+        variation.parent_id || 0, // WooCommerce parent product ID
+        userId,
+        attributeMappings,
+        fieldMappings,
+      );
+
+      // Return in expected format
+      return {
+        ...variantData,
+        _attributesToCreate: attributes,
+      };
+    } catch (error: any) {
+      this.logger.error(`Failed to build variant data for variation ${variation.id}: ${error.message}`);
+      throw new BadRequestException(`Invalid variation data: ${error.message}`);
     }
-    
-    // Handle images
-    if (variation.image?.src) {
-      data.imageUrl = variation.image.src;
-    }
-    
-    // Process attributes
-    const attributesToCreate: Array<{ name: string; value: any; type: string }> = [];
-    
-    // Add price as attribute if available
-    if (variation.regular_price) {
-      attributesToCreate.push({
-        name: 'regular_price',
-        value: variation.regular_price,
-        type: 'TEXT',
-      });
-    }
-    
-    if (variation.sale_price) {
-      attributesToCreate.push({
-        name: 'sale_price',
-        value: variation.sale_price,
-        type: 'TEXT',
-      });
-    }
-    
-    // Add weight as attribute if available
-    if (variation.weight) {
-      attributesToCreate.push({
-        name: 'weight',
-        value: variation.weight,
-        type: 'TEXT',
-      });
-    }
-    
-    // Add stock quantity if available
-    if (variation.stock_quantity !== undefined && variation.stock_quantity !== null) {
-      attributesToCreate.push({
-        name: 'stock_quantity',
-        value: variation.stock_quantity.toString(),
-        type: 'TEXT',
-      });
-    }
-    
-    // Process variation attributes
-    if (variation.attributes && Array.isArray(variation.attributes)) {
-      for (const attr of variation.attributes) {
-        if (attr.option) {
-          attributesToCreate.push({
-            name: attr.name || `Attribute ${attr.id}`,
-            value: attr.option,
-            type: 'TEXT',
-          });
-        }
-      }
-    }
-    
-    data._attributesToCreate = attributesToCreate;
-    
-    return data;
   }
 
   /**
@@ -1775,10 +2161,13 @@ export class WooCommerceMultiStoreService {
             const attrName = attr.attribute.name;
             variantAttributeNames.add(attrName);
             
-            if (!variantAttributeValues.has(attrName)) {
-              variantAttributeValues.set(attrName, new Set());
+            // Only add non-null, non-empty values
+            if (attr.value != null && attr.value !== '') {
+              if (!variantAttributeValues.has(attrName)) {
+                variantAttributeValues.set(attrName, new Set());
+              }
+              variantAttributeValues.get(attrName)!.add(attr.value);
             }
-            variantAttributeValues.get(attrName)!.add(attr.value);
           }
         }
       }
@@ -1787,17 +2176,23 @@ export class WooCommerceMultiStoreService {
       for (const [attrName, values] of variantAttributeValues.entries()) {
         const attrNameLower = attrName.toLowerCase();
         const isMapped = mappedAttributeNames.some(name => attrNameLower.includes(name.toLowerCase()));
+        const isMappedViaFieldMapping = attributesMappedToWooFields.includes(attrName);
         
-        if (!isMapped) {
-          const options = Array.from(values);
-          await this.ensureWooCommerceAttribute(attrName, options, wooClient);
+        // Only include if not mapped to standard fields AND is in fieldsToExport
+        if (!isMapped && !isMappedViaFieldMapping && this.shouldIncludeField(attrName, context)) {
+          const options = Array.from(values).filter(v => v != null && v !== '').map(v => String(v));
           
-          wooAttributes.push({
-            name: attrName,
-            options,
-            visible: true,
-            variation: true, // Mark as variation attribute
-          });
+          // Only add attribute if it has valid options
+          if (options.length > 0) {
+            await this.ensureWooCommerceAttribute(attrName, options, wooClient);
+            
+            wooAttributes.push({
+              name: attrName,
+              options,
+              visible: true,
+              variation: true, // Mark as variation attribute
+            });
+          }
         }
       }
     }
@@ -1816,7 +2211,7 @@ export class WooCommerceMultiStoreService {
           try {
             if (typeof attr.value === 'string' && attr.value.trim().startsWith('[')) {
               const parsed = JSON.parse(attr.value);
-              options = Array.isArray(parsed) ? parsed : [attr.value];
+              options = Array.isArray(parsed) ? parsed.filter(v => v != null && v !== '').map(v => String(v)) : [attr.value];
             } else {
               options = [attr.value];
             }
@@ -1824,14 +2219,20 @@ export class WooCommerceMultiStoreService {
             options = [attr.value];
           }
           
-          const isVariation = variationPatterns.some(pattern => attrName.includes(pattern));
-          await this.ensureWooCommerceAttribute(attr.attribute.name, options, wooClient);
-          wooAttributes.push({
-            name: attr.attribute.name,
-            options,
-            visible: true,
-            variation: isVariation
-          });
+          // Ensure all options are valid strings
+          options = options.filter(v => v != null && v !== '').map(v => String(v));
+          
+          // Only add attribute if it has valid options
+          if (options.length > 0) {
+            const isVariation = variationPatterns.some(pattern => attrName.includes(pattern));
+            await this.ensureWooCommerceAttribute(attr.attribute.name, options, wooClient);
+            wooAttributes.push({
+              name: attr.attribute.name,
+              options,
+              visible: true,
+              variation: isVariation
+            });
+          }
         }
       }
     }
@@ -1860,152 +2261,58 @@ export class WooCommerceMultiStoreService {
   /**
    * Build local product data from WooCommerce product
    */
+  /**
+   * Build local product data from WooCommerce product
+   * Uses the new domain builder for proper validation and field separation
+   */
   private async buildLocalProductData(
     wooProduct: any,
     attributeMappings: Record<string, any>,
     fieldMappings: Record<string, any>,
     userId: number,
   ): Promise<any> {
-    // 1. Validate required fields (name and SKU)
-    if (!wooProduct.name || !wooProduct.sku) {
-      throw new BadRequestException(
-        `Product ID ${wooProduct.id} is missing required field(s): ${!wooProduct.name ? 'name' : ''} ${!wooProduct.sku ? 'sku' : ''}`.trim()
+    try {
+      // Use domain builder for validation and proper field separation
+      this.logger.log(`The wocommerce Data for productID:${wooProduct.id} is :${JSON.stringify(wooProduct)}`);
+      this.logger.log(`The Attribute Mapping is :${JSON.stringify(attributeMappings)}`);
+      this.logger.log(`The Field Mapping is :${JSON.stringify(fieldMappings)}`);
+      const { productData, attributes } = this.productBuilder.buildParentProduct(
+        wooProduct,
+        userId,
+        attributeMappings,
+        fieldMappings,
       );
-    }
 
-    const data: any = {
-      name: wooProduct.name,
-      sku: wooProduct.sku,
-    };
+      this.logger.log(`Built product data for WooCommerce ID ${wooProduct.id}`);
+      this.logger.log(`  - Product: ${productData.name} (SKU: ${productData.sku})`);
+      this.logger.log(`  - Attributes to create: ${attributes.length}`);
 
-    // Description
-    if (wooProduct.description) {
-      data.productLink = wooProduct.description;
-    }
-
-    // Images
-    if (wooProduct.images && wooProduct.images.length > 0) {
-      data.imageUrl = wooProduct.images[0].src;
-      if (wooProduct.images.length > 1) {
-        data.subImages = wooProduct.images.slice(1).map((img: any) => img.src);
-      }
-    }
-
-    // 2. Create and map attributes from attributeMappings
-    const attributesToCreate: Array<{ name: string; value: any; type: string }> = [];
-    
-    // Check if "map all" is enabled
-    const mapAllAttributes = attributeMappings && attributeMappings['*'] === '*';
-    
-    // Process WooCommerce attributes -> Local attributes
-    if (mapAllAttributes) {
-      // Map all WooCommerce attributes automatically
-      this.logger.log('Mapping all attributes from WooCommerce product');
+      // Handle category mapping if present in fieldMappings
+      const categoryFieldMapped = fieldMappings && 
+        (fieldMappings['categories'] || Object.values(fieldMappings).includes('category') || Object.values(fieldMappings).includes('categories'));
       
-      if (wooProduct.attributes && Array.isArray(wooProduct.attributes)) {
-        for (const wooAttr of wooProduct.attributes) {
-          if (wooAttr.options && wooAttr.options.length > 0) {
-            const value = wooAttr.options.join(', ');
-            const attrName = wooAttr.name || wooAttr.slug;
-            
-            this.logger.log(`Auto-mapping attribute ${attrName}: ${value}`);
-            
-            attributesToCreate.push({
-              name: attrName,
-              value,
-              type: 'TEXT',
-            });
-          }
+      if (categoryFieldMapped && wooProduct.categories && Array.isArray(wooProduct.categories) && wooProduct.categories.length > 0) {
+        const validCategories = wooProduct.categories.filter(
+          (cat: any) => cat.name && cat.name.toLowerCase() !== 'uncategorized'
+        );
+        
+        if (validCategories.length > 0) {
+          const primaryCategory = validCategories[0];
+          const categoryId = await this.findOrCreateCategory(primaryCategory.name, userId);
+          productData.categoryId = categoryId;
+          this.logger.log(`  - Mapped category: ${primaryCategory.name} (ID: ${categoryId})`);
         }
       }
-    } else if (attributeMappings && Object.keys(attributeMappings).length > 0) {
-      // Use specific attribute mappings
-      this.logger.log(`Processing attribute mappings: ${JSON.stringify(attributeMappings)}`);
-      
-      for (const [wooAttrKey, localAttrName] of Object.entries(attributeMappings)) {
-        // Skip the special "*" marker
-        if (wooAttrKey === '*') continue;
-        
-        // Find the attribute in WooCommerce product data
-        let value: any = null;
-        
-        // Check in WooCommerce attributes array
-        if (wooProduct.attributes && Array.isArray(wooProduct.attributes)) {
-          const wooAttr = wooProduct.attributes.find((attr: any) => 
-            attr.slug === wooAttrKey || attr.name === wooAttrKey
-          );
-          
-          if (wooAttr && wooAttr.options && wooAttr.options.length > 0) {
-            value = wooAttr.options.join(', '); // Join multiple options
-            this.logger.log(`Found attribute ${wooAttrKey} -> ${localAttrName}: ${value}`);
-          }
-        }
-        
-        if (value) {
-          attributesToCreate.push({
-            name: localAttrName as string,
-            value,
-            type: 'TEXT', // Default type
-          });
-        }
-      }
-    }
 
-    // 3. Process field mappings (e.g., price, salePrice)
-    if (fieldMappings && Object.keys(fieldMappings).length > 0) {
-      this.logger.log(`Processing field mappings: ${JSON.stringify(fieldMappings)}`);
-      
-      for (const [wooField, localAttrName] of Object.entries(fieldMappings)) {
-        // Skip 'variants' - it's handled separately by importProductVariants
-        if (wooField === 'variants') {
-          continue;
-        }
-        
-        let value: any = null;
-        
-        // Get value from WooCommerce product
-        if (wooProduct[wooField] !== undefined && wooProduct[wooField] !== null && wooProduct[wooField] !== '') {
-          value = wooProduct[wooField];
-          this.logger.log(`Found field ${wooField} -> ${localAttrName}: ${value}`);
-          
-          attributesToCreate.push({
-            name: localAttrName as string,
-            value: String(value),
-            type: 'TEXT', // Will be determined by attribute type if it exists
-          });
-        }
-      }
+      // Return in expected format with attributes
+      return {
+        ...productData,
+        _attributesToCreate: attributes,
+      };
+    } catch (error: any) {
+      this.logger.error(`Failed to build product data for WooCommerce ID ${wooProduct.id}: ${error.message}`);
+      throw new BadRequestException(`Invalid product data: ${error.message}`);
     }
-
-    // 4. Handle category (only if "categories" is in fieldMappings)
-    let categoryId: number | null = null;
-    
-    // Check if categories field is mapped
-    const categoryFieldMapped = fieldMappings && 
-      (fieldMappings['categories'] || Object.values(fieldMappings).includes('category') || Object.values(fieldMappings).includes('categories'));
-    
-    if (categoryFieldMapped && wooProduct.categories && Array.isArray(wooProduct.categories) && wooProduct.categories.length > 0) {
-      // Filter out "Uncategorized"
-      const validCategories = wooProduct.categories.filter(
-        (cat: any) => cat.name && cat.name.toLowerCase() !== 'uncategorized'
-      );
-      
-      if (validCategories.length > 0) {
-        const primaryCategory = validCategories[0];
-        this.logger.log(`Processing category: ${primaryCategory.name}`);
-        
-        // Find or create category
-        categoryId = await this.findOrCreateCategory(primaryCategory.name, userId);
-        data.categoryId = categoryId;
-      }
-    }
-
-    // Store attributes to be created after product is created/updated
-    if (attributesToCreate.length > 0) {
-      data._attributesToCreate = attributesToCreate;
-    }
-
-    return data;
   }
 
   /**
@@ -2249,6 +2556,34 @@ export class WooCommerceMultiStoreService {
     }
 
     return allProducts;
+  }
+
+  /**
+   * Fetch all variations for a product from WooCommerce with pagination
+   */
+  private async getAllWooVariations(wooClient: any, productId: number): Promise<any[]> {
+    const allVariations: any[] = [];
+    let page = 1;
+    const perPage = 100;
+
+    while (true) {
+      const response = await wooClient.get(`products/${productId}/variations`, {
+        per_page: perPage,
+        page,
+      });
+
+      const variations = response.data;
+      allVariations.push(...variations);
+
+      if (variations.length < perPage) {
+        break; // No more pages
+      }
+
+      page++;
+    }
+
+    this.logger.log(`Fetched ${allVariations.length} total variations for product ${productId} across ${page} page(s)`);
+    return allVariations;
   }
 
   /**

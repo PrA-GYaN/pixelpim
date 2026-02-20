@@ -498,6 +498,49 @@ export class WooCommerceConnectionService {
     });
   }
 
+  /**
+   * Get WooCommerce product attributes from the store
+   */
+  async getWooCommerceAttributes(
+    userId: number,
+    connectionId: number,
+  ): Promise<{ success: boolean; attributes: any[] }> {
+    try {
+      // Get the WooCommerce client
+      const wooClient = await this.getWooCommerceClient(userId, connectionId);
+
+      // Fetch product attributes from WooCommerce
+      const response = await wooClient.get('products/attributes', {
+        per_page: 100, // Fetch up to 100 attributes
+      });
+
+      const attributes = response.data || [];
+
+      this.logger.log(`Fetched ${attributes.length} WooCommerce attributes for connection ${connectionId}`);
+
+      return {
+        success: true,
+        attributes: attributes.map((attr: any) => ({
+          id: attr.id,
+          name: attr.name,
+          slug: attr.slug,
+          type: attr.type,
+          orderBy: attr.order_by,
+          hasArchives: attr.has_archives,
+        })),
+      };
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to fetch WooCommerce attributes for connection ${connectionId}:`,
+        error.response?.data || error.message
+      );
+      return {
+        success: false,
+        attributes: [],
+      };
+    }
+  }
+
   // ===== Helper Methods =====
 
   private toResponseDto(connection: any): WooCommerceConnectionResponseDto {
