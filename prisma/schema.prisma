@@ -232,19 +232,20 @@ model AssetGroup {
 }
 
 model Asset {
-  id           Int         @id @default(autoincrement())
-  name         String
-  fileName     String
-  filePath     String
-  mimeType     String
-  uploadDate   DateTime    @default(now())
-  size         BigInt
-  userId       Int
-  assetGroupId Int?
-  deletedAt    DateTime?
-  isDeleted    Boolean     @default(false)
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  id            Int         @id @default(autoincrement())
+  name          String
+  fileName      String
+  filePath      String
+  thumbnailPath String?     // Path to thumbnail version of the image
+  mimeType      String
+  uploadDate    DateTime    @default(now())
+  size          BigInt
+  userId        Int
+  assetGroupId  Int?
+  deletedAt     DateTime?
+  isDeleted     Boolean     @default(false)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
 
   user         User        @relation("UserAssets", fields: [userId], references: [id], onDelete: Cascade)
   assetGroup   AssetGroup? @relation("AssetGroupAssets", fields: [assetGroupId], references: [id], onDelete: SetNull)

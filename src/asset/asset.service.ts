@@ -10,6 +10,7 @@ import {
   CloudinaryUtil,
   CloudinaryUploadResult,
 } from '../utils/cloudinary.util';
+import { ThumbnailUtil } from '../utils/thumbnail.util';
 import { PaginationUtils } from '../common';
 import { Builder } from 'xml2js';
 import * as fs from 'fs/promises';
@@ -72,11 +73,31 @@ export class AssetService {
         throw new NotFoundException('Asset group not found');
       }
 
-      groups.unshift(group.groupName);
+      // Sanitize group name for safe folder naming
+      const sanitizedGroupName = this.sanitizeFolderName(group.groupName);
+      groups.unshift(sanitizedGroupName);
       currentGroupId = group.parentGroupId;
     }
 
     return path.join(...groups);
+  }
+
+  /**
+   * Sanitize a string to be safe for use as a folder name
+   * Removes or replaces characters that are invalid in file system paths
+   */
+  private sanitizeFolderName(name: string): string {
+    return name
+      // Replace invalid characters with underscores
+      .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
+      // Replace multiple spaces with single space
+      .replace(/\s+/g, ' ')
+      // Trim spaces from start and end
+      .trim()
+      // Replace dots at the end (Windows doesn't allow folders ending with dots)
+      .replace(/\.+$/, '')
+      // If empty after sanitization, use a default name
+      || 'untitled_folder';
   }
   // Utility to recursively convert BigInt values to strings while preserving dates
   private static convertBigIntToString = (obj: any): any => {
@@ -170,6 +191,30 @@ export class AssetService {
     // Save file locally
     await fs.writeFile(localFilePath, file.buffer);
 
+    // Generate thumbnail if file is an image
+    let thumbnailUrl: string | null = null;
+    if (ThumbnailUtil.isImageFile(file.mimetype)) {
+      console.log('Generating thumbnail for image:', uniqueFileName);
+      
+      try {
+        const thumbnailResult = await ThumbnailUtil.generateThumbnail(
+          file.buffer,
+          uniqueFileName,
+          localDirPath
+        );
+
+        if (thumbnailResult.success && thumbnailResult.thumbnailUrl) {
+          thumbnailUrl = thumbnailResult.thumbnailUrl;
+          console.log('Thumbnail generated successfully:', thumbnailUrl);
+        } else {
+          console.warn('Thumbnail generation failed:', thumbnailResult.error);
+        }
+      } catch (error: any) {
+        // Log error but don't fail the upload - full resolution image is still saved
+        console.error('Error generating thumbnail:', error.message);
+      }
+    }
+
     // Check asset group exists
     if (parsedAssetGroupId) {
       const assetGroup = await this.prisma.assetGroup.findFirst({
@@ -191,6 +236,7 @@ export class AssetService {
         name: createAssetDto.name,
         fileName: uniqueFileName,
         filePath: `/uploads/${relativeFilePath}`, // Store file path with /uploads/ prefix
+        thumbnailPath: thumbnailUrl, // Store thumbnail path (null if not generated)
         mimeType: file.mimetype,
         size: BigInt(file.size),
         userId,
@@ -206,12 +252,23 @@ export class AssetService {
       await this.updateAssetGroupSize(parsedAssetGroupId);
     }
 
-    return {
+    // Prepare response with both full and thumbnail paths
+    const response = {
       ...AssetService.convertBigIntToString(asset),
       size: Number(asset.size),
-      url: asset.filePath, // filePath already includes /uploads/ prefix
+      url: asset.filePath, // filePath already includes /uploads/ prefix (BACKWARD COMPATIBLE)
       formattedSize: CloudinaryUtil.formatFileSize(Number(asset.size)),
     };
+
+    // Add image object with full and thumbnail for new clients
+    if (asset.thumbnailPath) {
+      response['image'] = {
+        full: asset.filePath,
+        thumbnail: asset.thumbnailPath,
+      };
+    }
+
+    return response;
   }
 
   async findAllWithGroups(
@@ -925,6 +982,13 @@ export class AssetService {
       const relativePath = asset.filePath.replace(/^\/uploads\//, '');
       const fullPath = path.join(process.cwd(), 'uploads', relativePath);
       await fs.unlink(fullPath);
+      
+      // Also delete thumbnail if it exists
+      if (asset.thumbnailPath) {
+        const thumbnailRelativePath = asset.thumbnailPath.replace(/^\/uploads\//, '');
+        const thumbnailFullPath = path.join(process.cwd(), 'uploads', thumbnailRelativePath);
+        await ThumbnailUtil.deleteThumbnail(thumbnailFullPath);
+      }
     } catch (error) {
       console.error('Error deleting local file:', error);
     }
