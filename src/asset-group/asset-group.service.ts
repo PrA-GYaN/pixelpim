@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, ConflictException } from '@nestjs/common
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateAssetGroupDto, UpdateAssetGroupDto } from './dto';
 import { PaginatedResponse, PaginationUtils } from '../common';
+import { CloudinaryUtil } from '../utils/cloudinary.util';
 
 @Injectable()
 export class AssetGroupService {
@@ -276,6 +277,7 @@ export class AssetGroupService {
           name: true,
           fileName: true,
           filePath: true,
+          thumbnailPath: true,
           mimeType: true,
           uploadDate: true,
           size: true,
@@ -289,8 +291,17 @@ export class AssetGroupService {
       this.prisma.asset.count({ where: whereCondition }),
     ]);
 
-  // Convert BigInt to String for JSON serialization
-  const transformedAssets = assets.map(AssetGroupService.convertBigIntToString);
+  // Convert BigInt to String and add computed fields for consistency with asset.service.ts
+  const transformedAssets = await Promise.all(assets.map(async (asset) => {
+    const converted = AssetGroupService.convertBigIntToString(asset);
+    return {
+      ...converted,
+      size: Number(asset.size),
+      url: asset.filePath, // filePath already includes /uploads/ prefix
+      formattedSize: CloudinaryUtil.formatFileSize(Number(asset.size)),
+    };
+  }));
+  
   return PaginationUtils.createPaginatedResponse(transformedAssets, total, page, limit);
   }
 

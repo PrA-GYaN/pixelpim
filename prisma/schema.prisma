@@ -168,6 +168,8 @@ model Product {
   productLink      String?
   imageUrl         String?
   subImages        String[]        @default([])
+  thumbnailUrl     String?
+  thumbnailSubImages String[]      @default([])
   status           String          @default("incomplete")
   categoryId       Int?
   attributeGroupId Int?

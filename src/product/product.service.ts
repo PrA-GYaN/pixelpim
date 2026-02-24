@@ -84,6 +84,7 @@ export class ProductService {
         name: true,
         sku: true,
         imageUrl: true,
+        thumbnailUrl: true,
         status: true,
         attributes: {
           select: {
@@ -783,6 +784,8 @@ export class ProductService {
           productLink: createProductDto.productLink,
           imageUrl: createProductDto.imageUrl,
           subImages: createProductDto.subImages || [],
+          thumbnailUrl: createProductDto.thumbnailUrl,
+          thumbnailSubImages: createProductDto.thumbnailSubImages || [],
           categoryId: createProductDto.categoryId,
           attributeGroupId: createProductDto.attributeGroupId,
           familyId: createProductDto.familyId,
@@ -995,6 +998,8 @@ export class ProductService {
             productLink: createProductDto.productLink,
             imageUrl: createProductDto.imageUrl,
             subImages: createProductDto.subImages || [],
+            thumbnailUrl: createProductDto.thumbnailUrl,
+            thumbnailSubImages: createProductDto.thumbnailSubImages || [],
             categoryId: createProductDto.categoryId,
             attributeGroupId: createProductDto.attributeGroupId,
             familyId: createProductDto.familyId,
@@ -1010,6 +1015,8 @@ export class ProductService {
             productLink: createProductDto.productLink,
             imageUrl: createProductDto.imageUrl,
             subImages: createProductDto.subImages || [],
+            thumbnailUrl: createProductDto.thumbnailUrl,
+            thumbnailSubImages: createProductDto.thumbnailSubImages || [],
             categoryId: createProductDto.categoryId,
             attributeGroupId: createProductDto.attributeGroupId,
             familyId: createProductDto.familyId,
@@ -1024,6 +1031,8 @@ export class ProductService {
             productLink: createProductDto.productLink,
             imageUrl: createProductDto.imageUrl,
             subImages: createProductDto.subImages || [],
+            thumbnailUrl: createProductDto.thumbnailUrl,
+            thumbnailSubImages: createProductDto.thumbnailSubImages || [],
             categoryId: createProductDto.categoryId,
             attributeGroupId: createProductDto.attributeGroupId,
             familyId: createProductDto.familyId,
@@ -1421,6 +1430,7 @@ export class ProductService {
               name: true,
               sku: true,
               imageUrl: true,
+              thumbnailUrl: true,
               status: true,
             },
           },
@@ -1610,6 +1620,14 @@ export class ProductService {
 
       if (updateProductDto.subImages !== undefined) {
         updateData.subImages = updateProductDto.subImages;
+      }
+
+      if (updateProductDto.thumbnailUrl !== undefined) {
+        updateData.thumbnailUrl = updateProductDto.thumbnailUrl;
+      }
+
+      if (updateProductDto.thumbnailSubImages !== undefined) {
+        updateData.thumbnailSubImages = updateProductDto.thumbnailSubImages;
       }
 
   // Status will be set automatically below
@@ -2349,6 +2367,8 @@ export class ProductService {
       productLink: product.productLink,
       imageUrl: product.imageUrl,
       subImages: product.subImages || [],
+      thumbnailUrl: product.thumbnailUrl,
+      thumbnailSubImages: product.thumbnailSubImages || [],
       status: product.status,
       categoryId: product.categoryId,
       attributeGroupId: product.attributeGroupId,
@@ -2397,6 +2417,7 @@ export class ProductService {
           name: variant.name,
           sku: variant.sku,
           imageUrl: variant.imageUrl,
+          thumbnailUrl: variant.thumbnailUrl,
           status: variant.status,
         };
 
@@ -2432,6 +2453,7 @@ export class ProductService {
         name: product.parentProduct.name,
         sku: product.parentProduct.sku,
         imageUrl: product.parentProduct.imageUrl,
+        thumbnailUrl: product.parentProduct.thumbnailUrl,
         status: product.parentProduct.status,
       } : undefined,
       attributes,
@@ -3000,6 +3022,8 @@ export class ProductService {
           productLink: variantProductData.productLink,
           imageUrl: variantProductData.imageUrl,
           subImages: variantProductData.subImages || [],
+          thumbnailUrl: variantProductData.thumbnailUrl,
+          thumbnailSubImages: variantProductData.thumbnailSubImages || [],
           categoryId: variantProductData.categoryId,
           attributeGroupId: variantProductData.attributeGroupId,
           familyId: variantProductData.familyId,

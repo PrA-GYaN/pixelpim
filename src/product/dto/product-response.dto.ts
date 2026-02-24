@@ -5,6 +5,7 @@ export class ProductVariantSummaryDto {
   name: string;
   sku: string;
   imageUrl?: string;
+  thumbnailUrl?: string;
   status: string;
   attributes?: {
     id: number;
@@ -23,6 +24,8 @@ export class ProductResponseDto {
   productLink?: string;
   imageUrl?: string;
   subImages?: string[];
+  thumbnailUrl?: string;
+  thumbnailSubImages?: string[];
   status: string;
   categoryId?: number;
   attributeGroupId?: number;

@@ -41,6 +41,17 @@ export class CreateProductDto {
 
   @IsOptional()
   @IsString()
+  // @IsUrl({}, { message: 'Thumbnail URL must be a valid URL' })
+  thumbnailUrl?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @Type(() => String)
+  thumbnailSubImages: string[] = [];
+
+  @IsOptional()
+  @IsString()
   @IsIn(['complete', 'incomplete'], { 
     message: 'Status must be one of: complete, incomplete' 
   })
